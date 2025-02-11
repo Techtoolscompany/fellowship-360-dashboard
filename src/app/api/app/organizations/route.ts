@@ -61,3 +61,12 @@ export const POST = withAuthRequired(async (req, context) => {
     );
   }
 });
+
+export const PUT = withAuthRequired(async (req, context) => {
+  // Update an organization
+  // Name
+  // Image
+});
+export const GET = withAuthRequired(async (req, context) => {
+  // List of all organizations for the user
+});

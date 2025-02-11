@@ -38,7 +38,7 @@ function UserLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b border-border/40">
+      <header className="sticky top-0 z-40 border-b border-border/40 bg-background">
         <div className="flex items-center justify-between px-6 h-16">
           <div className="flex items-center gap-6">
             <h1 className="text-xl font-semibold">
