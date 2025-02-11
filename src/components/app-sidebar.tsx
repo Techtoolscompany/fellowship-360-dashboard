@@ -53,86 +53,82 @@ const data = {
   navMain: [
     {
       title: "IndieKit",
-      url: "#",
+      url: "/app",
       icon: SquareTerminal,
       isActive: true,
       items: [
         {
-          title: "History",
-          url: "#",
+          title: "Dashboard",
+          url: "/app",
         },
         {
-          title: "Starred",
-          url: "#",
+          title: "Projects",
+          url: "/app/projects",
         },
         {
-          title: "Settings",
-          url: "#",
+          title: "User Settings",
+          url: "/app/user/settings",
         },
       ],
     },
     {
       title: "Models",
-      url: "#",
+      url: "/app/models",
       icon: Bot,
       items: [
         {
           title: "Genesis",
-          url: "#",
+          url: "/app/models/genesis",
         },
         {
           title: "Explorer",
-          url: "#",
+          url: "/app/models/explorer",
         },
         {
           title: "Quantum",
-          url: "#",
+          url: "/app/models/quantum",
         },
       ],
     },
     {
       title: "Documentation",
-      url: "#",
+      url: "/app/docs",
       icon: BookOpen,
       items: [
         {
           title: "Introduction",
-          url: "#",
+          url: "/app/docs/introduction",
         },
         {
           title: "Get Started",
-          url: "#",
+          url: "/app/docs/getting-started",
         },
         {
           title: "Tutorials",
-          url: "#",
+          url: "/app/docs/tutorials",
         },
         {
           title: "Changelog",
-          url: "#",
+          url: "/app/docs/changelog",
         },
       ],
     },
     {
       title: "Settings",
-      url: "#",
+      url: "/app/settings",
       icon: Settings2,
       items: [
         {
           title: "General",
-          url: "#",
+          url: "/app/settings",
         },
         {
           title: "Team",
-          url: "#",
+          url: "/app/settings/team",
         },
         {
           title: "Billing",
-          url: "#",
-        },
-        {
-          title: "Limits",
-          url: "#",
+          url: "/app/settings/billing",
         },
       ],
     },
@@ -140,17 +136,17 @@ const data = {
   projects: [
     {
       name: "Design Engineering",
-      url: "#",
+      url: "/app/projects/design",
       icon: Frame,
     },
     {
       name: "Sales & Marketing",
-      url: "#",
+      url: "/app/projects/sales",
       icon: PieChart,
     },
     {
       name: "Travel",
-      url: "#",
+      url: "/app/projects/travel",
       icon: Map,
     },
   ],
