@@ -67,6 +67,18 @@ export const PUT = withAuthRequired(async (req, context) => {
   // Name
   // Image
 });
+
 export const GET = withAuthRequired(async (req, context) => {
-  // List of all organizations for the user
+  const user = context.session.user;
+
+  const organization = await db
+    .select()
+    .from(organizations)
+    .leftJoin(
+      organizationMemberships,
+      eq(organizations.id, organizationMemberships.organizationId)
+    )
+    .where(eq(organizationMemberships.userId, user.id));
+
+  return NextResponse.json(organization);
 });
