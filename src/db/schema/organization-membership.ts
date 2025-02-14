@@ -2,6 +2,11 @@ import { timestamp, pgTable, text, primaryKey } from "drizzle-orm/pg-core";
 import { organizations } from "./organization";
 import { users } from "./user";
 import { roleEnum } from "./organization";
+import type { InferSelectModel } from "drizzle-orm";
+
+export type OrganizationMembership = InferSelectModel<
+  typeof organizationMemberships
+>;
 
 export const organizationMemberships = pgTable(
   "organization_membership",
@@ -19,4 +24,4 @@ export const organizationMemberships = pgTable(
   (t) => ({
     pk: primaryKey({ columns: [t.organizationId, t.userId] }),
   })
-); 
+);

@@ -20,6 +20,7 @@ declare module "next-auth" {
   interface Session {
     user: {
       id: string;
+      email: string;
     };
     expires: string;
   }
@@ -83,6 +84,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (token.sub) {
         session.user.id = token.sub;
       }
+      if (token.email) {
+        session.user.email = token.email;
+      }
       return session;
     },
     async jwt({ token }) {
@@ -91,6 +95,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       // which is acceptable while starting small.
       return {
         sub: token.sub,
+        email: token.email,
         iat: token.iat,
         exp: token.exp,
         jti: token.jti,

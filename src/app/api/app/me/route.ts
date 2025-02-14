@@ -23,13 +23,14 @@ export const PATCH = withAuthRequired(async (req, context) => {
   const body = await req.json();
 
   const validatedData = updateUserSchema.parse(body);
+  const user = await session.user;
 
   const updatedUser = await db
     .update(users)
     .set({
       name: validatedData.name,
     })
-    .where(eq(users.id, session.user.id))
+    .where(eq(users.id, user.id))
     .returning();
 
   return NextResponse.json(updatedUser[0]);

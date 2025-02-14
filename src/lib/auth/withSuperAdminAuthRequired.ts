@@ -34,13 +34,9 @@ const withSuperAdminAuthRequired = (handler: WithAuthHandler) => {
       );
     }
 
-    const user = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, session.user.id))
-      .then((users) => users[0]);
-
-    if (!process.env.SUPER_ADMIN_EMAILS?.split(",").includes(user?.email)) {
+    if (
+      !process.env.SUPER_ADMIN_EMAILS?.split(",").includes(session.user?.email)
+    ) {
       return NextResponse.json(
         {
           error: "Unauthorized",
@@ -50,15 +46,26 @@ const withSuperAdminAuthRequired = (handler: WithAuthHandler) => {
       );
     }
 
+    const sessionObject = {
+      ...session,
+      get user() {
+        return (async () => {
+          const user = await db
+            .select()
+            .from(users)
+            .where(eq(users.id, session.user.id))
+            .then((users) => users[0]);
+          return {
+            ...session.user,
+            ...user,
+          };
+        })();
+      },
+    };
+
     return await handler(req, {
       ...context,
-      session: {
-        ...session,
-        user: {
-          ...session.user,
-          ...user,
-        },
-      },
+      session: sessionObject,
     });
   };
 };
