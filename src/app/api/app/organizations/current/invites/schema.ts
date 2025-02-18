@@ -1,0 +1,32 @@
+import { z } from "zod";
+import { OrganizationRole } from "@/db/schema";
+
+export const createInviteSchema = z.object({
+  email: z.string().email(),
+  role: z.enum([OrganizationRole.enum.user, OrganizationRole.enum.admin]),
+});
+
+export const revokeInviteSchema = z.object({
+  inviteId: z.string(),
+});
+
+export const updateInviteRoleSchema = z.object({
+  inviteId: z.string(),
+  role: z.enum([OrganizationRole.enum.user, OrganizationRole.enum.admin]),
+});
+
+export type CreateInviteSchema = z.infer<typeof createInviteSchema>;
+export type RevokeInviteSchema = z.infer<typeof revokeInviteSchema>;
+export type UpdateInviteRoleSchema = z.infer<typeof updateInviteRoleSchema>;
+
+export type Invitation = {
+  id: string;
+  email: string;
+  organizationId: string;
+  role: "admin" | "user" | "owner";
+  invitedById: string;
+  token: string;
+  expiresAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}; 
