@@ -15,36 +15,48 @@ import {
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-
-const formSchema = z.object({
-  name: z.string().min(2, {
-    message: "Organization name must be at least 2 characters.",
-  }),
-  description: z.string().optional(),
-  website: z.string().url({ message: "Please enter a valid URL." }).optional().or(z.literal("")),
-});
+import useOrganization from "@/lib/organizations/useOrganization";
+import updateOrganizationSchema from "@/app/api/app/organizations/current/update/schema";
 
 export default function OrganizationSettingsPage() {
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
+  const { organization, mutate } = useOrganization();
+
+  const form = useForm<z.infer<typeof updateOrganizationSchema>>({
+    resolver: zodResolver(updateOrganizationSchema),
     defaultValues: {
-      name: "Acme Inc",
-      description: "We make everything",
-      website: "https://acme.com",
+      name: organization?.name || "",
     },
   });
 
-  function onSubmit(values: z.infer<typeof formSchema>) {
-    toast.success("Organization settings updated");
+  async function onSubmit(values: z.infer<typeof updateOrganizationSchema>) {
+    await toast.promise(
+      async () => {
+        const response = await fetch("/api/app/organizations/current/update", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(values),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to update organization");
+        }
+        await mutate();
+      },
+      {
+        loading: "Updating organization...",
+        success: "Organization updated",
+        error: "Failed to update organization",
+      }
+    );
   }
 
   return (
@@ -59,12 +71,12 @@ export default function OrganizationSettingsPage() {
         <CardHeader>
           <CardTitle>General</CardTitle>
           <CardDescription>
-            Update your organization's basic information.
+            Update your organization&apos;s basic information.
           </CardDescription>
         </CardHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
-            <CardContent className="space-y-6">
+            <CardContent>
               <FormField
                 control={form.control}
                 name="name"
@@ -74,55 +86,19 @@ export default function OrganizationSettingsPage() {
                     <FormControl>
                       <Input placeholder="Acme Inc" {...field} />
                     </FormControl>
-                    <FormDescription>
-                      This is your organization's displayed name.
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Description</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Tell us about your organization"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      Brief description of your organization.
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="website"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Website</FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://acme.com" {...field} />
-                    </FormControl>
-                    <FormDescription>
-                      Your organization's website URL.
-                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
               />
             </CardContent>
             <CardFooter>
-              <Button type="submit">Save changes</Button>
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting ? "Saving..." : "Save changes"}
+              </Button>
             </CardFooter>
           </form>
         </Form>
       </Card>
     </div>
   );
-} 
+}

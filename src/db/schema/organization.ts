@@ -8,8 +8,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { plans } from "./plans";
 import { z } from "zod";
+import type { InferSelectModel } from "drizzle-orm";
 
 export const roleEnum = pgEnum("role", ["admin", "owner", "user"]);
+
+export const OrganizationRole = z.enum(roleEnum.enumValues);
+export type OrganizationRole = z.infer<typeof OrganizationRole>;
 
 export const onboardingDataSchema = z.object({
   orgName: z.string().default(""),
@@ -41,3 +45,5 @@ export const organizations = pgTable("organization", {
   lemonSqueezySubscriptionId: text("lemonSqueezySubscriptionId"),
   planId: text("planId").references(() => plans.id),
 });
+
+export type Organization = InferSelectModel<typeof organizations>;

@@ -4,7 +4,7 @@ import {
   OrganizationMembership,
   organizationMemberships,
 } from "@/db/schema/organization-membership";
-import { organizations } from "@/db/schema/organization";
+import { OrganizationRole, organizations } from "@/db/schema/organization";
 import { and, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { MeResponse } from "@/app/api/app/me/types";
@@ -37,7 +37,7 @@ export interface WithOrganizationAuthHandler {
 
 const withOrganizationAuthRequired = (
   handler: WithOrganizationAuthHandler,
-  requiredRole: OrganizationMembership["role"] = "user"
+  requiredRole: OrganizationRole
 ) => {
   return async (
     req: NextRequest,
