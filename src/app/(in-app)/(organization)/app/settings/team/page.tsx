@@ -64,7 +64,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateInviteSchema, Invitation, createInviteSchema } from "@/app/api/app/organizations/current/invites/schema";
 import { toast } from "sonner";
 import useSWR from "swr";
-import useOrganization from "@/lib/organizations/useOrganization";
 import { useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -84,28 +83,6 @@ interface MembersResponse {
 interface InvitesResponse {
   invites: Invitation[];
   success: boolean;
-}
-
-function TableRowSkeleton() {
-  return (
-    <TableRow>
-      <TableCell>
-        <div className="flex items-center gap-3">
-          <Skeleton className="h-8 w-8 rounded-full" />
-          <div className="space-y-2">
-            <Skeleton className="h-4 w-32" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-        </div>
-      </TableCell>
-      <TableCell>
-        <Skeleton className="h-5 w-16" />
-      </TableCell>
-      <TableCell>
-        <Skeleton className="h-8 w-8" />
-      </TableCell>
-    </TableRow>
-  );
 }
 
 function InviteTableRowSkeleton() {
@@ -128,7 +105,6 @@ function InviteTableRowSkeleton() {
 }
 
 export default function TeamSettingsPage() {
-  const { organization } = useOrganization();
   const {
     data: invitesData,
     mutate: mutateInvites,
@@ -146,6 +122,7 @@ export default function TeamSettingsPage() {
   const [selectedInviteId, setSelectedInviteId] = useState<string | null>(null);
   const [isChangeRoleDialogOpen, setIsChangeRoleDialogOpen] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const [isRemoveMemberDialogOpen, setIsRemoveMemberDialogOpen] = useState(false);
 
   const inviteForm = useForm<CreateInviteSchema>({
     resolver: zodResolver(createInviteSchema),
@@ -240,11 +217,42 @@ export default function TeamSettingsPage() {
     }
   };
 
+  const onRemoveMember = async () => {
+    if (!selectedMemberId) return;
+
+    try {
+      const response = await fetch(
+        `/api/app/organizations/current/members/${selectedMemberId}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to remove member");
+      }
+
+      await mutateMembers();
+      setIsRemoveMemberDialogOpen(false);
+      setSelectedMemberId(null);
+      toast.success("Member removed successfully");
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to remove member");
+    }
+  };
+
   const handleRoleChange = (member: Member) => {
     if (member.role === "owner") return;
     setSelectedMemberId(member.id);
     roleForm.setValue("role", member.role === "admin" ? "admin" : "user");
     setIsChangeRoleDialogOpen(true);
+  };
+
+  const handleRemoveMember = (member: Member) => {
+    if (member.role === "owner") return;
+    setSelectedMemberId(member.id);
+    setIsRemoveMemberDialogOpen(true);
   };
 
   return (
@@ -324,65 +332,85 @@ export default function TeamSettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Team Members</CardTitle>
-          <CardDescription>View and manage your team members.</CardDescription>
+          <CardDescription>
+            Manage your team members and their roles.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Member</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead className="w-[50px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoadingMembers ? (
-                <>
-                  <TableRowSkeleton />
-                  <TableRowSkeleton />
-                  <TableRowSkeleton />
-                </>
-              ) : (
-                membersData?.members.map((member) => (
-                  <TableRow key={member.id}>
-                    <TableCell className="flex items-center gap-3">
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage src={member.image || undefined} alt={member.name || ""} />
-                        <AvatarFallback>
-                          {member.name
-                            ?.split(" ")
-                            .map((n) => n[0])
-                            .join("")}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <div className="font-medium">{member.name}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {member.email}
-                        </div>
+          <div className="space-y-4">
+            <div className="flex justify-end">
+              <Button onClick={() => setIsInviteDialogOpen(true)}>
+                <UserPlus className="h-4 w-4 mr-2" />
+                Invite Member
+              </Button>
+            </div>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Member</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead className="w-[100px]"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoadingMembers ? (
+                  <TableRow>
+                    <TableCell colSpan={3}>
+                      <div className="space-y-2">
+                        <Skeleton className="h-4 w-[250px]" />
+                        <Skeleton className="h-4 w-[200px]" />
                       </div>
                     </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          member.role === "owner"
-                            ? "default"
-                            : member.role === "admin"
+                  </TableRow>
+                ) : (
+                  membersData?.members.map((member) => (
+                    <TableRow key={member.id}>
+                      <TableCell className="flex items-center gap-2">
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={member.image || undefined} />
+                          <AvatarFallback>
+                            {member.name
+                              ?.split(" ")
+                              .map((n) => n[0])
+                              .join("")
+                              .toUpperCase() ||
+                              member.email.slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <div className="font-medium">
+                            {member.name || member.email}
+                          </div>
+                          {member.name && (
+                            <div className="text-sm text-muted-foreground">
+                              {member.email}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            member.role === "owner"
+                              ? "default"
+                              : member.role === "admin"
                               ? "secondary"
                               : "outline"
-                        }
-                      >
-                        {member.role}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {member.role !== "owner" &&
-                        organization?.role === "owner" && (
+                          }
+                        >
+                          {member.role}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {member.role !== "owner" && (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
+                              <Button
+                                variant="ghost"
+                                className="h-8 w-8 p-0"
+                              >
                                 <MoreVertical className="h-4 w-4" />
-                                <span className="sr-only">Open menu</span>
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
@@ -393,22 +421,20 @@ export default function TeamSettingsPage() {
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="text-destructive"
-                                onClick={() => {
-                                  setSelectedMemberId(member.id);
-                                  setIsRevokeDialogOpen(true);
-                                }}
+                                onClick={() => handleRemoveMember(member)}
                               >
                                 Remove Member
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         )}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
 
@@ -557,6 +583,31 @@ export default function TeamSettingsPage() {
           </Form>
         </DialogContent>
       </Dialog>
+
+      {/* Remove Member Dialog */}
+      <AlertDialog
+        open={isRemoveMemberDialogOpen}
+        onOpenChange={setIsRemoveMemberDialogOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Member</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to remove this member? This action cannot be
+              undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={onRemoveMember}
+            >
+              Remove Member
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

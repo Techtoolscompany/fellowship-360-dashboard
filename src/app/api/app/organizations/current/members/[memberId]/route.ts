@@ -3,26 +3,20 @@ import withOrganizationAuthRequired from "@/lib/auth/withOrganizationAuthRequire
 import { db } from "@/db";
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { z } from "zod";
 import { render } from "@react-email/components";
-import RoleChangeEmail from "@/emails/RoleChangeEmail";
+import AccessRevokedEmail from "@/emails/AccessRevokedEmail";
 import sendMail from "@/lib/email/sendMail";
 import { organizations } from "@/db/schema/organization";
 import { users } from "@/db/schema/user";
 
-const updateRoleSchema = z.object({
-  role: z.enum([OrganizationRole.enum.user, OrganizationRole.enum.admin]),
-});
-
-export const PATCH = withOrganizationAuthRequired(async (req, context) => {
+// Remove a member from the organization
+export const DELETE = withOrganizationAuthRequired(async (req, context) => {
   const currentOrganization = await context.session.organization;
   const currentUser = await context.session.user;
   const params = await context.params;
   const memberId = params.memberId as string;
 
   try {
-    const { role } = updateRoleSchema.parse(await req.json());
-
     // Check if the target member exists and is not the owner
     const targetMember = await db
       .select({
@@ -50,7 +44,7 @@ export const PATCH = withOrganizationAuthRequired(async (req, context) => {
 
     if (targetMember.role === OrganizationRole.enum.owner) {
       return NextResponse.json(
-        { message: "Cannot change owner's role", success: false },
+        { message: "Cannot remove the owner", success: false },
         { status: 403 }
       );
     }
@@ -67,10 +61,9 @@ export const PATCH = withOrganizationAuthRequired(async (req, context) => {
       throw new Error("Organization not found");
     }
 
-    // Update the role
+    // Remove the member
     await db
-      .update(organizationMemberships)
-      .set({ role })
+      .delete(organizationMemberships)
       .where(
         and(
           eq(organizationMemberships.userId, memberId),
@@ -78,40 +71,29 @@ export const PATCH = withOrganizationAuthRequired(async (req, context) => {
         )
       );
 
-    // Send role change email
+    // Send access revoked email
     const html = await render(
-      RoleChangeEmail({
+      AccessRevokedEmail({
         workspaceName: org.name,
-        newRole: role,
-        changedByName: currentUser.name || "A team member",
+        revokedByName: currentUser.name || "A team member",
       })
     );
 
     await sendMail(
       targetMember.email,
-      `Your role has been updated in ${org.name}`,
+      `Your access to ${org.name} has been revoked`,
       html
     );
 
     return NextResponse.json({
-      message: "Role updated successfully",
+      message: "Member removed successfully",
       success: true,
     });
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        {
-          message: error.message,
-          success: false,
-        },
-        { status: 400 }
-      );
-    }
-
-    console.error("Failed to update role:", error);
+    console.error("Failed to remove member:", error);
     return NextResponse.json(
-      { message: "Failed to update role", success: false },
+      { message: "Failed to remove member", success: false },
       { status: 500 }
     );
   }
-}, OrganizationRole.enum.owner);
+}, OrganizationRole.enum.owner); 

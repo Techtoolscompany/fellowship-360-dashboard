@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { OrganizationRole } from "@/db/schema";
+import { invitations, OrganizationRole } from "@/db/schema";
+import { InferSelectModel } from "drizzle-orm";
 
 export const createInviteSchema = z.object({
   email: z.string().email(),
@@ -19,14 +20,4 @@ export type CreateInviteSchema = z.infer<typeof createInviteSchema>;
 export type RevokeInviteSchema = z.infer<typeof revokeInviteSchema>;
 export type UpdateInviteRoleSchema = z.infer<typeof updateInviteRoleSchema>;
 
-export type Invitation = {
-  id: string;
-  email: string;
-  organizationId: string;
-  role: "admin" | "user" | "owner";
-  invitedById: string;
-  token: string;
-  expiresAt: Date;
-  createdAt: Date;
-  updatedAt: Date;
-}; 
+export type Invitation = InferSelectModel<typeof invitations>;

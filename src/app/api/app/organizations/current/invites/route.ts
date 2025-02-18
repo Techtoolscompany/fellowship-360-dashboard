@@ -7,6 +7,11 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { render } from "@react-email/components";
+import InvitationEmail from "@/emails/InvitationEmail";
+import sendMail from "@/lib/email/sendMail";
+import { appConfig } from "@/lib/config";
+import { organizations } from "@/db/schema/organization";
 
 // Get all invites for the current organization
 export const GET = withOrganizationAuthRequired(async (req, context) => {
@@ -40,6 +45,7 @@ export const POST = withOrganizationAuthRequired(async (req, context) => {
     const { email, role } = createInviteSchema.parse(await req.json());
 
     const token = nanoid(32); // Generate a secure token for the invitation
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
     const invite = await db
       .insert(invitations)
@@ -49,11 +55,41 @@ export const POST = withOrganizationAuthRequired(async (req, context) => {
         organizationId: currentOrganization.id,
         invitedById: currentUser.id,
         token,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+        expiresAt,
       })
       .returning();
 
-    // TODO: Send invitation email with the token
+    // Get organization details
+    const org = await db
+      .select()
+      .from(organizations)
+      .where(eq(organizations.id, currentOrganization.id))
+      .limit(1)
+      .then((orgs) => orgs[0]);
+
+    if (!org) {
+      throw new Error("Organization not found");
+    }
+
+    // Generate accept URL
+    const acceptUrl = `${process.env.NEXT_PUBLIC_APP_URL}/app/accept-invite?token=${token}`;
+
+    // Send invitation email
+    const html = await render(
+      InvitationEmail({
+        workspaceName: org.name,
+        inviterName: currentUser.name || "A team member",
+        role,
+        acceptUrl,
+        expiresAt,
+      })
+    );
+
+    await sendMail(
+      email,
+      `Join ${org.name} on ${appConfig.projectName}`,
+      html
+    );
 
     return NextResponse.json({
       invite: invite[0],
