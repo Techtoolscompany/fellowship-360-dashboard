@@ -1,35 +1,37 @@
 import useSWR from "swr";
-import { UserOrganization } from "./getUserOrganizations";
+import { UserOrganizationWithPlan } from "./getUserOrganizations";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
 const useOrganization = () => {
-  const { data, isLoading, error, mutate } = useSWR<UserOrganization>(
+  const { data, isLoading, error, mutate } = useSWR<UserOrganizationWithPlan>(
     "/api/app/organizations/current"
   );
   const router = useRouter();
 
   const switchOrganization = async (organizationId: string) => {
-    try {
-      const response = await fetch("/api/app/organizations/current", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ organizationId }),
-      });
+    toast.promise(
+      async () => {
+        const response = await fetch("/api/app/organizations/current", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ organizationId }),
+        });
 
-      if (!response.ok) {
-        throw new Error("Failed to switch organization");
+        if (!response.ok) {
+          throw new Error("Failed to switch organization");
+        }
+        await mutate();
+        router.push("/app");
+      },
+      {
+        loading: "Switching organization...",
+        success: "Organization switched successfully",
+        error: "Failed to switch organization",
       }
-
-      await mutate();
-      toast.success("Organization switched successfully");
-      router.push("/app");
-    } catch (error) {
-      console.error("Error switching organization:", error);
-      toast.error("Failed to switch organization");
-    }
+    );
   };
 
   return {

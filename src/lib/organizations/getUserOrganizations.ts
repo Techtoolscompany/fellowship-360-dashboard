@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { organizations } from "@/db/schema/organization";
 import { organizationMemberships } from "@/db/schema/organization-membership";
+import { plans } from "@/db/schema/plans";
 import { and, eq } from "drizzle-orm";
 import type { InferSelectModel } from "drizzle-orm";
 
@@ -12,6 +13,13 @@ export type UserOrganization = Pick<
   "id" | "name" | "slug" | "image" | "onboardingDone"
 > & {
   role: OrganizationMembership["role"];
+};
+
+export type UserOrganizationWithPlan = UserOrganization & {
+  plan: Pick<
+    InferSelectModel<typeof plans>,
+    "id" | "name" | "default" | "codename" | "quotas"
+  > | null;
 };
 
 export const getUserOrganizations = async (
@@ -42,7 +50,7 @@ export const getUserOrganizations = async (
 export const getUserOrganizationById = async (
   userId: string,
   organizationId: string
-): Promise<UserOrganization | undefined> => {
+): Promise<UserOrganizationWithPlan | undefined> => {
   const [organization] = await db
     .select({
       id: organizations.id,
@@ -51,6 +59,7 @@ export const getUserOrganizationById = async (
       image: organizations.image,
       role: organizationMemberships.role,
       onboardingDone: organizations.onboardingDone,
+      planId: organizations.planId,
     })
     .from(organizationMemberships)
     .innerJoin(
@@ -64,5 +73,32 @@ export const getUserOrganizationById = async (
       )
     );
 
-  return organization;
+  if (!organization) {
+    return undefined;
+  }
+
+  if (!organization.planId) {
+    return {
+      ...organization,
+      plan: null,
+    };
+  }
+
+  const plan = await db
+    .select({
+      id: plans.id,
+      name: plans.name,
+      default: plans.default,
+      codename: plans.codename,
+      quotas: plans.quotas,
+    })
+    .from(plans)
+    .where(eq(plans.id, organization.planId))
+    .limit(1)
+    .then((res) => res[0]);
+
+  return {
+    ...organization,
+    plan: plan,
+  };
 };

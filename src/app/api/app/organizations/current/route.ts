@@ -49,7 +49,11 @@ export const GET = withAuthRequired(async (req, context) => {
     // Set first organization as current
     session.currentOrganizationId = organizations[0].id;
     await session.save();
-    return NextResponse.json(organizations[0]);
+    const organizationWithPlan = await getUserOrganizationById(
+      user.id,
+      organizations[0].id
+    );
+    return NextResponse.json(organizationWithPlan);
   }
 
   // Get organization
