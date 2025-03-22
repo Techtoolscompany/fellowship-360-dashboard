@@ -11,6 +11,7 @@ import {
   LogOut,
   ClipboardList,
   Menu,
+  Building,
 } from "lucide-react";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { appConfig } from "@/lib/config";
@@ -21,11 +22,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { usePathname } from "next/navigation";
 
 const navigation = [
   { name: "Dashboard", href: "/super-admin", icon: LayoutDashboard },
   { name: "Plans", href: "/super-admin/plans", icon: CreditCard },
   { name: "Users", href: "/super-admin/users", icon: Users },
+  { name: "Organizations", href: "/super-admin/organizations", icon: Building },
   { name: "Messages", href: "/super-admin/messages", icon: MessageSquare },
   { name: "Waitlist", href: "/super-admin/waitlist", icon: ClipboardList },
   { name: "Logout", href: "/super-admin/logout", icon: LogOut },
@@ -36,6 +39,8 @@ interface SuperAdminLayoutProps {
 }
 
 function SuperAdminLayout({ children }: SuperAdminLayoutProps) {
+  const pathname = usePathname();
+
   return (
     <div className="min-h-screen bg-background">
       {/* Top Navigation */}
@@ -88,7 +93,10 @@ function SuperAdminLayout({ children }: SuperAdminLayoutProps) {
                   href={item.href}
                   className={cn(
                     "group flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground",
-                    "transition-colors"
+                    "transition-colors",
+                    pathname === item.href || (pathname?.startsWith(item.href) && item.href !== "/super-admin") 
+                      ? "bg-accent text-accent-foreground" 
+                      : ""
                   )}
                 >
                   <Icon className="mr-3 h-5 w-5" />

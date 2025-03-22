@@ -14,14 +14,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Search, ChevronLeft, ChevronRight } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
 
 interface User {
   id: string;
   name: string | null;
   email: string | null;
   image: string | null;
-  active: boolean;
   createdAt: string;
 }
 
@@ -74,49 +73,53 @@ export default function UsersPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="min-w-[200px]">User</TableHead>
-              <TableHead className="min-w-[200px]">Email</TableHead>
-              <TableHead className="min-w-[100px]">Status</TableHead>
-              <TableHead className="min-w-[120px]">Created At</TableHead>
+              <TableHead className="min-w-[300px]">User</TableHead>
+              <TableHead className="min-w-[120px]">Joined</TableHead>
               <TableHead className="min-w-[150px]">ID</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center">
+                <TableCell colSpan={3} className="text-center">
                   Loading...
                 </TableCell>
               </TableRow>
             ) : error ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-red-500">
+                <TableCell colSpan={3} className="text-center text-red-500">
                   Error loading users
                 </TableCell>
               </TableRow>
             ) : data?.users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center">
+                <TableCell colSpan={3} className="text-center">
                   No users found
                 </TableCell>
               </TableRow>
             ) : (
               data?.users.map((user) => (
                 <TableRow key={user.id}>
-                  <TableCell className="flex items-center gap-2">
-                    <Avatar>
+                  <TableCell className="flex items-center gap-3">
+                    <Avatar className="h-8 w-8">
                       <AvatarImage src={user.image || undefined} />
                       <AvatarFallback>
-                        {user.name ? getInitials(user.name) : "?"}
+                        {user.name
+                          ? getInitials(user.name)
+                          : user.email?.slice(0, 2).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
-                    <span>{user.name || "Unnamed"}</span>
-                  </TableCell>
-                  <TableCell>{user.email}</TableCell>
-                  <TableCell>
-                    <Badge variant={user.active ? "default" : "secondary"}>
-                      {user.active ? "Active" : "Inactive"}
-                    </Badge>
+                    <div>
+                      <Link 
+                        href={`/super-admin/users/${user.id}`}
+                        className="font-medium hover:underline block"
+                      >
+                        {user.name || "Unnamed User"}
+                      </Link>
+                      <span className="text-sm text-muted-foreground">
+                        {user.email}
+                      </span>
+                    </div>
                   </TableCell>
                   <TableCell>
                     {new Date(user.createdAt).toLocaleDateString()}
