@@ -3,31 +3,38 @@ import { Card } from "@/components/ui/card";
 import { XCircle } from "lucide-react";
 import Link from "next/link";
 
-interface ErrorMessages {
-  [key: string]: string;
-}
+type ErrorCodeType =
+  | "STRIPE_CANCEL_BEFORE_SUBSCRIBING"
+  | "LEMON_SQUEEZY_CANCEL_BEFORE_SUBSCRIBING"
+  | "DODO_CANCEL_BEFORE_SUBSCRIBING"
+  | "DODO_MISSING_BILLING_INFO"
+  | "INVALID_PARAMS";
+
+type ErrorMessages = {
+  [key in ErrorCodeType]?: string;
+};
 
 const errorMessages: ErrorMessages = {
   STRIPE_CANCEL_BEFORE_SUBSCRIBING:
     "Please cancel your current subscription before subscribing to a new onetime plan.",
   LEMON_SQUEEZY_CANCEL_BEFORE_SUBSCRIBING:
     "Please cancel your current subscription before subscribing to a new onetime plan.",
+  DODO_CANCEL_BEFORE_SUBSCRIBING:
+    "Please cancel your current subscription before subscribing to a new onetime plan.",
+  DODO_MISSING_BILLING_INFO:
+    "Billing information is required to complete your DodoPayments subscription.",
   INVALID_PARAMS: "Invalid parameters.",
-  PLAN_NOT_FOUND: "The requested subscription plan could not be found.",
-  PAYMENT_INCOMPLETE: "Your payment was not completed. Please try again.",
-  SESSION_VERIFICATION_FAILED: "We could not verify your payment session. Please contact support if you believe this is an error.",
-  NO_ADMIN_ACCESS: "You need administrative access to an organization to subscribe to a plan.",
 };
 
 export default async function SubscribeErrorPage({
   searchParams,
 }: {
-  searchParams: Promise<{ code?: string }>;
+  searchParams: Promise<{ code?: string; message?: string }>;
 }) {
-  const { code } = await searchParams;
+  const { code, message: errorMessage } = await searchParams;
   const message = code
-    ? errorMessages[code]
-    : "An error occurred during subscription.";
+    ? errorMessages[code as ErrorCodeType] || errorMessage
+    : errorMessage || "An error occurred during subscription.";
 
   return (
     <div className="container max-w-lg mx-auto py-12">
@@ -55,6 +62,27 @@ export default async function SubscribeErrorPage({
               </p>
               <Button asChild>
                 <Link href="/app/billing">Go to Billing</Link>
+              </Button>
+            </div>
+          )}
+          {code === "DODO_CANCEL_BEFORE_SUBSCRIBING" && (
+            <div className="flex flex-col gap-2 items-center">
+              <p>
+                If you want to cancel your current subscription, please go to
+                your billing page.
+              </p>
+              <Button asChild>
+                <Link href="/app/billing">Go to Billing</Link>
+              </Button>
+            </div>
+          )}
+          {code === "DODO_MISSING_BILLING_INFO" && (
+            <div className="flex flex-col gap-2 items-center">
+              <p>
+                Please provide your billing information to complete your subscription.
+              </p>
+              <Button asChild>
+                <Link href="/app/subscribe">Try Again</Link>
               </Button>
             </div>
           )}

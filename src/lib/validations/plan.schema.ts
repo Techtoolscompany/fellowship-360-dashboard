@@ -16,21 +16,21 @@ export const planFormSchema = z.object({
     .min(0, "Monthly anchor price must be non-negative"),
   monthlyStripePriceId: z.string().nullable(),
   monthlyLemonSqueezyVariantId: z.string().nullable(),
-
+  monthlyDodoProductId: z.string().nullable(),
   yearlyPrice: z.number().min(0, "Yearly price must be non-negative"),
   yearlyPriceAnchor: z
     .number()
     .min(0, "Yearly anchor price must be non-negative"),
   yearlyStripePriceId: z.string().nullable(),
   yearlyLemonSqueezyVariantId: z.string().nullable(),
-
+  yearlyDodoProductId: z.string().nullable(),
   onetimePrice: z.number().min(0, "One-time price must be non-negative"),
   onetimePriceAnchor: z
     .number()
     .min(0, "One-time anchor price must be non-negative"),
   onetimeStripePriceId: z.string().nullable(),
   onetimeLemonSqueezyVariantId: z.string().nullable(),
-
+  onetimeDodoProductId: z.string().nullable(),
   quotas: quotaSchema,
 });
 

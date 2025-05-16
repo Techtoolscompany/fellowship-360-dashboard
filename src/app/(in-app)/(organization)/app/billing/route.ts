@@ -3,6 +3,7 @@ import stripe from "@/lib/stripe";
 import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 import { OrganizationRole } from "@/db/schema/organization";
+import client from "@/lib/dodopayments/client";
 
 export const GET = withOrganizationAuthRequired(async (req, context) => {
   const organization = await context.session.organization;
@@ -12,6 +13,14 @@ export const GET = withOrganizationAuthRequired(async (req, context) => {
       { message: "Organization not found" },
       { status: 404 }
     );
+  }
+
+  const dodoCustomerId = organization.dodoCustomerId;
+  if (dodoCustomerId) {
+    const customerPortalSession = await client.customers.customerPortal.create(
+      dodoCustomerId
+    );
+    return redirect(customerPortalSession.link);
   }
 
   const stripeCustomerId = organization.stripeCustomerId;
@@ -30,9 +39,9 @@ export const GET = withOrganizationAuthRequired(async (req, context) => {
     // TODO: Get lemonSqueezy customer and redirect to lemonSqueezy customer portal
     // Replace with actual implementation when LemonSqueezy is implemented
     return NextResponse.json(
-      { 
+      {
         message: "LemonSqueezy portal integration is not implemented yet.",
-        customerId: lemonSqueezyCustomerId
+        customerId: lemonSqueezyCustomerId,
       },
       { status: 501 }
     );

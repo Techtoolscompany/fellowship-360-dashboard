@@ -9,6 +9,7 @@ export enum PlanType {
 export enum PlanProvider {
   STRIPE = "stripe",
   LEMON_SQUEEZY = "lemonsqueezy",
+  DODO = "dodo",
 }
 
 const trialPeriodDays = [7, 14];
@@ -20,9 +21,15 @@ export const subscribeParams = z.object({
   trialPeriodDays: z
     .number()
     .optional()
-    .refine((n) => n && trialPeriodDays.includes(n), {
-      message: `Trial period days must be ${trialPeriodDays.join(" or ")}`,
-    }),
+    .refine(
+      (n) => {
+        if (!n) return true;
+        return !isNaN(n) && trialPeriodDays.includes(n);
+      },
+      {
+        message: `Trial period days must be ${trialPeriodDays.join(" or ")}`,
+      }
+    ),
 });
 
 export type SubscribeParams = z.infer<typeof subscribeParams>;
