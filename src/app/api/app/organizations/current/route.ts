@@ -37,8 +37,12 @@ export const GET = withAuthRequired(async (req, context) => {
   const session = await getSession();
   const organizationId = session.currentOrganizationId;
 
-  if (!organizationId) {
-    // Get first organization
+  // Cases
+  // - No organization selected, select first organization
+  // - User does not belong to organization, select first organization
+  // - No first organization, return error
+
+  const setAndReturnFirstOrganization = async () => {
     const organizations = await getUserOrganizations(user.id);
     if (organizations.length === 0) {
       return NextResponse.json(
@@ -46,24 +50,27 @@ export const GET = withAuthRequired(async (req, context) => {
         { status: 400 }
       );
     }
+
+    const selectedOrg = organizations[0];
     // Set first organization as current
-    session.currentOrganizationId = organizations[0].id;
+    session.currentOrganizationId = selectedOrg.id;
     await session.save();
     const organizationWithPlan = await getUserOrganizationById(
       user.id,
-      organizations[0].id
+      selectedOrg.id
     );
     return NextResponse.json(organizationWithPlan);
+  };
+
+  if (!organizationId) {
+    return setAndReturnFirstOrganization();
   }
 
   // Get organization
   const organization = await getUserOrganizationById(user.id, organizationId);
 
   if (!organization) {
-    return NextResponse.json(
-      { error: "Organization not found" },
-      { status: 404 }
-    );
+    return setAndReturnFirstOrganization();
   }
 
   return NextResponse.json(organization);
