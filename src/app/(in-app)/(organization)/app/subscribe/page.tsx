@@ -23,6 +23,10 @@ import {
   createOneTimePaymentCheckout,
   createSubscriptionCheckout,
 } from "@/lib/dodopayments";
+import {
+  createPaypalOrderLink,
+  createPaypalSubscriptionLink,
+} from "@/lib/paypal/api";
 
 async function SubscribePage({
   searchParams,
@@ -405,6 +409,22 @@ async function SubscribePage({
         throw new Error("DodoPayments checkout link not found");
       }
       return redirect(dodoCheckoutResponse.payment_link);
+
+    case PlanProvider.PAYPAL:
+      // If this is one time plan then create Order
+      // else create subscription
+      if (type === PlanType.ONETIME) {
+        const orderLink = await createPaypalOrderLink(plan.id, session.user.id, currentOrganization.id);
+        return redirect(orderLink);
+      } else {
+        const subscriptionLink = await createPaypalSubscriptionLink(
+          plan.id,
+          session.user.id,
+          type,
+          currentOrganization.id
+        );
+        return redirect(subscriptionLink);
+      }
 
     default:
       return <div>Provider not found</div>;

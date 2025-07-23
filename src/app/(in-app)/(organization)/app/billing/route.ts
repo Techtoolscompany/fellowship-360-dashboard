@@ -4,6 +4,9 @@ import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 import { OrganizationRole } from "@/db/schema/organization";
 import client from "@/lib/dodopayments/client";
+import { db } from "@/db";
+import { paypalContext } from "@/db/schema/paypal";
+import { eq } from "drizzle-orm";
 
 export const GET = withOrganizationAuthRequired(async (req, context) => {
   const organization = await context.session.organization;
@@ -45,6 +48,15 @@ export const GET = withOrganizationAuthRequired(async (req, context) => {
       },
       { status: 501 }
     );
+  }
+
+  // Check if has paypal context
+  const paypalContexts = await db
+    .select()
+    .from(paypalContext)
+    .where(eq(paypalContext.organizationId, organization.id));
+  if (paypalContexts.length > 0) {
+    return redirect(`${process.env.NEXT_PUBLIC_APP_URL}/app/billing/paypal`);
   }
 
   return NextResponse.json(

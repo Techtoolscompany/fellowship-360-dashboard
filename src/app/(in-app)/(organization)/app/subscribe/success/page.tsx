@@ -18,10 +18,11 @@ import client from "@/lib/dodopayments/client";
 
 // Extended params for success page including sessionId
 const successParams = subscribeParams.extend({
-  sessionId: z.string(), // STRIPE
+  sessionId: z.string().optional(), // STRIPE
   subscription_id: z.string().optional(), // DODO
   status: z.string().optional(), // DODO
   payment_id: z.string().optional(), // DODO
+  paypalContextId: z.string().optional(), // PAYPAL
 });
 
 type SuccessParams = z.infer<typeof successParams>;
@@ -67,6 +68,9 @@ export default async function SubscribeSuccessPage({
 
     if (provider === PlanProvider.STRIPE) {
       try {
+        if (!sessionId) {
+          return redirect("/app/subscribe/error?code=SESSION_NOT_FOUND");
+        }
         // Verify the session exists and was successful
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
@@ -111,9 +115,8 @@ export default async function SubscribeSuccessPage({
     } else if (provider === PlanProvider.DODO) {
       const { subscription_id, payment_id } = await searchParams;
       if (subscription_id) {
-        const subscription = await client.subscriptions.retrieve(
-          subscription_id
-        );
+        const subscription =
+          await client.subscriptions.retrieve(subscription_id);
 
         if (subscription.status !== "active") {
           return (
@@ -168,6 +171,10 @@ export default async function SubscribeSuccessPage({
               <p className="font-medium">
                 You are now subscribed to the {plan.name} plan with{" "}
                 {billingText}.
+              </p>
+              <p className="text-muted-foreground">
+                Please note that in some cases it can take around upto 5 minutes
+                for the subscription to be activated.
               </p>
               {successDetails}
             </div>
