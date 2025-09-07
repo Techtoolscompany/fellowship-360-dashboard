@@ -6,7 +6,8 @@
     "dev": "concurrently \"next dev --turbopack\" \"inngest-cli dev -p 8288\" \"npx react-email dev --dir ./src/emails --port 3001\"",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "script": "tsx --import './scripts/_bootstrap/index.ts'"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.8.0",
@@ -121,6 +122,7 @@
     "prettier": "^3.3.3",
     "react-email": "^4.0.16",
     "tailwindcss": "^4.1.12",
+    "tsx": "^4.20.5",
     "typescript": "^5.8.3"
   }
 }
