@@ -8,6 +8,7 @@ import { z } from "zod";
 
 const updateUserSchema = z.object({
   name: z.string().min(2),
+  image: z.string().optional(),
 });
 
 export const GET = withAuthRequired(async (req, context) => {
@@ -29,6 +30,7 @@ export const PATCH = withAuthRequired(async (req, context) => {
     .update(users)
     .set({
       name: validatedData.name,
+      image: validatedData.image,
     })
     .where(eq(users.id, user.id))
     .returning();

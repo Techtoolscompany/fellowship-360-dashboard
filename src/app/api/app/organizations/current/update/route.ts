@@ -9,11 +9,11 @@ import { ZodError } from "zod";
 export const PATCH = withOrganizationAuthRequired(async (req, context) => {
   const currentOrganization = await context.session.organization;
   try {
-    const { name } = updateOrganizationSchema.parse(await req.json());
+    const { name, image } = updateOrganizationSchema.parse(await req.json());
 
     await db
       .update(organizations)
-      .set({ name })
+      .set({ name, image: image ?? currentOrganization.image })
       .where(eq(organizations.id, currentOrganization.id));
 
     return NextResponse.json({
