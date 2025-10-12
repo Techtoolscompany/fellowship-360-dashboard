@@ -1,8 +1,17 @@
 import { NextResponse } from "next/server";
 import { auth } from "./auth";
 import type { NextRequest } from "next/server";
+import { isMarkdownPreferred, rewritePath } from "fumadocs-core/negotiation";
+const { rewrite: rewriteLLM } = rewritePath("/docs/*path", "/llms.mdx/*path");
 
 export async function middleware(req: NextRequest) {
+  if (isMarkdownPreferred(req)) {
+    const result = rewriteLLM(req.nextUrl.pathname);
+    if (result) {
+      return NextResponse.rewrite(new URL(result, req.nextUrl));
+    }
+  }
+
   const session = await auth();
   const isAuth = !!session?.user;
 
