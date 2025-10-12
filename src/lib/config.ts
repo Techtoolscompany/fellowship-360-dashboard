@@ -36,4 +36,7 @@ export const appConfig: AppConfigPublic = {
     senderName: "Indie Kit",
     senderEmail: "ssent.hq@gmail.com",
   },
+  auth: {
+    enablePasswordAuth: false, // Set to true to enable password authentication
+  },
 };

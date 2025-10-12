@@ -1,6 +1,7 @@
 import { Metadata } from "next"
 import Link from "next/link"
 import { appConfig } from "@/lib/config"
+import { SignUpForm } from "@/components/auth/signup-form"
 import { AuthForm } from "@/components/auth/auth-form"
 
 export const metadata: Metadata = {
@@ -9,6 +10,8 @@ export const metadata: Metadata = {
 }
 
 export default function SignUpPage() {
+  const showPasswordAuth = appConfig.auth?.enablePasswordAuth;
+
   return (
     <>
       <div className="mb-8">
@@ -20,7 +23,7 @@ export default function SignUpPage() {
         </p>
       </div>
 
-      <AuthForm />
+      {showPasswordAuth ? <SignUpForm /> : <AuthForm />}
 
       <div className="mt-6 text-center">
         <Link

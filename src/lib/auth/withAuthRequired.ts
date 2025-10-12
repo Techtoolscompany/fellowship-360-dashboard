@@ -42,7 +42,14 @@ const withAuthRequired = (handler: WithAuthHandler) => {
       get user() {
         return (async () => {
           const user = await db
-            .select()
+            .select({
+              id: users.id,
+              name: users.name,
+              email: users.email,
+              image: users.image,
+              createdAt: users.createdAt,
+              emailVerified: users.emailVerified,
+            })
             .from(users)
             .where(eq(users.id, session.user.id))
             .then((users) => users[0]);
