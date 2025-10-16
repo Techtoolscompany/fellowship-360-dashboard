@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Trash2, Edit } from "lucide-react";
+import { ArrowLeft, Trash2, Edit, CreditCard, Plus, Minus } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -37,6 +37,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { enableCredits } from "@/lib/credits/config";
 
 interface OrganizationDetails {
   id: string;
@@ -74,6 +88,32 @@ interface RedeemedCoupon {
   expired: boolean;
 }
 
+interface CreditTransaction {
+  id: string;
+  creditType: string;
+  transactionType: "credit" | "debit" | "expired";
+  amount: number;
+  createdAt: string;
+  metadata?: {
+    reason?: string;
+    adminAction?: boolean;
+    adminEmail?: string;
+  };
+}
+
+interface CreditData {
+  currentCredits: Record<string, number>;
+  transactions: CreditTransaction[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+  };
+}
+
 export default function OrganizationDetailsPage() {
   const { id } = useParams() as { id: string };
   const router = useRouter();
@@ -81,6 +121,17 @@ export default function OrganizationDetailsPage() {
   const [isRemovingMember, setIsRemovingMember] = useState(false);
   const [isRevokingInvite, setIsRevokingInvite] = useState(false);
   const [changingPlan, setChangingPlan] = useState(false);
+
+  // Credit management state
+  const [creditPage, setCreditPage] = useState(1);
+  const [isCreditModalOpen, setIsCreditModalOpen] = useState(false);
+  const [creditAction, setCreditAction] = useState<"add" | "deduct">("add");
+  const [creditType, setCreditType] = useState<
+    "image_generation" | "video_generation"
+  >("image_generation");
+  const [creditAmount, setCreditAmount] = useState("");
+  const [creditReason, setCreditReason] = useState("");
+  const [isProcessingCredit, setIsProcessingCredit] = useState(false);
 
   const { data: org, error, isLoading, mutate } = useSWR<OrganizationDetails>(
     `/api/super-admin/organizations/${id}`
@@ -90,6 +141,10 @@ export default function OrganizationDetailsPage() {
   
   const { data: redeemedCoupons } = useSWR<RedeemedCoupon[]>(
     `/api/super-admin/organizations/${id}/coupons`
+  );
+
+  const { data: creditData, mutate: mutateCreditData } = useSWR<CreditData>(
+    `/api/super-admin/organizations/${id}/credits?page=${creditPage}&limit=10`
   );
 
   const formatDate = (date: string) => {
@@ -190,6 +245,54 @@ export default function OrganizationDetailsPage() {
     }
   };
 
+  const handleCreditSubmit = async () => {
+    if (!creditAmount || !creditReason || parseFloat(creditAmount) <= 0) {
+      toast.error("Please provide a valid amount (> 0) and reason");
+      return;
+    }
+
+    try {
+      setIsProcessingCredit(true);
+      const response = await fetch(`/api/super-admin/organizations/${id}/credits`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: creditAction,
+          creditType,
+          amount: parseFloat(creditAmount),
+          reason: creditReason,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to manage credits");
+      }
+
+      await mutateCreditData();
+      toast.success(result.message);
+
+      // Reset form
+      setCreditAmount("");
+      setCreditReason("");
+      setIsCreditModalOpen(false);
+    } catch (error) {
+      console.error("Error managing credits:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to manage credits"
+      );
+    } finally {
+      setIsProcessingCredit(false);
+    }
+  };
+
+  const formatCreditType = (type: string) => {
+    return type.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+  };
+
   if (error) {
     return (
       <div className="flex items-center justify-center h-[calc(100vh-14rem)]">
@@ -235,7 +338,17 @@ export default function OrganizationDetailsPage() {
           <h1 className="text-2xl font-bold">{org?.name}</h1>
           <Badge variant="outline">{org?.slug}</Badge>
         </div>
-        <div>
+        <div className="flex items-center gap-2">
+          {enableCredits && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsCreditModalOpen(true)}
+            >
+              <CreditCard className="h-4 w-4 mr-2" />
+              Manage Credits
+            </Button>
+          )}
           <Button
             variant="destructive"
             size="sm"
@@ -527,6 +640,260 @@ export default function OrganizationDetailsPage() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Credit Management Modal */}
+      <Dialog open={isCreditModalOpen} onOpenChange={setIsCreditModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Manage Organization Credits</DialogTitle>
+            <DialogDescription>
+              Add or deduct credits for {org?.name}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-4">
+            <div>
+              <Label htmlFor="credit-action">Action</Label>
+              <RadioGroup
+                value={creditAction}
+                onValueChange={(value: "add" | "deduct") =>
+                  setCreditAction(value)
+                }
+                className="flex flex-row gap-6 mt-2"
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="add" id="add" />
+                  <Label htmlFor="add" className="flex items-center gap-1">
+                    <Plus className="h-4 w-4 text-green-600" />
+                    Add Credits
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="deduct" id="deduct" />
+                  <Label htmlFor="deduct" className="flex items-center gap-1">
+                    <Minus className="h-4 w-4 text-red-600" />
+                    Deduct Credits
+                  </Label>
+                </div>
+              </RadioGroup>
+            </div>
+
+            <div>
+              <Label htmlFor="credit-type">Credit Type</Label>
+              <Select
+                value={creditType}
+                onValueChange={(
+                  value: "image_generation" | "video_generation"
+                ) => setCreditType(value)}
+              >
+                <SelectTrigger className="mt-1.5">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="image_generation">
+                    Image Generation
+                  </SelectItem>
+                  <SelectItem value="video_generation">
+                    Video Generation
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label htmlFor="credit-amount">Amount *</Label>
+              <Input
+                id="credit-amount"
+                type="number"
+                min="1"
+                step="1"
+                value={creditAmount}
+                onChange={(e) => setCreditAmount(e.target.value)}
+                placeholder="Enter amount (must be > 0)"
+                className="mt-1.5"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="credit-reason">Reason *</Label>
+              <Textarea
+                id="credit-reason"
+                value={creditReason}
+                onChange={(e) => setCreditReason(e.target.value)}
+                placeholder="Enter reason for this credit transaction"
+                className="mt-1.5"
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="sm:justify-between">
+            <Button
+              variant="outline"
+              onClick={() => setIsCreditModalOpen(false)}
+              disabled={isProcessingCredit}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreditSubmit}
+              disabled={
+                isProcessingCredit ||
+                !creditAmount ||
+                !creditReason ||
+                parseFloat(creditAmount) <= 0
+              }
+            >
+              {isProcessingCredit
+                ? "Processing..."
+                : `${creditAction === "add" ? "Add" : "Deduct"} Credits`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Credits History Section */}
+      {enableCredits && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Credits & History</CardTitle>
+            <CardDescription>
+              Organization credit balances and transaction history.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Tabs defaultValue="balance" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="balance">Current Balance</TabsTrigger>
+                <TabsTrigger value="history">Transaction History</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="balance" className="space-y-4">
+                {creditData?.currentCredits ? (
+                  <div className="flex flex-col gap-3">
+                    {Object.entries(creditData.currentCredits).map(
+                      ([type, amount]) => (
+                        <div
+                          key={type}
+                          className="flex items-center justify-between p-3 border rounded-lg"
+                        >
+                          <div className="flex items-center gap-2">
+                            <CreditCard className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-medium">
+                              {formatCreditType(type)}
+                            </span>
+                          </div>
+                          <Badge
+                            variant={amount > 0 ? "default" : "secondary"}
+                          >
+                            {amount} credits
+                          </Badge>
+                        </div>
+                      )
+                    )}
+                    {Object.keys(creditData.currentCredits).length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        No credits available
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-4">
+                    <p className="text-sm text-muted-foreground">
+                      Loading credits...
+                    </p>
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="history" className="space-y-4">
+                {creditData?.transactions ? (
+                  <>
+                    <div className="space-y-2">
+                      {creditData.transactions.map((transaction) => (
+                        <div
+                          key={transaction.id}
+                          className="flex items-center justify-between p-3 border rounded-lg"
+                        >
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <Badge
+                                variant={
+                                  transaction.transactionType === "credit"
+                                    ? "default"
+                                    : transaction.transactionType === "debit"
+                                      ? "destructive"
+                                      : "secondary"
+                                }
+                              >
+                                {transaction.transactionType === "credit"
+                                  ? "+"
+                                  : "-"}
+                                {transaction.amount}
+                              </Badge>
+                              <span className="text-sm font-medium">
+                                {formatCreditType(transaction.creditType)}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {transaction.metadata?.reason ||
+                                "No reason provided"}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {new Date(
+                                transaction.createdAt
+                              ).toLocaleString()}
+                            </p>
+                          </div>
+                          {transaction.metadata?.adminAction && (
+                            <Badge variant="outline" className="text-xs">
+                              Admin Action
+                            </Badge>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {creditData.pagination && (
+                      <div className="flex items-center justify-between pt-4">
+                        <p className="text-sm text-muted-foreground">
+                          Page {creditData.pagination.page} of{" "}
+                          {creditData.pagination.totalPages} (
+                          {creditData.pagination.total} total)
+                        </p>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCreditPage(creditPage - 1)}
+                            disabled={!creditData.pagination.hasPrev}
+                          >
+                            Previous
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCreditPage(creditPage + 1)}
+                            disabled={!creditData.pagination.hasNext}
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-center py-4">
+                    <p className="text-sm text-muted-foreground">
+                      Loading transaction history...
+                    </p>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 } 
