@@ -25,10 +25,15 @@ export const paypalContext = pgTable("paypal_context", {
   planId: text("plan_id").references(() => plans.id),
   userId: text("user_id").references(() => users.id), // User who created this context (For audit reasons)
   organizationId: text("organization_id").references(() => organizations.id),
-  frequency: text("frequency").notNull(), // monthly, yearly, onetime
+  frequency: text("frequency").notNull(), // monthly, yearly, onetime, credits
   paypalOrderId: text("paypal_order_id"),
   paypalSubscriptionId: text("paypal_subscription_id"),
   status: text("status").notNull().default("pending"), // 'pending', 'success', 'cancelled'
+
+  // Credit purchase fields
+  purchaseType: text("purchase_type").notNull().default("plan"), // 'plan', 'credits'
+  creditType: text("credit_type"), // nullable, only for credit purchases
+  creditAmount: text("credit_amount"), // nullable, stored as text to handle large numbers
 });
 
 // Types
@@ -36,4 +41,4 @@ export type PaypalAccessToken = typeof paypalAccessTokens.$inferSelect;
 export type NewPaypalAccessToken = typeof paypalAccessTokens.$inferInsert;
 
 export type PaypalContext = typeof paypalContext.$inferSelect;
-export type NewPaypalContext = typeof paypalContext.$inferInsert; 
+export type NewPaypalContext = typeof paypalContext.$inferInsert;

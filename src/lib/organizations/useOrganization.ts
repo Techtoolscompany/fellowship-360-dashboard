@@ -1,3 +1,4 @@
+"use client";
 import useSWR from "swr";
 import { UserOrganizationWithPlan } from "./getUserOrganizations";
 import { toast } from "sonner";

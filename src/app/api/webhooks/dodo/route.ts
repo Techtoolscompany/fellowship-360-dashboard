@@ -8,6 +8,9 @@ import downgradeToDefaultPlan from "@/lib/plans/downgradeToDefaultPlan";
 import { Webhook } from "standardwebhooks";
 import { organizations, type Organization } from "@/db/schema/organization";
 import getOrCreateOrganizationByDodoCustomer from "@/lib/organizations/getOrCreateOrganizationByDodoCustomer";
+import { addCredits } from "@/lib/credits/recalculate";
+import { type CreditType } from "@/lib/credits/credits";
+import { allocatePlanCredits } from "@/lib/credits/allocatePlanCredits";
 
 class DodoPaymentsWebhookHandler {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -63,7 +66,72 @@ class DodoPaymentsWebhookHandler {
   }
 
   async handleOutsidePlanManagementProductPaid() {
-    // TODO: Implement your own logic here
+    const payment = this.data;
+
+    // Check if this is a credit purchase using metadata
+    const metadata = payment.metadata;
+
+    if (metadata?.purchaseType === "credits") {
+      // This is a credit purchase - extract info from metadata
+      const creditType = metadata.creditType;
+      const creditAmount = parseInt(metadata.creditAmount);
+      const organizationId = metadata.organizationId;
+      const paymentId = payment.payment_id || `payment_${payment.customer.customer_id}_${Date.now()}`;
+
+      if (!creditType || !creditAmount || creditAmount <= 0 || !organizationId) {
+        console.error("Invalid credit metadata in DodoPayments webhook:", {
+          creditType,
+          creditAmount,
+          organizationId,
+          metadata
+        });
+        return;
+      }
+
+      if (!this.organization) {
+        console.error("Organization not resolved for DodoPayments credit purchase");
+        return;
+      }
+
+      // Verify the organization ID matches (security check)
+      if (this.organization.id !== organizationId) {
+        console.error("Organization ID mismatch in DodoPayments webhook:", {
+          metadataOrganizationId: organizationId,
+          actualOrganizationId: this.organization.id,
+          email: payment.customer.email
+        });
+        return;
+      }
+
+      try {
+        // Add credits with payment ID for idempotency
+        await addCredits(
+          organizationId,
+          creditType as CreditType,
+          creditAmount,
+          paymentId,
+          {
+            reason: "Purchase via DodoPayments",
+            dodoPaymentId: paymentId,
+            dodoCustomerId: payment.customer.customer_id,
+            totalPrice: metadata.totalPrice,
+          }
+        );
+
+        console.log(`Successfully added ${creditAmount} ${creditType} credits to organization ${organizationId} via DodoPayments payment ${paymentId}`);
+      } catch (error) {
+        console.error("Error adding credits from DodoPayments:", error);
+        // If it's a duplicate payment error, that's okay - idempotency working
+        if (error instanceof Error && error.message.includes("already exists")) {
+          console.log(`Credits purchase already processed for DodoPayments payment ${paymentId}`);
+        } else {
+          throw error; // Re-throw other errors
+        }
+      }
+    } else {
+      // Handle other non-plan products here if needed
+      console.log("DodoPayments payment for non-plan, non-credit product. Metadata:", metadata);
+    }
   }
 
   // Payment Events
@@ -92,6 +160,18 @@ class DodoPaymentsWebhookHandler {
         await updatePlan({
           organizationId: this.organization.id,
           newPlanId: dbPlan.id,
+        });
+
+        // Allocate plan-based credits
+        await allocatePlanCredits({
+          organizationId: this.organization.id,
+          planId: dbPlan.id,
+          paymentId: payment.payment_id || `payment_${payment.customer.customer_id}_${Date.now()}`,
+          paymentMetadata: {
+            source: "dodo_payment",
+            dodoPaymentId: payment.payment_id,
+            dodoCustomerId: payment.customer.customer_id,
+          }
         });
       }
     } catch (error) {
@@ -207,6 +287,18 @@ class DodoPaymentsWebhookHandler {
         organizationId: this.organization.id, 
         newPlanId: dbPlan.id 
       });
+
+      // Allocate plan-based credits
+      await allocatePlanCredits({
+        organizationId: this.organization.id,
+        planId: dbPlan.id,
+        paymentId: subscription.subscription_id,
+        paymentMetadata: {
+          source: "dodo_subscription",
+          dodoSubscriptionId: subscription.subscription_id,
+          dodoCustomerId: subscription.customer?.customer_id,
+        }
+      });
     } catch (error) {
       throw error;
     }
@@ -269,6 +361,18 @@ class DodoPaymentsWebhookHandler {
       await updatePlan({ 
         organizationId: org.id, 
         newPlanId: dbPlan.id 
+      });
+
+      // Allocate plan-based credits
+      await allocatePlanCredits({
+        organizationId: org.id,
+        planId: dbPlan.id,
+        paymentId: subscription.subscription_id,
+        paymentMetadata: {
+          source: "dodo_subscription_renewed",
+          dodoSubscriptionId: subscription.subscription_id,
+          dodoCustomerId: subscription.customer?.customer_id,
+        }
       });
     } catch (error) {
       // Handle error

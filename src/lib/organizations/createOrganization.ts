@@ -4,6 +4,10 @@ import { organizationMemberships } from "@/db/schema/organization-membership";
 import { plans } from "@/db/schema/plans";
 import { eq } from "drizzle-orm";
 import { getZodDefaults } from "../utils";
+import { enableCredits, onNewOrganizationCredits } from "../credits/config";
+import { addDays } from "date-fns";
+import { addCredits } from "../credits/recalculate";
+import { CreditType } from "../credits/credits";
 
 export type CreateOrganizationInput = {
   name: string;
@@ -59,6 +63,29 @@ export async function createOrganization({
     userId,
     role: "owner",
   });
+
+  // Add Welcome Credits, if configured
+  if (enableCredits) {
+    // Add welcome credits based on configuration
+    for (const [creditType, config] of Object.entries(
+      onNewOrganizationCredits
+    )) {
+      const expiryDate = config.expiryAfter
+        ? addDays(new Date(), config.expiryAfter)
+        : null;
+
+      await addCredits(
+        organization.id,
+        creditType as CreditType,
+        config.amount,
+        `welcome_credits_${creditType}_${organization.id}`,
+        {
+          reason: "Welcome credits",
+        },
+        expiryDate
+      );
+    }
+  }
 
   return organization;
 }

@@ -10,13 +10,17 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowUpRight, HelpCircle, TicketCheck } from "lucide-react";
+import { ArrowUpRight, Clock, HelpCircle, TicketCheck } from "lucide-react";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { Skeleton } from "@/components/ui/skeleton";
 import Link from "next/link";
+import useCredits from "@/lib/organizations/useCredits";
+import { creditsConfig } from "@/lib/credits/config";
 
 export default function BillingSettingsPage() {
   const { organization, isLoading, error } = useOrganization();
+
+  const { credits } = useCredits();
 
   // Check if organization has a plan with quotas
   const plan = organization?.plan;
@@ -177,6 +181,45 @@ export default function BillingSettingsPage() {
             ) : (
               renderQuotaFeatures()
             )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Your Credits</CardTitle>
+            <CardDescription>
+              Your available credits and their expiration date.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {/* List of all the credits and their count */}
+            <div className="space-y-4">
+              {Object.entries(credits || {}).map(
+                ([creditType, creditCount]) => (
+                  <div
+                    key={creditType}
+                    className="flex items-center justify-between"
+                  >
+                    <div className="font-medium text-sm">
+                      {
+                        creditsConfig[creditType as keyof typeof creditsConfig]
+                          .name
+                      }
+                    </div>
+                    <div className="text-sm">
+                      {creditCount.toLocaleString()}
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+
+            {/* Button to view history of credits */}
+            <Button variant="ghost" className="w-full mt-4" asChild>
+              <Link href="/app/credits/history">
+                View History
+                <Clock className="ml-2 h-4 w-4" />
+              </Link>
+            </Button>
           </CardContent>
         </Card>
       </div>

@@ -9,7 +9,11 @@ import {
 import { plans } from "./plans";
 import { z } from "zod";
 import type { InferSelectModel } from "drizzle-orm";
+import { type CreditType } from "@/lib/credits/credits";
 
+type CreditRecord = {
+  [K in CreditType]?: number;
+};
 export const roleEnum = pgEnum("role", ["admin", "owner", "user"]);
 
 export const OrganizationRole = z.enum(roleEnum.enumValues);
@@ -35,6 +39,8 @@ export const organizations = pgTable("organization", {
   image: text("image"),
   createdAt: timestamp("createdAt", { mode: "date" }).defaultNow(),
   updatedAt: timestamp("updatedAt", { mode: "date" }).defaultNow(),
+
+  credits: jsonb("credits").$type<CreditRecord>(),
 
   onboardingDone: boolean("onboardingDone").default(false),
   onboardingData: jsonb("onboardingData").$type<OnboardingData>(),

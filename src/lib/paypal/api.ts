@@ -86,25 +86,40 @@ export async function getPaypalAuthToken(forceRefresh = false) {
 
 export async function cancelPaypalSubscription(contextId: string) {
   // Find the context
-  const [context] = await db.select().from(paypalContext).where(eq(paypalContext.id, contextId)).limit(1);
-  if (!context || !context.paypalSubscriptionId) throw new Error("Subscription not found");
+  const [context] = await db
+    .select()
+    .from(paypalContext)
+    .where(eq(paypalContext.id, contextId))
+    .limit(1);
+  if (!context || !context.paypalSubscriptionId)
+    throw new Error("Subscription not found");
   // Cancel on PayPal
   const authToken = await getPaypalAuthToken();
-  const res = await fetch(`${PAYPAL_BASE_URL}/v1/billing/subscriptions/${context.paypalSubscriptionId}/cancel`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${authToken}`,
-    },
-    body: JSON.stringify({ reason: "User requested cancellation" }),
-  });
+  const res = await fetch(
+    `${PAYPAL_BASE_URL}/v1/billing/subscriptions/${context.paypalSubscriptionId}/cancel`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ reason: "User requested cancellation" }),
+    }
+  );
   if (!res.ok) throw new Error("Failed to cancel subscription on PayPal");
   // Update status in DB
-  await db.update(paypalContext).set({ status: "cancelled" }).where(eq(paypalContext.id, contextId));
+  await db
+    .update(paypalContext)
+    .set({ status: "cancelled" })
+    .where(eq(paypalContext.id, contextId));
   return true;
 }
 
-export const createPaypalOrderLink = async (planId: string, userId: string, organizationId: string) => {
+export const createPaypalOrderLink = async (
+  planId: string,
+  userId: string,
+  organizationId: string
+) => {
   const authToken = await getPaypalAuthToken();
   const contextId = randomUUID();
   const plan = await db
@@ -143,8 +158,13 @@ export const createPaypalOrderLink = async (planId: string, userId: string, orga
     }),
   });
   const data = await response.json();
-  const approvalUrl = data.links.find((link: { rel: string; href: string }) => link.rel === "approve")?.href;
-  if (!approvalUrl) throw new Error("PayPal order approval URL not found. Something went wrong calling paypal api.");
+  const approvalUrl = data.links.find(
+    (link: { rel: string; href: string }) => link.rel === "approve"
+  )?.href;
+  if (!approvalUrl)
+    throw new Error(
+      "PayPal order approval URL not found. Something went wrong calling paypal api."
+    );
   // Insert context row in DB
   await db.insert(paypalContext).values({
     id: contextId,
@@ -166,8 +186,18 @@ export const createPaypalSubscriptionLink = async (
 ) => {
   const authToken = await getPaypalAuthToken();
   const contextId = randomUUID();
-  const user = await db.select().from(users).where(eq(users.id, userId)).limit(1).then(res => res[0]);
-  const plan = await db.select().from(plans).where(eq(plans.id, planId)).limit(1).then(res => res[0]);
+  const user = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1)
+    .then((res) => res[0]);
+  const plan = await db
+    .select()
+    .from(plans)
+    .where(eq(plans.id, planId))
+    .limit(1)
+    .then((res) => res[0]);
   let paypalPlanId = null;
   if (frequency === "monthly") {
     paypalPlanId = plan?.monthlyPaypalPlanId;
@@ -203,8 +233,13 @@ export const createPaypalSubscriptionLink = async (
     }),
   });
   const data = await response.json();
-  const approvalUrl = data.links.find((link: { rel: string; href: string }) => link.rel === "approve")?.href;
-  if (!approvalUrl) throw new Error("PayPal subscription approval URL not found. Something went wrong calling paypal api.");
+  const approvalUrl = data.links.find(
+    (link: { rel: string; href: string }) => link.rel === "approve"
+  )?.href;
+  if (!approvalUrl)
+    throw new Error(
+      "PayPal subscription approval URL not found. Something went wrong calling paypal api."
+    );
   // Insert context row in DB
   await db.insert(paypalContext).values({
     id: contextId,
@@ -216,4 +251,76 @@ export const createPaypalSubscriptionLink = async (
     status: "pending",
   });
   return approvalUrl;
-}; 
+};
+
+export const createPaypalCreditOrderLink = async (
+  creditType: string,
+  creditAmount: number,
+  totalPrice: number,
+  userId: string,
+  organizationId: string
+) => {
+  const authToken = await getPaypalAuthToken();
+  const contextId = randomUUID();
+
+  const response = await fetch(`${PAYPAL_BASE_URL}/v2/checkout/orders`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${authToken}`,
+    },
+    body: JSON.stringify({
+      intent: "CAPTURE",
+      purchase_units: [
+        {
+          amount: {
+            currency_code: "USD",
+            value: (totalPrice / 100).toFixed(2), // Convert from cents to dollars
+          },
+          description: `${creditAmount} ${creditType} Credits`,
+        },
+      ],
+      application_context: {
+        brand_name: appConfig.projectName,
+        shipping_preference: "NO_SHIPPING",
+        user_action: "PAY_NOW",
+        return_url: `${process.env.NEXT_PUBLIC_APP_URL}/app/credits/buy/success?provider=paypal&creditType=${creditType}&amount=${creditAmount}&paypalContextId=${contextId}`,
+        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/app/credits/buy/cancel?provider=paypal&creditType=${creditType}&amount=${creditAmount}&paypalContextId=${contextId}`,
+      },
+    }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    console.error("PayPal order creation failed:", data);
+    throw new Error(
+      `PayPal order creation failed: ${data.message || "Unknown error"}`
+    );
+  }
+
+  const approvalUrl = data.links?.find(
+    (link: { rel: string; href: string }) => link.rel === "approve"
+  )?.href;
+  if (!approvalUrl) {
+    throw new Error(
+      "PayPal order approval URL not found. Something went wrong calling paypal api."
+    );
+  }
+
+  // Insert context row in DB for credit purchase
+  await db.insert(paypalContext).values({
+    id: contextId,
+    planId: null, // No plan for credit purchases
+    userId,
+    organizationId,
+    frequency: "credits", // Use "credits" to distinguish from plan purchases
+    paypalOrderId: data.id,
+    status: "pending",
+    purchaseType: "credits",
+    creditType,
+    creditAmount: creditAmount.toString(),
+  });
+
+  return approvalUrl;
+};

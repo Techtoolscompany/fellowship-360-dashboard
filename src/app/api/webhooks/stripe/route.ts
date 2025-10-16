@@ -9,6 +9,10 @@ import updatePlan from "@/lib/plans/updatePlan";
 import downgradeToDefaultPlan from "@/lib/plans/downgradeToDefaultPlan";
 import getOrCreateOrganizationByStripeCustomer from "@/lib/organizations/getOrCreateOrganizationByStripeCustomer";
 import { organizations, type Organization } from "@/db/schema/organization";
+import { addCredits } from "@/lib/credits/recalculate";
+import { type CreditType } from "@/lib/credits/credits";
+import { creditTypeSchema } from "@/lib/credits/config";
+import { allocatePlanCredits } from "@/lib/credits/allocatePlanCredits";
 
 class StripeWebhookHandler {
   private data: Stripe.Event.Data;
@@ -24,6 +28,23 @@ class StripeWebhookHandler {
     let customerId: string | null = null;
     let customerEmail: string | null = null;
     let customerName: string | null = null;
+
+    // Check metadata.organizationId if present then that is the organization
+    const object = this.data.object as {
+      metadata?: { organizationId: string };
+    };
+    if (object?.metadata?.organizationId) {
+      const organization = await db
+        .select()
+        .from(organizations)
+        .where(eq(organizations.id, object.metadata.organizationId))
+        .limit(1)
+        .then((res) => res[0]);
+      if (organization) {
+        this.organization = organization;
+        return;
+      }
+    }
 
     // Extract customer information based on event type
     if (this.eventType === "customer.created") {
@@ -92,6 +113,90 @@ class StripeWebhookHandler {
     // TODO: Implement your own logic here ex: update organization credits (if you have a credits system)
   }
 
+  /**
+   * Handles credits purchase from checkout session
+   * @param checkoutSession - Stripe checkout session
+   * @param organization - Organization object
+   */
+  async handleCreditsPurchase(
+    checkoutSession: Stripe.Checkout.Session,
+    organization: Organization
+  ) {
+    const metadata = checkoutSession.metadata;
+
+    if (!metadata || metadata.type !== "credits_purchase") {
+      return false; // Not a credits purchase
+    }
+
+    const { creditType, amount, userId, organizationId } = metadata;
+
+    // Validate metadata
+    if (!creditType || !amount || !organizationId) {
+      console.error("Invalid credits purchase metadata", metadata);
+      throw new APIError("Invalid credits purchase metadata");
+    }
+
+    if (organizationId !== organization.id) {
+      console.error(
+        "Organization ID mismatch in credits purchase",
+        organizationId,
+        organization.id
+      );
+      throw new APIError("Organization ID mismatch in credits purchase");
+    }
+
+    // Validate credit type
+    const parsedCreditType = creditTypeSchema.safeParse(creditType);
+    if (!parsedCreditType.success) {
+      console.error("Invalid credit type in credits purchase", creditType);
+      throw new APIError(`Invalid credit type: ${creditType}`);
+    }
+
+    const creditAmount = parseInt(amount);
+    if (isNaN(creditAmount) || creditAmount <= 0) {
+      console.error("Invalid credit amount in credits purchase", amount);
+      throw new APIError(`Invalid credit amount: ${amount}`);
+    }
+
+    try {
+      // Use checkout session ID as payment ID for idempotency
+      const paymentId = checkoutSession.id;
+
+      // Add credits with idempotency protection
+      await addCredits(
+        organization.id,
+        parsedCreditType.data as CreditType,
+        creditAmount,
+        paymentId,
+        {
+          reason: "Purchase via Stripe",
+          checkoutSessionId: checkoutSession.id,
+          paymentIntentId: checkoutSession.payment_intent,
+          amountPaid: checkoutSession.amount_total,
+          currency: checkoutSession.currency,
+          userId: userId, // Track who initiated the purchase
+        }
+      );
+
+      console.log(
+        `Successfully added ${creditAmount} ${creditType} credits to organization ${organization.id} via payment ${paymentId}`
+      );
+      return true; // Credits purchase handled
+    } catch (error) {
+      console.error("Error adding credits:", error);
+      // If it's a duplicate payment error, that's okay - idempotency working
+      if (error instanceof Error && error.message.includes("already exists")) {
+        console.log(
+          `Credits purchase already processed for payment ${checkoutSession.id}`
+        );
+        return true;
+      }
+      throw new APIError(
+        `Failed to add credits: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
+    }
+  }
+
   async onInvoicePaid() {
     const object = this.data.object as Stripe.Invoice;
 
@@ -123,6 +228,19 @@ class StripeWebhookHandler {
         await updatePlan({
           organizationId: this.organization.id,
           newPlanId: dbPlan.id,
+        });
+
+        // Allocate plan-based credits
+        await allocatePlanCredits({
+          organizationId: this.organization.id,
+          planId: dbPlan.id,
+          paymentId: object.id,
+          paymentMetadata: {
+            source: "stripe_invoice",
+            invoiceId: object.id,
+            customerId: object.customer,
+            subscriptionId: object.subscription,
+          },
         });
       }
     } else {
@@ -186,6 +304,18 @@ class StripeWebhookHandler {
     }
 
     await updatePlan({ organizationId: org.id, newPlanId: dbPlan.id });
+
+    // Allocate plan-based credits
+    await allocatePlanCredits({
+      organizationId: org.id,
+      planId: dbPlan.id,
+      paymentId: object.id,
+      paymentMetadata: {
+        source: "stripe_subscription_updated",
+        subscriptionId: object.id,
+        status: object.status,
+      },
+    });
   }
 
   async _getStripeCustomer(
@@ -235,6 +365,21 @@ class StripeWebhookHandler {
       organizationId: this.organization.id,
       newPlanId: dbPlan.id,
     });
+
+    // Allocate plan-based credits
+    await allocatePlanCredits({
+      organizationId: this.organization.id,
+      planId: dbPlan.id,
+      paymentId: object.id,
+      paymentMetadata: {
+        source: "stripe_subscription_created",
+        subscriptionId: object.id,
+        customerId:
+          typeof object.customer === "string"
+            ? object.customer
+            : object.customer?.id,
+      },
+    });
   }
 
   async onSubscriptionDeleted() {
@@ -269,10 +414,22 @@ class StripeWebhookHandler {
     }
 
     if (!this.organization) {
-      console.error("Organization not resolved for checkout.session.completed event");
+      console.error(
+        "Organization not resolved for checkout.session.completed event"
+      );
       return;
     }
 
+    // First, check if this is a credits purchase
+    const isCreditsHandled = await this.handleCreditsPurchase(
+      object,
+      this.organization
+    );
+    if (isCreditsHandled) {
+      return; // Credits purchase was handled successfully
+    }
+
+    // If not credits, handle as plan purchase
     // Get line items to find the plan
     const lineItems = await stripe.checkout.sessions.listLineItems(object.id);
 
@@ -288,7 +445,12 @@ class StripeWebhookHandler {
     const dbPlan = await this._getPlanFromStripePriceId(firstItem.price.id);
 
     if (!dbPlan) {
-      // Handle outside plan management product
+      // Handle outside plan management product - could be credits or other products
+      console.log(
+        "No plan found for price ID:",
+        firstItem.price.id,
+        "- may be credits or other product"
+      );
       await this.handleOutsidePlanManagementProductInvoicePaid();
       return;
     }
@@ -296,6 +458,24 @@ class StripeWebhookHandler {
     await updatePlan({
       organizationId: this.organization.id,
       newPlanId: dbPlan.id,
+    });
+
+    // Allocate plan-based credits
+    await allocatePlanCredits({
+      organizationId: this.organization.id,
+      planId: dbPlan.id,
+      paymentId: object.id,
+      paymentMetadata: {
+        source: "stripe_checkout",
+        checkoutSessionId: object.id,
+        paymentIntentId: object.payment_intent,
+        customerId:
+          typeof object.customer === "string"
+            ? object.customer
+            : object.customer?.id,
+        amountTotal: object.amount_total,
+        currency: object.currency,
+      },
     });
   }
 

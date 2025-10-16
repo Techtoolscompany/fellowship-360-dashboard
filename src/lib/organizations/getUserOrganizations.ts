@@ -10,7 +10,7 @@ type OrganizationMembership = InferSelectModel<typeof organizationMemberships>;
 
 export type UserOrganization = Pick<
   Organization,
-  "id" | "name" | "slug" | "image" | "onboardingDone"
+  "id" | "name" | "slug" | "image" | "onboardingDone" | "credits"
 > & {
   role: OrganizationMembership["role"];
 };
@@ -33,6 +33,7 @@ export const getUserOrganizations = async (
       image: organizations.image,
       role: organizationMemberships.role,
       onboardingDone: organizations.onboardingDone,
+      credits: organizations.credits,
     })
     .from(organizationMemberships)
     .innerJoin(
@@ -60,6 +61,7 @@ export const getUserOrganizationById = async (
       role: organizationMemberships.role,
       onboardingDone: organizations.onboardingDone,
       planId: organizations.planId,
+      credits: organizations.credits,
     })
     .from(organizationMemberships)
     .innerJoin(

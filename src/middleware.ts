@@ -21,30 +21,20 @@ export async function middleware(req: NextRequest) {
     req.nextUrl.pathname.startsWith("/sign-out");
 
   if (isAuthPage) {
-    if (isAuth && !req.nextUrl.pathname.startsWith("/sign-out")) {
-      return NextResponse.redirect(new URL("/app", req.url));
-    }
     return NextResponse.next();
   }
 
-  if (!isAuth) {
-    let callbackUrl = req.nextUrl.pathname;
-    if (req.nextUrl.search) {
-      callbackUrl += req.nextUrl.search;
-    }
-
-    return NextResponse.redirect(
-      new URL(
-        `/sign-in?callbackUrl=${encodeURIComponent(callbackUrl)}`,
-        req.url
-      )
-    );
-  }
-
   if (req.nextUrl.pathname.startsWith("/app")) {
-    if (!session?.user) {
+    if (!isAuth) {
+      let callbackUrl = req.nextUrl.pathname;
+      if (req.nextUrl.search) {
+        callbackUrl += req.nextUrl.search;
+      }
       return NextResponse.redirect(
-        new URL("/sign-in?error=unauthorized", req.url)
+        new URL(
+          `/sign-in?error=unauthorized&callbackUrl=${encodeURIComponent(callbackUrl)}`,
+          req.url
+        )
       );
     }
     return NextResponse.next();
@@ -60,6 +50,11 @@ export async function middleware(req: NextRequest) {
 
   if (req.nextUrl.pathname.startsWith("/super-admin")) {
     const email = session?.user?.email;
+    if (!email) {
+      return NextResponse.redirect(
+        new URL("/sign-in?error=unauthorized", req.url)
+      );
+    }
     const isSuperAdmin =
       process.env.SUPER_ADMIN_EMAILS?.split(",").includes(email);
     const hasAccess = isSuperAdmin && !!email;
