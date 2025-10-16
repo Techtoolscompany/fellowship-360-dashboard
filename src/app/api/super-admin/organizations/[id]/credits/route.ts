@@ -74,6 +74,7 @@ export const POST = withSuperAdminAuthRequired(async (req, context) => {
     const { action, creditType, amount, reason } =
       creditActionSchema.parse(body);
 
+    const user = await context.session.user;
     // Determine transaction type based on action
     const transactionType = action === "add" ? "credit" : "debit";
 
@@ -81,8 +82,8 @@ export const POST = withSuperAdminAuthRequired(async (req, context) => {
     const metadata = {
       reason,
       adminAction: true,
-      adminId: context.session.user.id,
-      adminEmail: context.session.user.email,
+      adminId: user.id,
+      adminEmail: user.email,
     };
 
     // Add the credit transaction
