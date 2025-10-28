@@ -214,7 +214,7 @@ async function SubscribePage({
             }
           : undefined,
         customer: stripeCustomerId,
-        customer_email: session.user.email,
+        customer_email: stripeCustomerId ? undefined : session.user.email,
         billing_address_collection: "required",
         customer_update: stripeCustomerId
           ? {
