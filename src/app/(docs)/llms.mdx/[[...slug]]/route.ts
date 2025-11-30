@@ -6,10 +6,10 @@ export const revalidate = false;
 
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ slug: string[] }> }
+  context: { params: Promise<{ slug?: string[] | undefined }> }
 ) {
-  const { slug } = await params;
-  const page = source.getPage(slug);
+  const { slug } = await context.params;
+  const page = source.getPage(slug?.slice(0, -1) || []);
   if (!page) notFound();
 
   return new Response(await getLLMText(page), {
