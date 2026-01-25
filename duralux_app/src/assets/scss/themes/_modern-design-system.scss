@@ -1,0 +1,612 @@
+// Modern Design System
+// Inspired by modern dashboard aesthetics with lime green accents
+
+// ==============================================
+// COLOR PALETTE
+// ==============================================
+
+// Primary Accent - Lime Green
+$accent-primary: #c8f542;
+$accent-primary-dark: #a8d435;
+$accent-primary-light: #e5ff7a;
+$accent-primary-subtle: rgba(200, 245, 66, 0.15);
+
+// Secondary Colors
+$accent-secondary: #2d2d2d;
+$accent-secondary-light: #3d3d3d;
+
+// Neutral Colors
+$neutral-50: #fafafa;
+$neutral-100: #f5f5f5;
+$neutral-200: #e5e5e5;
+$neutral-300: #d4d4d4;
+$neutral-400: #a3a3a3;
+$neutral-500: #737373;
+$neutral-600: #525252;
+$neutral-700: #404040;
+$neutral-800: #262626;
+$neutral-900: #171717;
+
+// Status Colors
+$status-success: #22c55e;
+$status-success-bg: rgba(34, 197, 94, 0.1);
+$status-warning: #f59e0b;
+$status-warning-bg: rgba(245, 158, 11, 0.1);
+$status-danger: #ef4444;
+$status-danger-bg: rgba(239, 68, 68, 0.1);
+$status-info: #3b82f6;
+$status-info-bg: rgba(59, 130, 246, 0.1);
+
+// ==============================================
+// SHADOWS
+// ==============================================
+
+$shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+$shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+$shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+$shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+$shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+$shadow-card: 0 2px 8px rgba(0, 0, 0, 0.04), 0 0 1px rgba(0, 0, 0, 0.06);
+$shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.08), 0 0 1px rgba(0, 0, 0, 0.08);
+
+// ==============================================
+// BORDER RADIUS
+// ==============================================
+
+$radius-sm: 8px;
+$radius-md: 12px;
+$radius-lg: 16px;
+$radius-xl: 20px;
+$radius-2xl: 24px;
+$radius-full: 9999px;
+
+// ==============================================
+// TYPOGRAPHY
+// ==============================================
+
+$font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+$font-weight-normal: 400;
+$font-weight-medium: 500;
+$font-weight-semibold: 600;
+$font-weight-bold: 700;
+
+// ==============================================
+// TRANSITIONS
+// ==============================================
+
+$transition-fast: 150ms ease;
+$transition-base: 200ms ease;
+$transition-slow: 300ms ease;
+
+// ==============================================
+// GLOBAL OVERRIDES
+// ==============================================
+
+:root {
+  --accent-primary: #{$accent-primary};
+  --accent-primary-dark: #{$accent-primary-dark};
+  --accent-primary-light: #{$accent-primary-light};
+  --accent-primary-subtle: #{$accent-primary-subtle};
+  --shadow-card: #{$shadow-card};
+  --shadow-card-hover: #{$shadow-card-hover};
+  --radius-md: #{$radius-md};
+  --radius-lg: #{$radius-lg};
+}
+
+// Modern Card Base
+.card {
+  background: #ffffff;
+  border: 1px solid $neutral-100;
+  border-radius: $radius-lg !important;
+  box-shadow: $shadow-card;
+  transition: box-shadow $transition-base, transform $transition-base;
+  overflow: hidden;
+  
+  &:hover {
+    box-shadow: $shadow-card-hover;
+  }
+  
+  .card-header {
+    background: transparent;
+    border-bottom: 1px solid $neutral-100;
+    padding: 20px 24px;
+    
+    .card-title {
+      font-weight: $font-weight-semibold;
+      font-size: 16px;
+      color: $neutral-800;
+      margin: 0;
+    }
+  }
+  
+  .card-body {
+    padding: 24px;
+  }
+  
+  .card-footer {
+    background: $neutral-50;
+    border-top: 1px solid $neutral-100;
+    padding: 16px 24px;
+  }
+}
+
+// Modern Buttons
+.btn {
+  border-radius: $radius-md;
+  font-weight: $font-weight-medium;
+  padding: 10px 20px;
+  transition: all $transition-base;
+  border: none;
+  
+  &.btn-primary {
+    background: $accent-primary;
+    color: $neutral-900;
+    
+    &:hover, &:focus {
+      background: $accent-primary-dark;
+      color: $neutral-900;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(200, 245, 66, 0.3);
+    }
+  }
+  
+  &.btn-outline-primary {
+    border: 1.5px solid $neutral-200;
+    background: transparent;
+    color: $neutral-700;
+    
+    &:hover, &:focus {
+      border-color: $accent-primary;
+      background: $accent-primary-subtle;
+      color: $neutral-800;
+    }
+  }
+  
+  &.btn-secondary {
+    background: $neutral-100;
+    color: $neutral-700;
+    
+    &:hover, &:focus {
+      background: $neutral-200;
+    }
+  }
+  
+  &.btn-dark {
+    background: $neutral-900;
+    color: #ffffff;
+    
+    &:hover, &:focus {
+      background: $neutral-800;
+    }
+  }
+  
+  &.btn-sm {
+    padding: 8px 16px;
+    font-size: 13px;
+    border-radius: $radius-sm;
+  }
+  
+  &.btn-lg {
+    padding: 14px 28px;
+    font-size: 16px;
+    border-radius: $radius-md;
+  }
+}
+
+// Modern Badges
+.badge {
+  font-weight: $font-weight-medium;
+  padding: 6px 12px;
+  border-radius: $radius-full;
+  font-size: 12px;
+  
+  &.bg-primary, &.badge-primary {
+    background: $accent-primary !important;
+    color: $neutral-900;
+  }
+  
+  &.bg-success, &.badge-success {
+    background: $status-success-bg !important;
+    color: $status-success;
+  }
+  
+  &.bg-warning, &.badge-warning {
+    background: $status-warning-bg !important;
+    color: $status-warning;
+  }
+  
+  &.bg-danger, &.badge-danger {
+    background: $status-danger-bg !important;
+    color: $status-danger;
+  }
+  
+  &.bg-info, &.badge-info {
+    background: $status-info-bg !important;
+    color: $status-info;
+  }
+  
+  &.bg-soft-primary {
+    background: $accent-primary-subtle !important;
+    color: $neutral-800;
+  }
+  
+  &.bg-soft-success {
+    background: $status-success-bg !important;
+    color: $status-success;
+  }
+}
+
+// Status Dots
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  
+  &.status-success { background: $status-success; }
+  &.status-warning { background: $status-warning; }
+  &.status-danger { background: $status-danger; }
+  &.status-info { background: $status-info; }
+}
+
+// Modern Form Controls
+.form-control, .form-select {
+  border-radius: $radius-md;
+  border: 1.5px solid $neutral-200;
+  padding: 12px 16px;
+  font-size: 14px;
+  transition: border-color $transition-base, box-shadow $transition-base;
+  
+  &:focus {
+    border-color: $accent-primary;
+    box-shadow: 0 0 0 3px $accent-primary-subtle;
+    outline: none;
+  }
+  
+  &::placeholder {
+    color: $neutral-400;
+  }
+}
+
+.form-label {
+  font-weight: $font-weight-medium;
+  font-size: 13px;
+  color: $neutral-600;
+  margin-bottom: 8px;
+}
+
+// Modern Tables
+.table {
+  border-radius: $radius-md;
+  overflow: hidden;
+  
+  thead {
+    background: $neutral-50;
+    
+    th {
+      font-weight: $font-weight-semibold;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: $neutral-500;
+      padding: 14px 16px;
+      border-bottom: 1px solid $neutral-100;
+    }
+  }
+  
+  tbody {
+    tr {
+      transition: background $transition-fast;
+      
+      &:hover {
+        background: $neutral-50;
+      }
+      
+      td {
+        padding: 16px;
+        vertical-align: middle;
+        border-bottom: 1px solid $neutral-100;
+        font-size: 14px;
+        color: $neutral-700;
+      }
+    }
+  }
+}
+
+// Progress Bars
+.progress {
+  height: 8px;
+  border-radius: $radius-full;
+  background: $neutral-100;
+  overflow: hidden;
+  
+  .progress-bar {
+    background: linear-gradient(90deg, $accent-primary, $accent-primary-light);
+    border-radius: $radius-full;
+    transition: width $transition-slow;
+  }
+  
+  &.progress-success .progress-bar {
+    background: linear-gradient(90deg, $status-success, lighten($status-success, 10%));
+  }
+  
+  &.progress-warning .progress-bar {
+    background: linear-gradient(90deg, $status-warning, lighten($status-warning, 10%));
+  }
+}
+
+// Avatar Styles
+.avatar {
+  border-radius: $radius-lg;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: $font-weight-semibold;
+  
+  &.avatar-rounded {
+    border-radius: 50%;
+  }
+  
+  &.avatar-sm {
+    width: 32px;
+    height: 32px;
+    font-size: 12px;
+  }
+  
+  &.avatar-md {
+    width: 44px;
+    height: 44px;
+    font-size: 14px;
+  }
+  
+  &.avatar-lg {
+    width: 64px;
+    height: 64px;
+    font-size: 20px;
+  }
+  
+  &.avatar-xl {
+    width: 88px;
+    height: 88px;
+    font-size: 28px;
+  }
+}
+
+// KPI Cards
+.kpi-card {
+  background: #ffffff;
+  border-radius: $radius-xl;
+  padding: 24px;
+  border: 1px solid $neutral-100;
+  box-shadow: $shadow-card;
+  
+  .kpi-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: $radius-md;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: $neutral-50;
+    color: $neutral-600;
+    
+    &.kpi-icon-primary {
+      background: $accent-primary-subtle;
+      color: $neutral-800;
+    }
+    
+    &.kpi-icon-success {
+      background: $status-success-bg;
+      color: $status-success;
+    }
+  }
+  
+  .kpi-value {
+    font-size: 28px;
+    font-weight: $font-weight-bold;
+    color: $neutral-900;
+    line-height: 1.2;
+  }
+  
+  .kpi-label {
+    font-size: 13px;
+    color: $neutral-500;
+    margin-top: 4px;
+  }
+  
+  .kpi-trend {
+    font-size: 12px;
+    font-weight: $font-weight-medium;
+    padding: 4px 10px;
+    border-radius: $radius-full;
+    
+    &.trend-up {
+      background: $status-success-bg;
+      color: $status-success;
+    }
+    
+    &.trend-down {
+      background: $status-danger-bg;
+      color: $status-danger;
+    }
+  }
+}
+
+// Feature Highlight Card (Dark)
+.feature-card {
+  background: $neutral-900;
+  border-radius: $radius-xl;
+  padding: 28px;
+  color: #ffffff;
+  
+  .feature-dots {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 16px;
+    
+    span {
+      width: 8px;
+      height: 8px;
+      background: $accent-primary;
+      border-radius: 50%;
+    }
+  }
+  
+  .feature-title {
+    font-size: 22px;
+    font-weight: $font-weight-bold;
+    line-height: 1.3;
+    
+    .highlight {
+      color: $accent-primary;
+    }
+  }
+}
+
+// Modal Overrides
+.modal-content {
+  border-radius: $radius-xl;
+  border: none;
+  box-shadow: $shadow-xl;
+  
+  .modal-header {
+    padding: 24px 28px 16px;
+    border-bottom: 1px solid $neutral-100;
+    
+    .modal-title {
+      font-weight: $font-weight-semibold;
+      font-size: 18px;
+    }
+    
+    .btn-close {
+      opacity: 0.5;
+      
+      &:hover {
+        opacity: 1;
+      }
+    }
+  }
+  
+  .modal-body {
+    padding: 24px 28px;
+  }
+  
+  .modal-footer {
+    padding: 16px 28px 24px;
+    border-top: 1px solid $neutral-100;
+  }
+}
+
+// Dropdown Overrides
+.dropdown-menu {
+  border-radius: $radius-md;
+  border: 1px solid $neutral-100;
+  box-shadow: $shadow-lg;
+  padding: 8px;
+  
+  .dropdown-item {
+    border-radius: $radius-sm;
+    padding: 10px 14px;
+    font-size: 14px;
+    transition: background $transition-fast;
+    
+    &:hover {
+      background: $neutral-50;
+    }
+    
+    &.active {
+      background: $accent-primary-subtle;
+      color: $neutral-900;
+    }
+  }
+}
+
+// Chart Container Styling
+.chart-container {
+  background: #ffffff;
+  border-radius: $radius-lg;
+  padding: 20px;
+}
+
+// Timeline Styling
+.timeline-item {
+  position: relative;
+  padding-left: 28px;
+  padding-bottom: 20px;
+  border-left: 2px solid $neutral-100;
+  margin-left: 8px;
+  
+  &:last-child {
+    border-left-color: transparent;
+    padding-bottom: 0;
+  }
+  
+  &::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 4px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: $accent-primary;
+    border: 2px solid #ffffff;
+  }
+  
+  .timeline-title {
+    font-weight: $font-weight-medium;
+    font-size: 14px;
+    color: $neutral-800;
+    margin-bottom: 4px;
+  }
+  
+  .timeline-desc {
+    font-size: 13px;
+    color: $neutral-500;
+  }
+  
+  .timeline-time {
+    font-size: 12px;
+    color: $neutral-400;
+    margin-top: 6px;
+  }
+}
+
+// Scrollbar Styling
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: $neutral-100;
+  border-radius: $radius-full;
+}
+
+::-webkit-scrollbar-thumb {
+  background: $neutral-300;
+  border-radius: $radius-full;
+  
+  &:hover {
+    background: $neutral-400;
+  }
+}
+
+// Page Background
+.main-content {
+  background: $neutral-50;
+}
+
+// Typography Utilities
+.text-accent {
+  color: $accent-primary !important;
+}
+
+.bg-accent {
+  background: $accent-primary !important;
+}
+
+.bg-accent-subtle {
+  background: $accent-primary-subtle !important;
+}

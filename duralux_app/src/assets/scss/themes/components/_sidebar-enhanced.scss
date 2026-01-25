@@ -167,16 +167,16 @@ $nav-item-radius: 8px;
   
   &.active > .nxl-link,
   &.nxl-trigger > .nxl-link {
-    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-    color: #ffffff !important;
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
+    background: #c8f542;
+    color: #171717 !important;
+    box-shadow: 0 4px 12px rgba(200, 245, 66, 0.35);
     
     .nxl-micon {
-      color: #ffffff;
+      color: #171717;
     }
     
     .nxl-arrow {
-      color: #ffffff;
+      color: #171717;
     }
   }
 }
@@ -200,7 +200,7 @@ $nav-item-radius: 8px;
     color: #1f2937;
     
     .nxl-micon {
-      color: #3b82f6;
+      color: #171717;
     }
   }
   
@@ -292,18 +292,18 @@ $nav-item-radius: 8px;
     }
     
     &:hover::before {
-      background: #3b82f6;
+      background: #171717;
       transform: translateY(-50%) scale(1.2);
     }
   }
   
   .nxl-item.active .nxl-link {
-    color: #3b82f6;
+    color: #171717;
     font-weight: 500;
-    background: #eff6ff;
+    background: rgba(200, 245, 66, 0.2);
     
     &::before {
-      background: #3b82f6;
+      background: #c8f542;
     }
   }
 }
@@ -350,8 +350,8 @@ $nav-item-radius: 8px;
     gap: 8px;
     width: 100%;
     padding: 10px 16px;
-    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-    color: #ffffff;
+    background: #c8f542;
+    color: #171717;
     border: none;
     border-radius: $nav-item-radius;
     font-size: 13px;
@@ -361,7 +361,8 @@ $nav-item-radius: 8px;
     
     &:hover {
       transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+      box-shadow: 0 4px 12px rgba(200, 245, 66, 0.4);
+      background: #a8d435;
     }
     
     svg {
