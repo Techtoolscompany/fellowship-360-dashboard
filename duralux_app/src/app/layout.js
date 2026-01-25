@@ -6,23 +6,16 @@ import "react-datetime/css/react-datetime.css";
 import NavigationProvider from "@/contentApi/navigationProvider";
 import SettingSideBarProvider from "@/contentApi/settingSideBarProvider";
 import ThemeCustomizer from "@/components/shared/ThemeCustomizer";
-import { Plus_Jakarta_Sans } from 'next/font/google';
-
-const plusJakartaSans = Plus_Jakarta_Sans({ 
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-plus-jakarta-sans',
-});
 
 export const metadata = {
-  title: "Finance Dashboard",
-  description: "Cash Flow Dashboard - Track Your Inflows and Outflows",
+  title: "Fellowship 360",
+  description: "Fellowship 360 - Church Management Dashboard",
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={plusJakartaSans.variable}>
-      <body style={{ fontFamily: 'var(--font-plus-jakarta-sans), sans-serif' }}>
+    <html lang="en">
+      <body>
         <SettingSideBarProvider>
           <NavigationProvider>
             {children}
