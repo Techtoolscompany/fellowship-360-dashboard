@@ -4,6 +4,18 @@
 Fellowship 360 is a comprehensive church management dashboard built on Next.js 14 (App Router). This project was converted from the Duralux admin template to serve as the UI foundation for the Fellowship 360 product.
 
 ## Recent Changes
+- **Jan 25, 2026**: World-class UI enhancements
+  - Dark mode toggle with full theme persistence (navigation, header, skin)
+  - Command palette with Cmd/Ctrl+K keyboard shortcut for quick navigation
+  - Drag-and-drop Kanban board using @hello-pangea/dnd with toast notifications
+  - Toast notification system (success, error, warning, info types)
+  - CSV export functionality for data tables
+  - Skeleton loading components with multiple variants (Card, KPI, Table, Chart)
+  - Micro-interactions SCSS with hover effects, animations, and transitions
+  - Mobile responsive layouts with breakpoint handling
+  - Onboarding tour for first-time users
+  - Empty state components with custom illustrations
+
 - **Jan 25, 2026**: Enhanced pages with rich data visualizations and charts
   - Giving/Donations: KPI cards, weekly giving trend area chart, fund breakdown donut, monthly bar chart
   - Reports/Overview: Attendance trend, visitor conversion donut, monthly giving, engagement radar, growth metrics
@@ -27,8 +39,18 @@ Fellowship 360 is a comprehensive church management dashboard built on Next.js 1
 ### Tech Stack
 - **Framework**: Next.js 14 (App Router)
 - **Styling**: Bootstrap 5 + Sass
+- **Charts**: ApexCharts (react-apexcharts)
+- **Drag & Drop**: @hello-pangea/dnd
 - **UI Components**: Custom components based on Duralux patterns
 - **Icons**: Feather Icons, React Icons
+
+### Reusable Components
+- `Skeleton.jsx` - Loading skeleton components (Card, KPI, Table, Chart, Avatar, Text variants)
+- `Toast.jsx` - Toast notification system with ToastProvider context
+- `CommandPalette.jsx` - Global search with Cmd+K keyboard shortcut
+- `EmptyState.jsx` - Empty state displays with custom illustrations
+- `CsvExport.jsx` - CSV export utility for data tables
+- `OnboardingTour.jsx` - Step-by-step onboarding tour for new users
 
 ### Directory Structure
 ```
