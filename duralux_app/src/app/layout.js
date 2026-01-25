@@ -8,8 +8,8 @@ import SettingSideBarProvider from "@/contentApi/settingSideBarProvider";
 import ThemeCustomizer from "@/components/shared/ThemeCustomizer";
 
 export const metadata = {
-  title: "Duralux | Dashboard",
-  description: "Duralux is a admin Dashboard create for multipurpose,",
+  title: "Fellowship 360",
+  description: "Fellowship 360 - Church Management Dashboard",
 };
 
 export default function RootLayout({ children }) {

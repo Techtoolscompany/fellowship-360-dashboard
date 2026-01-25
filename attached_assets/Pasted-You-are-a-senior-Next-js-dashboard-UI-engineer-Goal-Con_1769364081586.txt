@@ -1,0 +1,154 @@
+You are a senior Next.js + dashboard UI engineer.
+
+Goal:
+Convert the Duralux Next.js dashboard template (App Router) into the Fellowship 360 dashboard UI.
+This is UI + routing + navigation + layout + placeholder data only (NO real backend integration yet).
+Keep the existing component patterns and pages as much as possible, but rename, reorganize, and repurpose them to match Fellowship 360.
+
+Project facts:
+- Repo is a Duralux admin template in Next.js 14 (App Router) located in src/app
+- Uses Bootstrap + Sass
+- We are rebranding everything to “Fellowship 360”
+- Multi-tenant and DS Digital super-admin will exist later, but for this task we only need UI structure
+
+Primary deliverable:
+A working UI where the left sidebar, page titles, breadcrumbs, and route structure match the Fellowship 360 product modules.
+
+--------------------------------------------
+1) REBRAND (GLOBAL)
+--------------------------------------------
+Update ALL branding references:
+- Replace the name “Duralux” with “Fellowship 360” in:
+  - src/app/layout.js metadata title/description
+  - sidebar/header labels
+  - auth screens
+  - any page headers / footer strings / HTML titles
+- Replace favicon and logo assets (create placeholder Fellowship 360 logo if needed)
+- Ensure browser tab title reads “Fellowship 360”
+
+--------------------------------------------
+2) ROUTE + NAV STRUCTURE (Fellowship 360)
+--------------------------------------------
+Create/rename routes in src/app to match the following module structure.
+Use the existing page templates as starting points (don’t build from scratch if a similar page exists).
+
+Required sidebar items (in this exact order):
+
+A) Home
+- /home (Dashboard overview: KPI cards, recent activity list)
+
+B) People
+- /people/contacts (table list)
+- /people/contacts/[id] (profile view page)
+- /people/segments (tags/segments UI)
+
+C) Engage
+- /engage/pipeline (Kanban workflow for visitor follow-up)
+- /engage/tasks (task list)
+
+D) Comms
+- /comms/conversations (inbox style UI, can reuse chat/email patterns)
+- /comms/broadcasts (broadcast message builder + history list)
+- /comms/templates (template list)
+
+E) Grace AI
+- /grace/calls (call log table)
+- /grace/calls/[id] (call detail: transcript, intent, outcome, notes)
+- /grace/settings (forms/settings UI for agent config)
+
+F) Prayer & Care
+- /care/prayer-requests (board or table with status filters)
+- /care/prayer-requests/[id] (detail view)
+
+G) Scheduling
+- /scheduling/calendar (calendar UI)
+- /scheduling/appointments (table list)
+- /scheduling/volunteers (volunteer schedule UI)
+
+H) Giving
+- /giving/donations (table)
+- /giving/donors (donor list + donor profile)
+- /giving/pledges (table)
+
+I) Reports
+- /reports/overview (summary dashboard)
+- /reports/attendance (table + simple chart placeholder)
+- /reports/engagement (simple placeholder score/report)
+
+J) Settings
+- /settings/church-profile (form UI)
+- /settings/users-roles (table UI)
+- /settings/integrations (cards UI)
+- /settings/billing (placeholder UI)
+
+K) DS Digital Admin (Super Admin UI only, no auth enforcement yet)
+- /admin/churches (church list)
+- /admin/churches/new (create church form)
+- /admin/provisioning (provisioning status list)
+
+--------------------------------------------
+3) PAGE UI REQUIREMENTS (PLACEHOLDER DATA OK)
+--------------------------------------------
+For each major module, create a clean UI using Duralux’s existing patterns:
+- Tables use existing Duralux table components/styles
+- Detail pages have:
+  - a header with title + action buttons
+  - an “Overview” card
+  - a “Details” section
+  - a “Recent Activity” list section
+
+Specific screens:
+
+(1) /engage/pipeline
+- Kanban with these columns:
+  New Visitor
+  Attempted
+  Connected
+  Scheduled Visit
+  Joined
+  Inactive
+- Cards show: Name, last contact date, assigned owner, next action due date
+
+(2) /grace/calls
+- Table columns:
+  Date/Time, Caller, Intent, Outcome, Duration, Follow-up Needed (Yes/No)
+- Add filters at top: Intent, Outcome, Date range
+
+(3) /grace/calls/[id]
+- Show transcript block
+- Show call metadata (intent/outcome/duration/sentiment placeholder)
+- Show “Create Follow-up Task” button (UI only)
+
+(4) /giving/donations
+- Table columns:
+  Date, Donor, Amount, Fund, Method, Status
+
+(5) /people/contacts/[id]
+- Profile card with name, phone, email, status (member/visitor/etc.)
+- Timeline component (messages/calls/notes placeholders)
+
+--------------------------------------------
+4) SIDEBAR + HEADER CLEANUP
+--------------------------------------------
+- Remove irrelevant Duralux menu items (ecommerce, random apps not used)
+- Make sure sidebar icons match the new labels (use existing icon set)
+- Breadcrumbs should match the new route hierarchy
+
+--------------------------------------------
+5) CODE QUALITY / IMPLEMENTATION NOTES
+--------------------------------------------
+- Keep everything inside src/app (App Router)
+- Use existing Duralux layout/providers — don’t break the theme
+- Use placeholder arrays for data in each page (later we will connect Supabase)
+- No TypeScript conversion required
+- Ensure npm run dev works and navigation between pages is functional
+
+--------------------------------------------
+6) OUTPUT EXPECTATION
+--------------------------------------------
+When done, provide:
+1) A list of files changed/created
+2) Any new components created (and where)
+3) Screenshots are not required, but the pages must compile and load
+
+Proceed with implementation now.

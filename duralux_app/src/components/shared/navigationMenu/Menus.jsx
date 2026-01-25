@@ -31,26 +31,27 @@ const Menus = () => {
     };
 
     useEffect(() => {
-        if (pathName !== "/") {
+        if (pathName !== "/" && pathName !== "/home") {
             const x = pathName.split("/");
             setActiveParent(x[1]);
             setActiveChild(x[2]);
             setOpenDropdown(x[1]);
             setOpenSubDropdown(x[2]);
         } else {
-            setActiveParent("dashboards");
-            setOpenDropdown("dashboards");
+            setActiveParent("home");
+            setOpenDropdown("home");
         }
     }, [pathName]);
 
     return (
         <>
             {menuList.map(({ dropdownMenu, id, name, path, icon }) => {
+                const menuKey = name.toLowerCase().split(' ')[0];
                 return (
                     <li
                         key={id}
-                        onClick={(e) => handleMainMenu(e, name.split(' ')[0])}
-                        className={`nxl-item nxl-hasmenu ${activeParent === name.split(' ')[0] ? "active nxl-trigger" : ""}`}
+                        onClick={(e) => handleMainMenu(e, menuKey)}
+                        className={`nxl-item nxl-hasmenu ${activeParent === menuKey ? "active nxl-trigger" : ""}`}
                     >
                         <Link href={path} className="nxl-link text-capitalize">
                             <span className="nxl-micon"> {getIcon(icon)} </span>
@@ -61,12 +62,12 @@ const Menus = () => {
                                 <FiChevronRight />
                             </span>
                         </Link>
-                        <ul className={`nxl-submenu ${openDropdown === name.split(' ')[0] ? "nxl-menu-visible" : "nxl-menu-hidden"}`}>
+                        <ul className={`nxl-submenu ${openDropdown === menuKey ? "nxl-menu-visible" : "nxl-menu-hidden"}`}>
                             {dropdownMenu.map(({ id, name, path, subdropdownMenu, target }) => {
                                 const x = name;
                                 return (
                                     <Fragment key={id}>
-                                        {subdropdownMenu.length ? (
+                                        {subdropdownMenu && subdropdownMenu.length ? (
                                             <li
                                                 className={`nxl-item nxl-hasmenu ${activeChild === name ? "active" : ""}`}
                                                 onClick={(e) => handleDropdownMenu(e, x)}
