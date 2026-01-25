@@ -4,6 +4,14 @@
 Fellowship 360 is a comprehensive church management dashboard built on Next.js 14 (App Router). This project was converted from the Duralux admin template to serve as the UI foundation for the Fellowship 360 product.
 
 ## Recent Changes
+- **Jan 25, 2026**: Modern design system with lime green accent
+  - Lime green (#c8f542) as primary accent color throughout the app
+  - Modern card styling with 16px border radius and soft shadows
+  - ContactCard component for grid/list contact views
+  - Enhanced ChurchOverviewStatistics with trend badges and gradient progress bars
+  - Sidebar active/hover states updated to use lime green
+  - Grid/list toggle with lime accent on contacts page
+
 - **Jan 25, 2026**: Enhanced sidebar navigation
   - Collapsible icon-only mode with localStorage persistence
   - Section groupings (Main, Communication, Operations, Administration)
@@ -54,12 +62,19 @@ Fellowship 360 is a comprehensive church management dashboard built on Next.js 1
 - **Icons**: Feather Icons, React Icons
 
 ### Reusable Components
+- `ContactCard.jsx` - Contact display card with avatar, status badges, and action buttons
 - `Skeleton.jsx` - Loading skeleton components (Card, KPI, Table, Chart, Avatar, Text variants)
 - `Toast.jsx` - Toast notification system with ToastProvider context
 - `CommandPalette.jsx` - Global search with Cmd+K keyboard shortcut
 - `EmptyState.jsx` - Empty state displays with custom illustrations
 - `CsvExport.jsx` - CSV export utility for data tables
 - `OnboardingTour.jsx` - Step-by-step onboarding tour for new users
+
+### Design System
+- **Primary Accent**: Lime green (#c8f542)
+- **Card Styling**: 16px border radius, subtle shadows (0 2px 8px rgba(0,0,0,0.04))
+- **Status Colors**: Semantic (green for members, blue for visitors, etc.)
+- **Progress Bars**: Lime green gradient
 
 ### Directory Structure
 ```

@@ -90,14 +90,25 @@ const ContactsPage = () => {
                                 <span style={{ fontSize: '13px', color: '#737373' }}>{filteredContacts.length} contacts</span>
                                 <div className='btn-group'>
                                     <button 
-                                        className={`btn btn-sm ${viewMode === 'grid' ? 'btn-dark' : 'btn-outline-secondary'}`}
+                                        className="btn btn-sm"
                                         onClick={() => setViewMode('grid')}
+                                        style={{
+                                            background: viewMode === 'grid' ? '#c8f542' : 'transparent',
+                                            color: viewMode === 'grid' ? '#171717' : '#737373',
+                                            border: '1px solid #e5e5e5',
+                                            borderRight: 'none',
+                                        }}
                                     >
                                         <FiGrid size={16} />
                                     </button>
                                     <button 
-                                        className={`btn btn-sm ${viewMode === 'list' ? 'btn-dark' : 'btn-outline-secondary'}`}
+                                        className="btn btn-sm"
                                         onClick={() => setViewMode('list')}
+                                        style={{
+                                            background: viewMode === 'list' ? '#c8f542' : 'transparent',
+                                            color: viewMode === 'list' ? '#171717' : '#737373',
+                                            border: '1px solid #e5e5e5',
+                                        }}
                                     >
                                         <FiList size={16} />
                                     </button>
