@@ -1,33 +1,21 @@
 'use client'
 import React, { useContext, useEffect, useRef, useState } from 'react'
-import { FiAlignLeft, FiArrowLeft, FiArrowRight, FiMaximize, FiMinimize, FiMoon, FiSun, } from "react-icons/fi";
+import { FiAlignLeft, FiArrowRight, FiMaximize, FiMinimize, FiMoon, FiSun, } from "react-icons/fi";
 import LanguagesModal from './LanguagesModal';
 import NotificationsModal from './NotificationsModal';
 import ProfileModal from './ProfileModal';
 import SearchModal from './SearchModal';
 import TimesheetsModal from './TimesheetsModal';
-import HeaderDropDownModal from './HeaderDropDownModal';
-import MegaMenu from './megaManu/MegaMenu';
 import { NavigationContext } from '@/contentApi/navigationProvider';
 
 
 const Header = () => {
     const { navigationOpen, setNavigationOpen } = useContext(NavigationContext)
-    const [openMegaMenu, setOpenMegaMenu] = useState(false)
     const [navigationExpend, setNavigationExpend] = useState(false)
     const [isDarkMode, setIsDarkMode] = useState(false)
     const miniButtonRef = useRef(null);
     const expendButtonRef = useRef(null);
 
-
-    useEffect(() => {
-        if (openMegaMenu) {
-            document.documentElement.classList.add("nxl-lavel-mega-menu-open")
-        }
-        else {
-            document.documentElement.classList.remove("nxl-lavel-mega-menu-open")
-        }
-    }, [openMegaMenu])
 
     const handleThemeMode = (type) => {
         if (type === "dark") {
@@ -175,23 +163,6 @@ const Header = () => {
                         <a href="#" onClick={(e) => handleNavigationExpendDown(e, "show")} id="menu-expend-button" ref={expendButtonRef} style={{ display: navigationExpend ? "none" : "block" }}>
                             <FiArrowRight size={24} />
                         </a>
-                    </div>
-                    <div className="nxl-lavel-mega-menu-toggle d-flex d-lg-none">
-                        <a href="#" onClick={(e) => {e.preventDefault(), setOpenMegaMenu(true)}} id="nxl-lavel-mega-menu-open">
-                            <FiAlignLeft size={24} />
-                        </a>
-                    </div>
-                    <div className="nxl-drp-link nxl-lavel-mega-menu">
-                        <div className="nxl-lavel-mega-menu-toggle d-flex d-lg-none">
-                            <a href="#" onClick={(e) => {e.preventDefault(), setOpenMegaMenu(false)}} id="nxl-lavel-mega-menu-hide">
-                                <i className="me-2"><FiArrowLeft /></i>
-                                <span>Back</span>
-                            </a>
-                        </div>
-                        <div className="nxl-lavel-mega-menu-wrapper d-flex gap-3">
-                            <HeaderDropDownModal />
-                            <MegaMenu />
-                        </div>
                     </div>
                 </div>
                 <div className="header-right ms-auto">
