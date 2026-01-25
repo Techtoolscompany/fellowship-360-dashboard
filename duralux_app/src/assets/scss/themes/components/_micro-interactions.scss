@@ -1,0 +1,278 @@
+/* Micro-interactions for world-class UI feel */
+
+/* Smooth transitions for all interactive elements */
+* {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Card hover effects */
+.card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  }
+}
+
+/* Button interactions */
+.btn {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  
+  &::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: width 0.4s ease, height 0.4s ease;
+  }
+  
+  &:active::after {
+    width: 200px;
+    height: 200px;
+  }
+  
+  &:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+  
+  &:active:not(:disabled) {
+    transform: translateY(0);
+  }
+}
+
+/* Table row hover */
+.table tbody tr {
+  transition: background-color 0.15s ease;
+  
+  &:hover {
+    background-color: rgba(59, 130, 246, 0.05);
+  }
+}
+
+/* Badge pulse animation for notifications */
+.badge-pulse {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Progress bar animation */
+.progress-bar {
+  transition: width 0.6s ease;
+}
+
+/* Icon hover effects */
+.nxl-head-link {
+  transition: all 0.2s ease;
+  
+  &:hover {
+    transform: scale(1.1);
+    color: var(--bs-primary);
+  }
+}
+
+/* Navigation item transitions */
+.nxl-link {
+  transition: all 0.2s ease;
+  
+  &:hover {
+    padding-left: 1.25rem;
+  }
+}
+
+/* Dropdown animations */
+.dropdown-menu {
+  animation: fadeInDown 0.2s ease;
+  transform-origin: top;
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Form input focus effects */
+.form-control, .form-select {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  
+  &:focus {
+    border-color: var(--bs-primary);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+}
+
+/* Checkbox and radio animations */
+.form-check-input {
+  transition: all 0.15s ease;
+  
+  &:checked {
+    animation: checkBounce 0.3s ease;
+  }
+}
+
+@keyframes checkBounce {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Avatar hover effects */
+.avatar, [class*="avatar-"] {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  
+  &:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+}
+
+/* KPI card number animation */
+.kpi-value {
+  display: inline-block;
+  transition: transform 0.3s ease;
+}
+
+/* Skeleton shimmer animation */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+/* Page transition */
+.main-content {
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Kanban card drag preview */
+.kanban-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: grab;
+  
+  &:hover {
+    transform: rotate(1deg) scale(1.02);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
+  }
+  
+  &:active {
+    cursor: grabbing;
+    transform: rotate(2deg) scale(1.05);
+    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.18);
+  }
+}
+
+/* Smooth scroll */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Focus visible for accessibility */
+*:focus-visible {
+  outline: 2px solid var(--bs-primary);
+  outline-offset: 2px;
+}
+
+/* Tooltip fade */
+.tooltip {
+  animation: tooltipFade 0.15s ease;
+}
+
+@keyframes tooltipFade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Theme toggle animation */
+.theme-toggle-btn {
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: rotate(15deg);
+  }
+  
+  svg {
+    transition: transform 0.3s ease;
+  }
+}
+
+/* Badge scale on appear */
+.badge {
+  animation: badgeAppear 0.2s ease;
+}
+
+@keyframes badgeAppear {
+  from {
+    transform: scale(0);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+/* Chart container fade in */
+.apexcharts-canvas {
+  animation: chartFadeIn 0.5s ease;
+}
+
+@keyframes chartFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

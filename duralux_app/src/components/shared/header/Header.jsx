@@ -15,6 +15,7 @@ const Header = () => {
     const { navigationOpen, setNavigationOpen } = useContext(NavigationContext)
     const [openMegaMenu, setOpenMegaMenu] = useState(false)
     const [navigationExpend, setNavigationExpend] = useState(false)
+    const [isDarkMode, setIsDarkMode] = useState(false)
     const miniButtonRef = useRef(null);
     const expendButtonRef = useRef(null);
 
@@ -31,11 +32,29 @@ const Header = () => {
     const handleThemeMode = (type) => {
         if (type === "dark") {
             document.documentElement.classList.add("app-skin-dark")
+            document.documentElement.classList.add("app-navigation-dark")
+            document.documentElement.classList.add("app-header-dark")
             localStorage.setItem("skinTheme", "dark");
+            localStorage.setItem("navigationTheme", "dark");
+            localStorage.setItem("headerTheme", "dark");
+            setIsDarkMode(true)
         }
         else {
             document.documentElement.classList.remove("app-skin-dark")
+            document.documentElement.classList.remove("app-navigation-dark")
+            document.documentElement.classList.remove("app-header-dark")
             localStorage.setItem("skinTheme", "light");
+            localStorage.setItem("navigationTheme", "light");
+            localStorage.setItem("headerTheme", "light");
+            setIsDarkMode(false)
+        }
+    }
+
+    const toggleTheme = () => {
+        if (isDarkMode) {
+            handleThemeMode("light")
+        } else {
+            handleThemeMode("dark")
         }
     }
 
@@ -63,7 +82,11 @@ const Header = () => {
         handleResize();
 
         const savedSkinTheme = localStorage.getItem("skinTheme");
-        handleThemeMode(savedSkinTheme)
+        if (savedSkinTheme === "dark") {
+            handleThemeMode("dark")
+        } else {
+            setIsDarkMode(false)
+        }
 
         return () => {
             window.removeEventListener('resize', handleResize);
@@ -129,9 +152,7 @@ const Header = () => {
     return (
         <header className="nxl-header">
             <div className="header-wrapper">
-                {/* <!--! [Start] Header Left !--> */}
                 <div className="header-left d-flex align-items-center gap-4">
-                    {/* <!--! [Start] nxl-head-mobile-toggler !--> */}
                     <a href="#" className="nxl-head-mobile-toggler" onClick={(e) => {e.preventDefault(), setNavigationOpen(true)}} id="mobile-collapse">
                         <div className={`hamburger hamburger--arrowturn ${navigationOpen ? "is-active" : ""}`}>
                             <div className="hamburger-box">
@@ -139,8 +160,6 @@ const Header = () => {
                             </div>
                         </div>
                     </a>
-                    {/* <!--! [Start] nxl-head-mobile-toggler !-->
-                    <!--! [Start] nxl-navigation-toggle !--> */}
                     <div className="nxl-navigation-toggle navigation-up-1600">
                         <a href="#" onClick={(e) => handleNavigationExpendUp(e, "show")} id="menu-mini-button" ref={miniButtonRef} style={{ display: navigationExpend ? "none" : "block" }}>
                             <FiAlignLeft size={24} />
@@ -157,15 +176,11 @@ const Header = () => {
                             <FiArrowRight size={24} />
                         </a>
                     </div>
-                    {/* <!--! [End] nxl-navigation-toggle !-->
-                    <!--! [Start] nxl-lavel-mega-menu-toggle !--> */}
                     <div className="nxl-lavel-mega-menu-toggle d-flex d-lg-none">
                         <a href="#" onClick={(e) => {e.preventDefault(), setOpenMegaMenu(true)}} id="nxl-lavel-mega-menu-open">
                             <FiAlignLeft size={24} />
                         </a>
                     </div>
-                    {/* <!--! [End] nxl-lavel-mega-menu-toggle !-->
-                    <!--! [Start] nxl-lavel-mega-menu !--> */}
                     <div className="nxl-drp-link nxl-lavel-mega-menu">
                         <div className="nxl-lavel-mega-menu-toggle d-flex d-lg-none">
                             <a href="#" onClick={(e) => {e.preventDefault(), setOpenMegaMenu(false)}} id="nxl-lavel-mega-menu-hide">
@@ -173,15 +188,12 @@ const Header = () => {
                                 <span>Back</span>
                             </a>
                         </div>
-                        {/* <!--! [Start] nxl-lavel-mega-menu-wrapper !--> */}
                         <div className="nxl-lavel-mega-menu-wrapper d-flex gap-3">
                             <HeaderDropDownModal />
                             <MegaMenu />
                         </div>
                     </div>
                 </div>
-                {/* <!--! [End] Header Left !-->
-                <!--! [Start] Header Right !--> */}
                 <div className="header-right ms-auto">
                     <div className="d-flex align-items-center">
                         <SearchModal />
@@ -195,11 +207,13 @@ const Header = () => {
                             </div>
                         </div>
                         <div className="nxl-h-item dark-light-theme">
-                            <div className="nxl-head-link me-0 dark-button" onClick={() => handleThemeMode("dark")}>
-                                <FiMoon size={20} />
-                            </div>
-                            <div className="nxl-head-link me-0 light-button" onClick={() => handleThemeMode("light")} style={{ display: "none" }}>
-                                <FiSun size={20} />
+                            <div 
+                                className="nxl-head-link me-0 theme-toggle-btn" 
+                                onClick={toggleTheme}
+                                style={{ cursor: 'pointer' }}
+                                title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                            >
+                                {isDarkMode ? <FiSun size={20} /> : <FiMoon size={20} />}
                             </div>
                         </div>
                         <TimesheetsModal />
@@ -207,7 +221,6 @@ const Header = () => {
                         <ProfileModal />
                     </div>
                 </div>
-                {/* <!--! [End] Header Right !--> */}
             </div>
         </header>
     )

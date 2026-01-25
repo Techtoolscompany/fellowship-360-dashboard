@@ -5,8 +5,9 @@ import PageHeader from '@/components/shared/pageHeader/PageHeader'
 import PageHeaderDate from '@/components/shared/pageHeader/PageHeaderDate'
 import Footer from '@/components/shared/Footer'
 import CardHeader from '@/components/shared/CardHeader'
-import useCardTitleActions from '@/hooks/useCardTitleActions'
-import { FiFilter, FiDownload, FiDollarSign, FiTrendingUp, FiUsers, FiPieChart } from 'react-icons/fi'
+import CsvExportButton from '@/components/shared/CsvExport'
+import { useToast } from '@/components/shared/Toast'
+import { FiFilter, FiDollarSign, FiTrendingUp, FiUsers, FiPieChart } from 'react-icons/fi'
 
 const ReactApexChart = dynamic(() => import('react-apexcharts'), { ssr: false })
 
@@ -71,7 +72,11 @@ const kpiStats = [
 ]
 
 const DonationsPage = () => {
-    const chartActions = useCardTitleActions()
+    const toast = useToast()
+
+    const handleExport = () => {
+        toast.success('Donations exported successfully!')
+    }
 
     return (
         <>
@@ -178,7 +183,11 @@ const DonationsPage = () => {
                                 <h5 className='card-title mb-0'>Recent Donations</h5>
                                 <div className='d-flex gap-2'>
                                     <button className='btn btn-sm btn-outline-secondary'><FiFilter size={14} /> Filter</button>
-                                    <button className='btn btn-sm btn-outline-secondary'><FiDownload size={14} /> Export</button>
+                                    <CsvExportButton 
+                                        data={donations} 
+                                        filename="donations" 
+                                        onExport={handleExport}
+                                    />
                                 </div>
                             </div>
                             <div className='card-body p-0'>

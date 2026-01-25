@@ -1,10 +1,12 @@
 'use client'
-import React from 'react'
+import React, { useState } from 'react'
 import dynamic from 'next/dynamic'
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
 import PageHeader from '@/components/shared/pageHeader/PageHeader'
 import Footer from '@/components/shared/Footer'
 import CardHeader from '@/components/shared/CardHeader'
-import { FiPlus, FiMoreVertical, FiCalendar, FiUser, FiTrendingUp, FiTarget, FiUsers, FiCheckCircle } from 'react-icons/fi'
+import { FiPlus, FiCalendar, FiUser, FiUsers, FiCheckCircle, FiTarget, FiMoreVertical } from 'react-icons/fi'
+import { useToast } from '@/components/shared/Toast'
 
 const ReactApexChart = dynamic(() => import('react-apexcharts'), { ssr: false })
 
@@ -49,39 +51,107 @@ const weeklyActivityData = {
     }
 }
 
-const pipelineColumns = [
-    { id: 'new', title: 'New Visitor', color: 'info', count: 12 },
-    { id: 'attempted', title: 'Attempted', color: 'warning', count: 8 },
-    { id: 'connected', title: 'Connected', color: 'primary', count: 6 },
-    { id: 'scheduled', title: 'Scheduled Visit', color: 'secondary', count: 5 },
-    { id: 'joined', title: 'Joined', color: 'success', count: 4 },
-    { id: 'inactive', title: 'Inactive', color: 'danger', count: 3 },
-]
-
-const pipelineCards = {
-    new: [
-        { id: 1, name: 'Jennifer Martinez', lastContact: 'Today', owner: 'Pastor Mike', nextAction: 'Jan 28', priority: 'high' },
-        { id: 2, name: 'Carlos Rodriguez', lastContact: 'Yesterday', owner: 'Sarah L.', nextAction: 'Jan 29', priority: 'medium' },
-    ],
-    attempted: [
-        { id: 3, name: 'Amanda Chen', lastContact: '2 days ago', owner: 'Pastor Mike', nextAction: 'Jan 27', priority: 'high' },
-    ],
-    connected: [
-        { id: 4, name: 'David Kim', lastContact: '3 days ago', owner: 'John D.', nextAction: 'Jan 30', priority: 'medium' },
-        { id: 5, name: 'Lisa Thompson', lastContact: '1 week ago', owner: 'Sarah L.', nextAction: 'Jan 28', priority: 'low' },
-    ],
-    scheduled: [
-        { id: 6, name: 'Mark Wilson', lastContact: 'Today', owner: 'Pastor Mike', nextAction: 'Jan 26', priority: 'high' },
-    ],
-    joined: [
-        { id: 7, name: 'Rachel Green', lastContact: '2 weeks ago', owner: 'John D.', nextAction: 'Feb 1', priority: 'low' },
-    ],
-    inactive: [
-        { id: 8, name: 'Tom Bradley', lastContact: '1 month ago', owner: 'Sarah L.', nextAction: 'Overdue', priority: 'high' },
-    ],
+const initialColumns = {
+    new: {
+        id: 'new',
+        title: 'New Visitor',
+        color: 'info',
+        items: [
+            { id: 'card-1', name: 'Jennifer Martinez', lastContact: 'Today', owner: 'Pastor Mike', nextAction: 'Jan 28', priority: 'high' },
+            { id: 'card-2', name: 'Carlos Rodriguez', lastContact: 'Yesterday', owner: 'Sarah L.', nextAction: 'Jan 29', priority: 'medium' },
+            { id: 'card-9', name: 'Emily Watson', lastContact: '3 days ago', owner: 'John D.', nextAction: 'Jan 30', priority: 'low' },
+        ]
+    },
+    attempted: {
+        id: 'attempted',
+        title: 'Attempted',
+        color: 'warning',
+        items: [
+            { id: 'card-3', name: 'Amanda Chen', lastContact: '2 days ago', owner: 'Pastor Mike', nextAction: 'Jan 27', priority: 'high' },
+            { id: 'card-10', name: 'Robert Kim', lastContact: '4 days ago', owner: 'Sarah L.', nextAction: 'Jan 28', priority: 'medium' },
+        ]
+    },
+    connected: {
+        id: 'connected',
+        title: 'Connected',
+        color: 'primary',
+        items: [
+            { id: 'card-4', name: 'David Kim', lastContact: '3 days ago', owner: 'John D.', nextAction: 'Jan 30', priority: 'medium' },
+            { id: 'card-5', name: 'Lisa Thompson', lastContact: '1 week ago', owner: 'Sarah L.', nextAction: 'Jan 28', priority: 'low' },
+        ]
+    },
+    scheduled: {
+        id: 'scheduled',
+        title: 'Scheduled Visit',
+        color: 'secondary',
+        items: [
+            { id: 'card-6', name: 'Mark Wilson', lastContact: 'Today', owner: 'Pastor Mike', nextAction: 'Jan 26', priority: 'high' },
+        ]
+    },
+    joined: {
+        id: 'joined',
+        title: 'Joined',
+        color: 'success',
+        items: [
+            { id: 'card-7', name: 'Rachel Green', lastContact: '2 weeks ago', owner: 'John D.', nextAction: 'Feb 1', priority: 'low' },
+        ]
+    },
+    inactive: {
+        id: 'inactive',
+        title: 'Inactive',
+        color: 'danger',
+        items: [
+            { id: 'card-8', name: 'Tom Bradley', lastContact: '1 month ago', owner: 'Sarah L.', nextAction: 'Overdue', priority: 'high' },
+        ]
+    },
 }
 
 const PipelinePage = () => {
+    const [columns, setColumns] = useState(initialColumns)
+    const toast = useToast()
+
+    const onDragEnd = (result) => {
+        const { source, destination } = result
+
+        if (!destination) return
+
+        if (source.droppableId === destination.droppableId && source.index === destination.index) {
+            return
+        }
+
+        const sourceColumn = columns[source.droppableId]
+        const destColumn = columns[destination.droppableId]
+        const sourceItems = [...sourceColumn.items]
+        const destItems = source.droppableId === destination.droppableId ? sourceItems : [...destColumn.items]
+
+        const [removed] = sourceItems.splice(source.index, 1)
+
+        if (source.droppableId === destination.droppableId) {
+            sourceItems.splice(destination.index, 0, removed)
+            setColumns({
+                ...columns,
+                [source.droppableId]: {
+                    ...sourceColumn,
+                    items: sourceItems,
+                },
+            })
+        } else {
+            destItems.splice(destination.index, 0, removed)
+            setColumns({
+                ...columns,
+                [source.droppableId]: {
+                    ...sourceColumn,
+                    items: sourceItems,
+                },
+                [destination.droppableId]: {
+                    ...destColumn,
+                    items: destItems,
+                },
+            })
+            toast.success(`Moved ${removed.name} to ${destColumn.title}`)
+        }
+    }
+
     return (
         <>
             <PageHeader>
@@ -151,41 +221,78 @@ const PipelinePage = () => {
                 </div>
 
                 <div className='card mb-4'>
-                    <CardHeader title="Pipeline Board" />
-                    <div className='card-body'>
-                        <div className='row' style={{ overflowX: 'auto', flexWrap: 'nowrap', paddingBottom: '10px' }}>
-                            {pipelineColumns.map((column) => (
-                                <div key={column.id} className='col-xl-2 col-lg-3 col-md-4' style={{ minWidth: '250px' }}>
-                                    <div className={`rounded-top p-2 bg-soft-${column.color} text-center`}>
-                                        <span className='fw-bold fs-13'>{column.title}</span>
-                                        <span className={`badge bg-${column.color} ms-2`}>{column.count}</span>
-                                    </div>
-                                    <div className='border border-top-0 rounded-bottom p-2' style={{ minHeight: '350px', backgroundColor: '#fafafa' }}>
-                                        {pipelineCards[column.id]?.map((card) => (
-                                            <div key={card.id} className='card mb-2 shadow-sm'>
-                                                <div className='card-body p-3'>
-                                                    <div className='d-flex justify-content-between align-items-start mb-2'>
-                                                        <h6 className='fs-13 fw-semibold mb-0'>{card.name}</h6>
-                                                        <span className={`badge bg-soft-${card.priority === 'high' ? 'danger' : card.priority === 'medium' ? 'warning' : 'success'} text-${card.priority === 'high' ? 'danger' : card.priority === 'medium' ? 'warning' : 'success'}`} style={{ fontSize: '9px' }}>
-                                                            {card.priority}
-                                                        </span>
-                                                    </div>
-                                                    <p className='text-muted fs-11 mb-2'>Last contact: {card.lastContact}</p>
-                                                    <div className='d-flex justify-content-between align-items-center'>
-                                                        <span className='fs-11 text-muted'>
-                                                            <FiUser size={10} className='me-1' />{card.owner}
-                                                        </span>
-                                                        <span className={`fs-11 ${card.nextAction === 'Overdue' ? 'text-danger fw-bold' : 'text-muted'}`}>
-                                                            <FiCalendar size={10} className='me-1' />{card.nextAction}
-                                                        </span>
-                                                    </div>
+                    <div className='card-header d-flex align-items-center justify-content-between'>
+                        <h5 className='card-title mb-0'>Pipeline Board</h5>
+                        <span className='text-muted fs-11'>Drag and drop cards to move visitors between stages</span>
+                    </div>
+                    <div className='card-body' style={{ overflowX: 'auto' }}>
+                        <DragDropContext onDragEnd={onDragEnd}>
+                            <div className='d-flex gap-3' style={{ minWidth: 'max-content' }}>
+                                {Object.entries(columns).map(([columnId, column]) => (
+                                    <div key={columnId} style={{ minWidth: '260px', width: '260px' }}>
+                                        <div className={`rounded-top p-2 bg-soft-${column.color} text-center`}>
+                                            <span className='fw-bold fs-13'>{column.title}</span>
+                                            <span className={`badge bg-${column.color} ms-2`}>{column.items.length}</span>
+                                        </div>
+                                        <Droppable droppableId={columnId}>
+                                            {(provided, snapshot) => (
+                                                <div
+                                                    ref={provided.innerRef}
+                                                    {...provided.droppableProps}
+                                                    className='border border-top-0 rounded-bottom p-2'
+                                                    style={{ 
+                                                        minHeight: '400px', 
+                                                        backgroundColor: snapshot.isDraggingOver ? '#e0e7ff' : '#fafafa',
+                                                        transition: 'background-color 0.2s ease',
+                                                    }}
+                                                >
+                                                    {column.items.map((card, index) => (
+                                                        <Draggable key={card.id} draggableId={card.id} index={index}>
+                                                            {(provided, snapshot) => (
+                                                                <div
+                                                                    ref={provided.innerRef}
+                                                                    {...provided.draggableProps}
+                                                                    {...provided.dragHandleProps}
+                                                                    className='card mb-2 kanban-card'
+                                                                    style={{
+                                                                        ...provided.draggableProps.style,
+                                                                        boxShadow: snapshot.isDragging 
+                                                                            ? '0 8px 25px rgba(0, 0, 0, 0.15)' 
+                                                                            : '0 1px 3px rgba(0, 0, 0, 0.08)',
+                                                                        transform: snapshot.isDragging 
+                                                                            ? `${provided.draggableProps.style?.transform} rotate(3deg)` 
+                                                                            : provided.draggableProps.style?.transform,
+                                                                    }}
+                                                                >
+                                                                    <div className='card-body p-3'>
+                                                                        <div className='d-flex justify-content-between align-items-start mb-2'>
+                                                                            <h6 className='fs-13 fw-semibold mb-0'>{card.name}</h6>
+                                                                            <span className={`badge bg-soft-${card.priority === 'high' ? 'danger' : card.priority === 'medium' ? 'warning' : 'success'} text-${card.priority === 'high' ? 'danger' : card.priority === 'medium' ? 'warning' : 'success'}`} style={{ fontSize: '9px' }}>
+                                                                                {card.priority}
+                                                                            </span>
+                                                                        </div>
+                                                                        <p className='text-muted fs-11 mb-2'>Last contact: {card.lastContact}</p>
+                                                                        <div className='d-flex justify-content-between align-items-center'>
+                                                                            <span className='fs-11 text-muted'>
+                                                                                <FiUser size={10} className='me-1' />{card.owner}
+                                                                            </span>
+                                                                            <span className={`fs-11 ${card.nextAction === 'Overdue' ? 'text-danger fw-bold' : 'text-muted'}`}>
+                                                                                <FiCalendar size={10} className='me-1' />{card.nextAction}
+                                                                            </span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </Draggable>
+                                                    ))}
+                                                    {provided.placeholder}
                                                 </div>
-                                            </div>
-                                        ))}
+                                            )}
+                                        </Droppable>
                                     </div>
-                                </div>
-                            ))}
-                        </div>
+                                ))}
+                            </div>
+                        </DragDropContext>
                     </div>
                 </div>
             </div>
