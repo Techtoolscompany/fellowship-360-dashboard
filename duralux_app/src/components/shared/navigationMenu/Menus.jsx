@@ -1,20 +1,35 @@
 'use client'
 import React, { Fragment, useEffect, useState } from "react";
 import { FiChevronRight } from "react-icons/fi";
-import { menuList } from "@/utils/fackData/menuList";
+import { menuList, menuSections } from "@/utils/fackData/menuList";
 import getIcon from "@/utils/getIcon";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 
-const Menus = () => {
+const badgeData = {
+    'engage': { count: 5, type: 'primary' },
+    'comms': { count: 3, type: 'warning' },
+    'care': { count: 2, type: 'danger' },
+};
+
+const Menus = ({ isCollapsed = false }) => {
     const [openDropdown, setOpenDropdown] = useState(null);
     const [openSubDropdown, setOpenSubDropdown] = useState(null);
     const [activeParent, setActiveParent] = useState("");
     const [activeChild, setActiveChild] = useState("");
+    const [hoveredItem, setHoveredItem] = useState(null);
     const pathName = usePathname();
+    const router = useRouter();
 
-    const handleMainMenu = (e, name, isSingleItem) => {
-        if (isSingleItem) return;
+    const handleMainMenu = (e, name, isSingleItem, directPath) => {
+        e.preventDefault();
+        if (isSingleItem) {
+            router.push(directPath);
+            return;
+        }
+        if (isCollapsed) {
+            return;
+        }
         if (openDropdown === name) {
             setOpenDropdown(null);
         } else {
@@ -36,42 +51,75 @@ const Menus = () => {
             const x = pathName.split("/");
             setActiveParent(x[1]);
             setActiveChild(x[2]);
-            setOpenDropdown(x[1]);
+            if (!isCollapsed) {
+                setOpenDropdown(x[1]);
+            }
             setOpenSubDropdown(x[2]);
         } else {
             setActiveParent("home");
-            setOpenDropdown("home");
+            if (!isCollapsed) {
+                setOpenDropdown("home");
+            }
         }
-    }, [pathName]);
+    }, [pathName, isCollapsed]);
 
-    return (
-        <>
-            {menuList.map(({ dropdownMenu, id, name, path, icon }) => {
-                const menuKey = name.toLowerCase().split(' ')[0];
-                const isSingleItem = !dropdownMenu || dropdownMenu.length <= 1;
-                const directPath = isSingleItem && dropdownMenu && dropdownMenu.length === 1 
-                    ? dropdownMenu[0].path 
-                    : (path !== "#" ? path : (dropdownMenu && dropdownMenu[0]?.path) || "/");
+    const getMenuItemsBySection = (sectionItems) => {
+        return menuList.filter(menu => sectionItems.includes(menu.name));
+    };
+
+    const renderMenuItem = ({ dropdownMenu, id, name, path, icon }) => {
+        const menuKey = name.toLowerCase().split(' ')[0];
+        const isSingleItem = !dropdownMenu || dropdownMenu.length <= 1;
+        const directPath = isSingleItem && dropdownMenu && dropdownMenu.length === 1 
+            ? dropdownMenu[0].path 
+            : (path !== "#" ? path : (dropdownMenu && dropdownMenu[0]?.path) || "/");
+        const badge = badgeData[menuKey];
+        const isHovered = hoveredItem === menuKey;
+        
+        return (
+            <li
+                key={id}
+                onClick={(e) => handleMainMenu(e, menuKey, isSingleItem, directPath)}
+                onMouseEnter={() => setHoveredItem(menuKey)}
+                onMouseLeave={() => setHoveredItem(null)}
+                className={`nxl-item ${!isSingleItem ? 'nxl-hasmenu' : ''} ${activeParent === menuKey ? "active nxl-trigger" : ""}`}
+            >
+                <a 
+                    href={isSingleItem ? directPath : undefined}
+                    onClick={(e) => e.preventDefault()}
+                    className="nxl-link text-capitalize"
+                    role={!isSingleItem ? "button" : undefined}
+                    aria-expanded={!isSingleItem ? openDropdown === menuKey : undefined}
+                >
+                    <span className="nxl-micon"> {getIcon(icon)} </span>
+                    <span className="nxl-mtext">
+                        {name}
+                    </span>
+                    {badge && !isCollapsed && (
+                        <span className={`nav-badge badge-${badge.type}`}>{badge.count}</span>
+                    )}
+                    {!isSingleItem && (
+                        <span className="nxl-arrow fs-16">
+                            <FiChevronRight />
+                        </span>
+                    )}
+                </a>
                 
-                return (
-                    <li
-                        key={id}
-                        onClick={(e) => handleMainMenu(e, menuKey, isSingleItem)}
-                        className={`nxl-item ${!isSingleItem ? 'nxl-hasmenu' : ''} ${activeParent === menuKey ? "active nxl-trigger" : ""}`}
-                    >
-                        <Link href={isSingleItem ? directPath : path} className="nxl-link text-capitalize">
-                            <span className="nxl-micon"> {getIcon(icon)} </span>
-                            <span className="nxl-mtext" style={{ paddingLeft: "2.5px" }}>
-                                {name}
-                            </span>
-                            {!isSingleItem && (
-                                <span className="nxl-arrow fs-16">
-                                    <FiChevronRight />
-                                </span>
-                            )}
-                        </Link>
-                        {!isSingleItem && dropdownMenu && (
-                            <ul className={`nxl-submenu ${openDropdown === menuKey ? "nxl-menu-visible" : "nxl-menu-hidden"}`}>
+                {isCollapsed && (
+                    <span className="sidebar-tooltip">{name}</span>
+                )}
+                
+                {!isSingleItem && dropdownMenu && (
+                            <ul className={`nxl-submenu ${
+                                isCollapsed 
+                                    ? (isHovered ? "nxl-menu-visible" : "nxl-menu-hidden")
+                                    : (openDropdown === menuKey ? "nxl-menu-visible" : "nxl-menu-hidden")
+                            }`}>
+                                {isCollapsed && (
+                                    <li className="nxl-item submenu-header">
+                                        <span className="submenu-title">{name}</span>
+                                    </li>
+                                )}
                                 {dropdownMenu.map(({ id, name, path, subdropdownMenu, target }) => {
                                     const x = name;
                                     return (
@@ -128,7 +176,20 @@ const Menus = () => {
                         )}
                     </li>
                 );
-            })}
+    };
+
+    return (
+        <>
+            {menuSections.map((section, sectionIndex) => (
+                <Fragment key={section.title}>
+                    {sectionIndex > 0 && (
+                        <li className="nxl-item nxl-caption">
+                            <label>{section.title}</label>
+                        </li>
+                    )}
+                    {getMenuItemsBySection(section.items).map(renderMenuItem)}
+                </Fragment>
+            ))}
         </>
     );
 };

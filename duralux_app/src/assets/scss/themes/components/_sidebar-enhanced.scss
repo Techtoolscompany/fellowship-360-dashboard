@@ -1,0 +1,524 @@
+// Enhanced Sidebar Styles for Fellowship 360 CRM
+// World-class navigation with modern UX principles
+
+// Variables
+$sidebar-width: 260px;
+$sidebar-collapsed-width: 72px;
+$sidebar-transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+$sidebar-bg: #ffffff;
+$sidebar-bg-dark: #1a1d21;
+$sidebar-border: #e9ecef;
+$sidebar-border-dark: #2d3238;
+$nav-item-height: 44px;
+$nav-item-radius: 8px;
+
+// Collapsible sidebar behavior
+.nxl-navigation {
+  width: $sidebar-width;
+  transition: width $sidebar-transition, transform $sidebar-transition;
+  background: $sidebar-bg;
+  border-right: 1px solid $sidebar-border;
+  
+  &.collapsed {
+    width: $sidebar-collapsed-width;
+    
+    .logo-lg { display: none; }
+    .logo-sm { display: flex !important; }
+    
+    .nxl-caption { 
+      opacity: 0;
+      height: 0;
+      padding: 0;
+      margin: 0;
+      overflow: hidden;
+    }
+    
+    .nxl-mtext { 
+      opacity: 0;
+      width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    
+    .nxl-arrow { opacity: 0; width: 0; }
+    
+    .nxl-link {
+      justify-content: center;
+      padding: 0 !important;
+      
+      .nxl-micon {
+        margin: 0;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+      }
+    }
+    
+    .nxl-submenu {
+      position: absolute;
+      left: $sidebar-collapsed-width;
+      top: 0;
+      min-width: 200px;
+      background: $sidebar-bg;
+      border-radius: $nav-item-radius;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
+      padding: 8px;
+      z-index: 1000;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateX(-10px);
+      transition: all 0.2s ease;
+      
+      &.nxl-menu-visible {
+        opacity: 1;
+        visibility: visible;
+        transform: translateX(0);
+      }
+    }
+    
+    .nxl-item.nxl-hasmenu:hover .nxl-submenu {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(0);
+    }
+    
+    .sidebar-collapse-btn {
+      transform: rotate(180deg);
+    }
+  }
+}
+
+// Logo area
+.m-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid $sidebar-border;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 64px;
+  
+  .b-brand {
+    display: flex;
+    align-items: center;
+    text-decoration: none;
+    
+    .logo-sm { display: none; }
+  }
+}
+
+// Sidebar collapse button
+.sidebar-collapse-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid $sidebar-border;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #6c757d;
+  
+  &:hover {
+    background: #f8f9fa;
+    color: #3b82f6;
+    border-color: #3b82f6;
+  }
+}
+
+// Navigation content
+.navbar-content {
+  padding: 12px;
+  height: calc(100vh - 64px);
+}
+
+// Navigation list
+.nxl-navbar {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+// Section captions/dividers
+.nxl-caption {
+  padding: 16px 12px 8px;
+  margin-top: 8px;
+  transition: all $sidebar-transition;
+  
+  &:first-child {
+    margin-top: 0;
+    padding-top: 8px;
+  }
+  
+  label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #9ca3af;
+  }
+}
+
+// Navigation items
+.nxl-item {
+  position: relative;
+  margin-bottom: 2px;
+  
+  &.active > .nxl-link,
+  &.nxl-trigger > .nxl-link {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    color: #ffffff !important;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
+    
+    .nxl-micon {
+      color: #ffffff;
+    }
+    
+    .nxl-arrow {
+      color: #ffffff;
+    }
+  }
+}
+
+// Navigation links
+.nxl-link {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: $nav-item-radius;
+  color: #4b5563;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  min-height: $nav-item-height;
+  position: relative;
+  
+  &:hover {
+    background: #f3f4f6;
+    color: #1f2937;
+    
+    .nxl-micon {
+      color: #3b82f6;
+    }
+  }
+  
+  .nxl-micon {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 12px;
+    color: #6b7280;
+    transition: color 0.15s ease;
+    flex-shrink: 0;
+    
+    svg {
+      width: 18px;
+      height: 18px;
+      stroke-width: 1.75;
+    }
+  }
+  
+  .nxl-mtext {
+    flex: 1;
+    transition: opacity 0.2s ease, width 0.2s ease;
+    white-space: nowrap;
+  }
+  
+  .nxl-arrow {
+    transition: transform 0.2s ease, opacity 0.2s ease;
+    color: #9ca3af;
+    
+    svg {
+      width: 16px;
+      height: 16px;
+    }
+  }
+}
+
+// Open state arrow rotation
+.nxl-item.nxl-trigger > .nxl-link .nxl-arrow,
+.nxl-item.active > .nxl-link .nxl-arrow {
+  transform: rotate(90deg);
+}
+
+// Submenu
+.nxl-submenu {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 0.3s ease;
+  
+  &.nxl-menu-visible {
+    max-height: 500px;
+  }
+  
+  &.nxl-menu-hidden {
+    max-height: 0;
+  }
+  
+  .nxl-item {
+    margin: 0;
+  }
+  
+  .nxl-link {
+    padding: 8px 12px 8px 46px;
+    font-size: 13px;
+    font-weight: 400;
+    min-height: 36px;
+    color: #6b7280;
+    
+    &:hover {
+      color: #3b82f6;
+      background: #f3f4f6;
+    }
+    
+    &::before {
+      content: '';
+      position: absolute;
+      left: 24px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #d1d5db;
+      transition: all 0.15s ease;
+    }
+    
+    &:hover::before {
+      background: #3b82f6;
+      transform: translateY(-50%) scale(1.2);
+    }
+  }
+  
+  .nxl-item.active .nxl-link {
+    color: #3b82f6;
+    font-weight: 500;
+    background: #eff6ff;
+    
+    &::before {
+      background: #3b82f6;
+    }
+  }
+}
+
+// Notification badges
+.nav-badge {
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 10px;
+  margin-left: 8px;
+  
+  &.badge-primary {
+    background: #dbeafe;
+    color: #1d4ed8;
+  }
+  
+  &.badge-danger {
+    background: #fee2e2;
+    color: #dc2626;
+  }
+  
+  &.badge-success {
+    background: #dcfce7;
+    color: #16a34a;
+  }
+  
+  &.badge-warning {
+    background: #fef3c7;
+    color: #d97706;
+  }
+}
+
+// Quick actions section
+.sidebar-quick-actions {
+  padding: 12px;
+  border-top: 1px solid $sidebar-border;
+  margin-top: auto;
+  
+  .quick-action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 16px;
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    color: #ffffff;
+    border: none;
+    border-radius: $nav-item-radius;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+    }
+    
+    svg {
+      width: 16px;
+      height: 16px;
+    }
+  }
+}
+
+// Tooltip for collapsed mode
+.sidebar-tooltip {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: #1f2937;
+  color: #ffffff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.15s ease;
+  z-index: 1000;
+  pointer-events: none;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 5px solid transparent;
+    border-right-color: #1f2937;
+  }
+}
+
+.nxl-navigation.collapsed .nxl-item:not(.nxl-hasmenu):hover .sidebar-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+// Dark mode styles
+[data-menu-styles="dark"] .nxl-navigation,
+.dark-mode .nxl-navigation {
+  background: $sidebar-bg-dark;
+  border-right-color: $sidebar-border-dark;
+  
+  .m-header {
+    border-bottom-color: $sidebar-border-dark;
+  }
+  
+  .sidebar-collapse-btn {
+    border-color: $sidebar-border-dark;
+    color: #9ca3af;
+    
+    &:hover {
+      background: #2d3238;
+    }
+  }
+  
+  .nxl-caption label {
+    color: #6b7280;
+  }
+  
+  .nxl-link {
+    color: #d1d5db;
+    
+    &:hover {
+      background: #2d3238;
+      color: #ffffff;
+    }
+    
+    .nxl-micon {
+      color: #9ca3af;
+    }
+  }
+  
+  .nxl-submenu {
+    background: $sidebar-bg-dark;
+    
+    .nxl-link {
+      color: #9ca3af;
+      
+      &:hover {
+        background: #2d3238;
+        color: #60a5fa;
+      }
+      
+      &::before {
+        background: #4b5563;
+      }
+    }
+    
+    .nxl-item.active .nxl-link {
+      background: rgba(59, 130, 246, 0.15);
+      color: #60a5fa;
+      
+      &::before {
+        background: #60a5fa;
+      }
+    }
+  }
+  
+  .sidebar-quick-actions {
+    border-top-color: $sidebar-border-dark;
+  }
+}
+
+// Mobile overlay enhancement
+.nxl-menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 999;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+// Smooth scrollbar styling
+.navbar-content {
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+    border-radius: 2px;
+    
+    &:hover {
+      background: #9ca3af;
+    }
+  }
+}
+
+// Focus states for accessibility
+.nxl-link:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+// Keyboard navigation indicator
+.nxl-item.keyboard-focused > .nxl-link {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+}

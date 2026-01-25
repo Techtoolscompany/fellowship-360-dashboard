@@ -244,3 +244,22 @@ export const menuList = [
         ]
     }
 ]
+
+export const menuSections = [
+    {
+        title: 'Main',
+        items: ['Home', 'People', 'Engage']
+    },
+    {
+        title: 'Communication',
+        items: ['Comms', 'Grace AI', 'Prayer & Care']
+    },
+    {
+        title: 'Operations',
+        items: ['Scheduling', 'Giving', 'Reports']
+    },
+    {
+        title: 'Administration',
+        items: ['Settings', 'Admin']
+    }
+]
