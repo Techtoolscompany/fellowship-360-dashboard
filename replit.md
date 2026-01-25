@@ -4,6 +4,15 @@
 Fellowship 360 is a comprehensive church management dashboard built on Next.js 14 (App Router). This project was converted from the Duralux admin template to serve as the UI foundation for the Fellowship 360 product.
 
 ## Recent Changes
+- **Jan 25, 2026**: Enhanced sidebar navigation
+  - Collapsible icon-only mode with localStorage persistence
+  - Section groupings (Main, Communication, Operations, Administration)
+  - Notification badges on Engage (5), Comms (3), and Care (2)
+  - Tooltips for collapsed mode navigation
+  - Quick Add modal for common CRM actions (7 actions with keyboard accessibility)
+  - Fixed navigation to use buttons instead of links for parent menus
+  - Added focus trapping and ARIA attributes for accessibility
+
 - **Jan 25, 2026**: World-class UI enhancements
   - Dark mode toggle with full theme persistence (navigation, header, skin)
   - Command palette with Cmd/Ctrl+K keyboard shortcut for quick navigation
