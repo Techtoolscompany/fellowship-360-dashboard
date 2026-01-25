@@ -4,6 +4,12 @@
 Fellowship 360 is a comprehensive church management dashboard built on Next.js 14 (App Router). This project was converted from the Duralux admin template to serve as the UI foundation for the Fellowship 360 product.
 
 ## Recent Changes
+- **Jan 25, 2026**: Enhanced pages with rich data visualizations and charts
+  - Giving/Donations: KPI cards, weekly giving trend area chart, fund breakdown donut, monthly bar chart
+  - Reports/Overview: Attendance trend, visitor conversion donut, monthly giving, engagement radar, growth metrics
+  - Engage/Pipeline: Funnel chart, weekly activity chart, enhanced Kanban with priority badges
+  - People/Segments: Ministry involvement table with engagement progress bars, distribution donut, status cards
+
 - **Jan 25, 2026**: Dashboard improvements and navigation fixes
   - Fixed menu navigation: single-item menus now link directly without dropdowns
   - Improved home dashboard with rich widgets (KPI cards, pipeline summary, events, donors, activity)
