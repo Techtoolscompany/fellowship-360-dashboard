@@ -18,9 +18,9 @@ const ChurchOverviewStatistics = () => {
                             <div 
                                 className="card stretch stretch-full"
                                 style={{
-                                    borderRadius: '16px',
-                                    border: '1px solid #f5f5f5',
-                                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                                    borderRadius: '24px',
+                                    border: '1px solid #e9e9e9',
+                                    background: '#f2f2f2',
                                 }}
                             >
                                 <div className="card-body" style={{ padding: '24px' }}>
@@ -28,24 +28,24 @@ const ChurchOverviewStatistics = () => {
                                         <div className="d-flex gap-3 align-items-center">
                                             <div 
                                                 style={{
-                                                    width: '52px',
-                                                    height: '52px',
-                                                    borderRadius: '12px',
-                                                    background: index % 2 === 0 ? 'linear-gradient(135deg, #c8f542 0%, #a8d435 100%)' : '#f5f5f5',
+                                                    width: '32px',
+                                                    height: '32px',
+                                                    borderRadius: '6px',
+                                                    background: index % 2 === 0 ? '#bbff00' : '#f2f2f2',
                                                     display: 'flex',
                                                     alignItems: 'center',
                                                     justifyContent: 'center',
-                                                    color: index % 2 === 0 ? '#171717' : '#525252',
+                                                    color: '#343330',
                                                 }}
                                             >
                                                 {React.cloneElement(getIcon(icon), { size: 22 })}
                                             </div>
                                             <div>
-                                                <div style={{ fontSize: '26px', fontWeight: 700, color: '#171717', lineHeight: 1.2 }}>
+                                                <div style={{ fontSize: '32px', fontWeight: 600, color: '#343330', lineHeight: 1.5 }}>
                                                     <span>{completed_number ? completed_number + "/" : ""}</span>
                                                     <span>{total_number}</span>
                                                 </div>
-                                                <h3 style={{ fontSize: '13px', fontWeight: 500, color: '#737373', margin: 0 }}>{title}</h3>
+                                                <h3 style={{ fontSize: '16px', fontWeight: 400, color: '#636363', margin: 0 }}>{title}</h3>
                                             </div>
                                         </div>
                                         <button 
@@ -65,9 +65,9 @@ const ChurchOverviewStatistics = () => {
                                             <FiMoreVertical size={16} />
                                         </button>
                                     </div>
-                                    <div style={{ paddingTop: '16px', borderTop: '1px solid #f5f5f5' }}>
+                                    <div style={{ paddingTop: '16px', borderTop: '1px solid #e9e9e9' }}>
                                         <div className="d-flex align-items-center justify-content-between mb-2">
-                                            <span style={{ fontSize: '12px', color: '#a3a3a3' }}>{title}</span>
+                                            <span style={{ fontSize: '12px', color: '#969696' }}>{title}</span>
                                             <div className="d-flex align-items-center gap-2">
                                                 <span 
                                                     style={{
@@ -85,15 +85,15 @@ const ChurchOverviewStatistics = () => {
                                                     {isPositiveTrend ? <FiTrendingUp size={12} /> : <FiTrendingDown size={12} />}
                                                     {progress_info}
                                                 </span>
-                                                <span style={{ fontSize: '12px', color: '#a3a3a3' }}>({progress})</span>
+                                                <span style={{ fontSize: '12px', color: '#969696' }}>({progress})</span>
                                             </div>
                                         </div>
                                         <div 
                                             style={{
-                                                height: '6px',
-                                                borderRadius: '100px',
-                                                background: '#f5f5f5',
-                                                overflow: 'hidden',
+                                                height: '8px',
+                                                borderRadius: '360px',
+                                                background: '#d9d9d9',
+                                                overflow: 'visible',
                                             }}
                                         >
                                             <div 
@@ -101,7 +101,7 @@ const ChurchOverviewStatistics = () => {
                                                     height: '100%',
                                                     width: progress,
                                                     borderRadius: '100px',
-                                                    background: 'linear-gradient(90deg, #c8f542, #a8d435)',
+                                                    background: '#bbff00',
                                                     transition: 'width 0.5s ease',
                                                 }}
                                             />
