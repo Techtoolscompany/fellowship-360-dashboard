@@ -55,8 +55,8 @@ const ContactCard = ({
                     style={{
                         width: '40px',
                         height: '40px',
-                        borderRadius: '10px',
-                        background: 'linear-gradient(135deg, #c8f542 0%, #a8d435 100%)',
+                        borderRadius: '360px',
+                        background: '#bbff00',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -106,8 +106,8 @@ const ContactCard = ({
                         style={{
                             width: '56px',
                             height: '56px',
-                            borderRadius: '14px',
-                            background: 'linear-gradient(135deg, #c8f542 0%, #a8d435 100%)',
+                            borderRadius: '360px',
+                            background: '#bbff00',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',

@@ -1,16 +1,17 @@
 // Enhanced Sidebar Styles for Fellowship 360 CRM
-// World-class navigation with modern UX principles
+// Based on Finance Dashboard Figma Design
 
 // Variables
 $sidebar-width: 260px;
-$sidebar-collapsed-width: 72px;
+$sidebar-collapsed-width: 96px;
 $sidebar-transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-$sidebar-bg: #ffffff;
+$sidebar-bg: #f2f2f2;
 $sidebar-bg-dark: #1a1d21;
-$sidebar-border: #e9ecef;
+$sidebar-border: #e9e9e9;
 $sidebar-border-dark: #2d3238;
-$nav-item-height: 44px;
+$nav-item-height: 48px;
 $nav-item-radius: 8px;
+$accent-lime: #bbff00;
 
 // Collapsible sidebar behavior
 .nxl-navigation {
@@ -167,16 +168,16 @@ $nav-item-radius: 8px;
   
   &.active > .nxl-link,
   &.nxl-trigger > .nxl-link {
-    background: #c8f542;
-    color: #171717 !important;
-    box-shadow: 0 4px 12px rgba(200, 245, 66, 0.35);
+    background: $accent-lime;
+    color: #343330 !important;
+    box-shadow: none;
     
     .nxl-micon {
-      color: #171717;
+      color: #343330;
     }
     
     .nxl-arrow {
-      color: #171717;
+      color: #343330;
     }
   }
 }
@@ -350,10 +351,10 @@ $nav-item-radius: 8px;
     gap: 8px;
     width: 100%;
     padding: 10px 16px;
-    background: #c8f542;
-    color: #171717;
+    background: $accent-lime;
+    color: #343330;
     border: none;
-    border-radius: $nav-item-radius;
+    border-radius: 360px;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
@@ -361,13 +362,46 @@ $nav-item-radius: 8px;
     
     &:hover {
       transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(200, 245, 66, 0.4);
-      background: #a8d435;
+      background: #99d600;
     }
     
     svg {
       width: 16px;
       height: 16px;
+    }
+  }
+}
+
+// Dark/Light Mode Toggle (Figma style)
+.theme-toggle-container {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 6px;
+  background: #343330;
+  border-radius: 360px;
+  
+  .theme-toggle-btn {
+    padding: 4px;
+    border-radius: 360px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    
+    &.active {
+      background: $accent-lime;
+      
+      svg {
+        color: #343330;
+      }
+    }
+    
+    svg {
+      width: 32px;
+      height: 32px;
+      color: #ffffff;
     }
   }
 }
