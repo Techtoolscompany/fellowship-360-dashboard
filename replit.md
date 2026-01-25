@@ -1,118 +1,54 @@
-# Fellowship 360 Dashboard
+# Finance Tracking Dashboard
 
 ## Overview
-Fellowship 360 is a comprehensive church management dashboard built on Next.js 14 (App Router). This project was converted from the Duralux admin template to serve as the UI foundation for the Fellowship 360 product.
+A modern finance tracking dashboard built on Next.js 14 (App Router). The dashboard features a clean "Cash Flow Dashboard" interface with a minimal icon-only sidebar, bright lime green (#bbff00) accents, and financial widgets for tracking income, expenses, and net worth.
 
 ## Recent Changes
-- **Jan 25, 2026**: Modern design system with lime green accent
-  - Lime green (#c8f542) as primary accent color throughout the app
-  - Modern card styling with 16px border radius and soft shadows
-  - ContactCard component for grid/list contact views
-  - Enhanced ChurchOverviewStatistics with trend badges and gradient progress bars
-  - Sidebar active/hover states updated to use lime green
-  - Grid/list toggle with lime accent on contacts page
-
-- **Jan 25, 2026**: Enhanced sidebar navigation
-  - Collapsible icon-only mode with localStorage persistence
-  - Section groupings (Main, Communication, Operations, Administration)
-  - Notification badges on Engage (5), Comms (3), and Care (2)
-  - Tooltips for collapsed mode navigation
-  - Quick Add modal for common CRM actions (7 actions with keyboard accessibility)
-  - Fixed navigation to use buttons instead of links for parent menus
-  - Added focus trapping and ARIA attributes for accessibility
-
-- **Jan 25, 2026**: World-class UI enhancements
-  - Dark mode toggle with full theme persistence (navigation, header, skin)
-  - Command palette with Cmd/Ctrl+K keyboard shortcut for quick navigation
-  - Drag-and-drop Kanban board using @hello-pangea/dnd with toast notifications
-  - Toast notification system (success, error, warning, info types)
-  - CSV export functionality for data tables
-  - Skeleton loading components with multiple variants (Card, KPI, Table, Chart)
-  - Micro-interactions SCSS with hover effects, animations, and transitions
-  - Mobile responsive layouts with breakpoint handling
-  - Onboarding tour for first-time users
-  - Empty state components with custom illustrations
-
-- **Jan 25, 2026**: Enhanced pages with rich data visualizations and charts
-  - Giving/Donations: KPI cards, weekly giving trend area chart, fund breakdown donut, monthly bar chart
-  - Reports/Overview: Attendance trend, visitor conversion donut, monthly giving, engagement radar, growth metrics
-  - Engage/Pipeline: Funnel chart, weekly activity chart, enhanced Kanban with priority badges
-  - People/Segments: Ministry involvement table with engagement progress bars, distribution donut, status cards
-
-- **Jan 25, 2026**: Dashboard improvements and navigation fixes
-  - Fixed menu navigation: single-item menus now link directly without dropdowns
-  - Improved home dashboard with rich widgets (KPI cards, pipeline summary, events, donors, activity)
-  - Created new Fellowship 360-specific components (ChurchOverviewStatistics, VisitorPipelineChart, UpcomingEvents, etc.)
-  - Added church-specific placeholder data in churchStatisticsData.js
-  
-- **Jan 25, 2026**: Complete rebranding from Duralux to Fellowship 360
-  - Updated all metadata, titles, and navigation
-  - Created new route structure with 11 main modules
-  - Implemented 30+ pages with placeholder data
-  - Cleaned up legacy Duralux routes
+- **Jan 25, 2026**: Built finance dashboard matching Figma design
+  - Minimal 96px icon-only sidebar with diamond logo, nav icons, and dark/light mode toggle
+  - Hero section with "Cash Flow Dashboard" headline and pill-shaped search bar
+  - KPI row: Total Balance, Inflows ($11,342,882), Outflows ($6,258,444)
+  - Net Worth donut chart with color-coded legend
+  - Trends and Insights weekly bar chart with lime accent on Thursday
+  - Promotional CTA card with green gradient background (#f4ffd4)
+  - Debt Status card (dark #343330 background) with progress bar
+  - Net Worth line chart with dual SVG paths and 50% increase badge
+  - Transaction History table with status badges (Pending/Done)
+  - This Month mini card with income/expenses visualization
 
 ## Project Architecture
 
 ### Tech Stack
 - **Framework**: Next.js 14 (App Router)
-- **Styling**: Bootstrap 5 + Sass
-- **Charts**: ApexCharts (react-apexcharts)
-- **Drag & Drop**: @hello-pangea/dnd
-- **UI Components**: Custom components based on Duralux patterns
-- **Icons**: Feather Icons, React Icons
-
-### Reusable Components
-- `ContactCard.jsx` - Contact display card with avatar, status badges, and action buttons
-- `Skeleton.jsx` - Loading skeleton components (Card, KPI, Table, Chart, Avatar, Text variants)
-- `Toast.jsx` - Toast notification system with ToastProvider context
-- `CommandPalette.jsx` - Global search with Cmd+K keyboard shortcut
-- `EmptyState.jsx` - Empty state displays with custom illustrations
-- `CsvExport.jsx` - CSV export utility for data tables
-- `OnboardingTour.jsx` - Step-by-step onboarding tour for new users
+- **Styling**: Inline styles with Plus Jakarta Sans font
+- **Charts**: Custom CSS/SVG implementations
+- **Icons**: React Icons (Feather Icons)
 
 ### Design System
-- **Primary Accent**: Lime green (#c8f542)
-- **Card Styling**: 16px border radius, subtle shadows (0 2px 8px rgba(0,0,0,0.04))
-- **Status Colors**: Semantic (green for members, blue for visitors, etc.)
-- **Progress Bars**: Lime green gradient
+- **Primary Accent**: Bright lime green (#bbff00)
+- **Background Gray**: #f2f2f2 for cards and sidebar
+- **Border Gray**: #e9e9e9
+- **Dark Gray**: #343330 for text and dark cards
+- **Card Border Radius**: 24px
+- **Pill Buttons**: 360px border radius
+- **Font**: Plus Jakarta Sans (Regular, Medium, SemiBold, Bold)
+
+### Key Components
+- `FigmaSidebar.jsx` - Minimal icon-only sidebar with theme toggle
+- `home/page.js` - Main finance dashboard with all widgets
 
 ### Directory Structure
 ```
 duralux_app/
 ├── src/
 │   ├── app/
-│   │   ├── (general)/          # Main authenticated pages
-│   │   │   ├── home/           # Dashboard overview
-│   │   │   ├── people/         # Contacts & Segments
-│   │   │   ├── engage/         # Pipeline & Tasks
-│   │   │   ├── comms/          # Conversations, Broadcasts, Templates
-│   │   │   ├── grace/          # Grace AI calls & settings
-│   │   │   ├── care/           # Prayer requests
-│   │   │   ├── scheduling/     # Calendar, Appointments, Volunteers
-│   │   │   ├── giving/         # Donations, Donors, Pledges
-│   │   │   ├── reports/        # Overview, Attendance, Engagement
-│   │   │   ├── settings/       # Church profile, Users, Integrations, Billing
-│   │   │   └── admin/          # DS Digital super admin pages
-│   │   ├── authentication/     # Login, Register, Reset pages
-│   │   └── layout.js           # Root layout with providers
-│   ├── components/             # Shared UI components
-│   ├── utils/                  # Utility functions and fake data
-│   └── assets/                 # SCSS styles
-└── public/                     # Static assets
+│   │   ├── (general)/
+│   │   │   ├── home/          # Finance dashboard
+│   │   │   └── layout.js      # Layout with FigmaSidebar for home
+│   │   └── layout.js          # Root layout with font
+│   └── components/
+│       └── FigmaSidebar.jsx   # Icon-only sidebar
 ```
-
-### Module Structure
-1. **Home** - Dashboard with KPIs and recent activity
-2. **People** - Contact management and segmentation
-3. **Engage** - Visitor pipeline (Kanban) and task management
-4. **Comms** - Conversations, broadcasts, and templates
-5. **Grace AI** - AI call logs, transcripts, and settings
-6. **Prayer & Care** - Prayer request management
-7. **Scheduling** - Calendar, appointments, and volunteer scheduling
-8. **Giving** - Donations, donor profiles, and pledges
-9. **Reports** - Overview, attendance, and engagement reports
-10. **Settings** - Church profile, users, integrations, and billing
-11. **Admin** - DS Digital super admin (churches and provisioning)
 
 ## Development
 
@@ -121,17 +57,7 @@ duralux_app/
 cd duralux_app && npm run dev -- -p 5000
 ```
 
-### Key Files
-- `src/utils/fackData/menuList.js` - Navigation menu structure
-- `src/components/shared/navigationMenu/` - Sidebar navigation components
-- `src/app/(general)/layout.js` - Main authenticated layout
-
 ## User Preferences
-- No emojis in code or comments
-- Follow existing Bootstrap/Sass patterns
-- Use placeholder data (real backend integration coming later)
-
-## Notes
-- All pages currently use placeholder data
-- Authentication is UI-only (no backend enforcement yet)
-- Multi-tenant and super-admin features are UI placeholders
+- Exact Figma design implementation required
+- No variations or creative interpretation
+- Use inline styles for pixel-perfect matching
