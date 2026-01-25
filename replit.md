@@ -4,13 +4,15 @@
 Fellowship 360 is a comprehensive church management dashboard built on Next.js 14 (App Router). This project was converted from the Duralux admin template to serve as the UI foundation for the Fellowship 360 product.
 
 ## Recent Changes
-- **Jan 25, 2026**: Modern design system with lime green accent
-  - Lime green (#c8f542) as primary accent color throughout the app
-  - Modern card styling with 16px border radius and soft shadows
-  - ContactCard component for grid/list contact views
-  - Enhanced ChurchOverviewStatistics with trend badges and gradient progress bars
-  - Sidebar active/hover states updated to use lime green
-  - Grid/list toggle with lime accent on contacts page
+- **Jan 25, 2026**: Finance Dashboard design system from Figma
+  - Neon lime (#bbff00) as primary accent color (updated from #c8f542)
+  - Card styling with 24px border radius and #f2f2f2 background
+  - Pill-shaped buttons and badges with 360px border radius
+  - Plus Jakarta Sans font family
+  - ContactCard component with circular avatars
+  - Enhanced ChurchOverviewStatistics with Figma-style KPI cards
+  - Sidebar with dark mode toggle styling
+  - New color palette: dark text #343330, muted #969696, borders #e9e9e9
 
 - **Jan 25, 2026**: Enhanced sidebar navigation
   - Collapsible icon-only mode with localStorage persistence
@@ -70,11 +72,15 @@ Fellowship 360 is a comprehensive church management dashboard built on Next.js 1
 - `CsvExport.jsx` - CSV export utility for data tables
 - `OnboardingTour.jsx` - Step-by-step onboarding tour for new users
 
-### Design System
-- **Primary Accent**: Lime green (#c8f542)
-- **Card Styling**: 16px border radius, subtle shadows (0 2px 8px rgba(0,0,0,0.04))
-- **Status Colors**: Semantic (green for members, blue for visitors, etc.)
-- **Progress Bars**: Lime green gradient
+### Design System (Finance Dashboard Style)
+- **Primary Accent**: Neon lime (#bbff00)
+- **Typography**: Plus Jakarta Sans
+- **Card Styling**: 24px border radius, #f2f2f2 background, #e9e9e9 border
+- **Buttons/Badges**: Pill-shaped with 360px border radius
+- **Dark Text**: #343330
+- **Muted Text**: #969696, #636363
+- **Status Colors**: Success (#19cf56), Danger (#fd4a4a), Info (#3b82f6)
+- **Progress Bars**: Solid lime green (#bbff00) with #d9d9d9 track
 
 ### Directory Structure
 ```
