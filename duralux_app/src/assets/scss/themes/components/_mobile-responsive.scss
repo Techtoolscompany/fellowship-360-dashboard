@@ -1,0 +1,295 @@
+// Mobile Responsive Styles for Fellowship 360
+
+// Sidebar mobile behavior
+@media (max-width: 991.98px) {
+  .nxl-navigation {
+    position: fixed;
+    left: -280px;
+    top: 0;
+    height: 100vh;
+    z-index: 1050;
+    transition: left 0.3s ease-in-out;
+    
+    &.mobile-open {
+      left: 0;
+      box-shadow: 5px 0 15px rgba(0, 0, 0, 0.1);
+    }
+  }
+  
+  .nxl-header {
+    left: 0 !important;
+    width: 100% !important;
+  }
+  
+  .nxl-container {
+    padding-left: 0 !important;
+    margin-left: 0 !important;
+  }
+  
+  .mobile-nav-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1040;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    
+    &.active {
+      opacity: 1;
+      visibility: visible;
+    }
+  }
+  
+  .mobile-menu-toggle {
+    display: flex !important;
+  }
+}
+
+@media (min-width: 992px) {
+  .mobile-menu-toggle {
+    display: none !important;
+  }
+  
+  .mobile-nav-overlay {
+    display: none !important;
+  }
+}
+
+// Card grid responsiveness
+@media (max-width: 767.98px) {
+  .row {
+    .col-xl-3,
+    .col-xxl-3 {
+      flex: 0 0 100%;
+      max-width: 100%;
+    }
+    
+    .col-xl-4,
+    .col-xxl-4 {
+      flex: 0 0 100%;
+      max-width: 100%;
+    }
+    
+    .col-xl-6,
+    .col-xxl-6 {
+      flex: 0 0 100%;
+      max-width: 100%;
+    }
+    
+    .col-xl-8,
+    .col-xxl-8 {
+      flex: 0 0 100%;
+      max-width: 100%;
+    }
+  }
+  
+  .main-content {
+    padding: 0.75rem !important;
+  }
+  
+  .card {
+    margin-bottom: 0.75rem !important;
+  }
+  
+  .card-body {
+    padding: 1rem !important;
+  }
+  
+  // KPI cards compact view
+  .wd-50 {
+    width: 40px !important;
+    height: 40px !important;
+    
+    svg {
+      width: 18px !important;
+      height: 18px !important;
+    }
+  }
+  
+  h3.fw-bold {
+    font-size: 1.25rem !important;
+  }
+}
+
+// Table responsiveness
+@media (max-width: 991.98px) {
+  .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    
+    table {
+      min-width: 600px;
+    }
+  }
+  
+  .table {
+    th, td {
+      white-space: nowrap;
+      padding: 0.5rem !important;
+    }
+  }
+}
+
+// Kanban board mobile
+@media (max-width: 767.98px) {
+  .kanban-board-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 1rem;
+  }
+  
+  .kanban-column {
+    min-width: 260px !important;
+    flex-shrink: 0;
+  }
+  
+  .kanban-card {
+    .card-body {
+      padding: 0.75rem !important;
+    }
+  }
+}
+
+// Header mobile adjustments
+@media (max-width: 767.98px) {
+  .nxl-header {
+    padding: 0.5rem !important;
+    
+    .header-wrapper {
+      gap: 0.5rem !important;
+    }
+  }
+  
+  .page-header {
+    padding: 0.75rem !important;
+    
+    h2 {
+      font-size: 1rem !important;
+    }
+    
+    .breadcrumb {
+      font-size: 0.75rem;
+    }
+  }
+  
+  // Hide some header elements on mobile
+  .mega-menu-btn,
+  .nxl-lavel-mega-menu-toggle,
+  .country-select {
+    display: none !important;
+  }
+}
+
+// Command palette mobile
+@media (max-width: 767.98px) {
+  .command-palette-modal {
+    width: 95% !important;
+    max-width: none !important;
+    margin: 1rem !important;
+    top: 1rem !important;
+    left: 2.5% !important;
+  }
+}
+
+// Toast mobile positioning
+@media (max-width: 767.98px) {
+  .toast-container {
+    left: 1rem !important;
+    right: 1rem !important;
+    bottom: 1rem !important;
+    
+    .toast-item {
+      width: 100% !important;
+      min-width: auto !important;
+    }
+  }
+}
+
+// Charts responsiveness
+@media (max-width: 575.98px) {
+  .apexcharts-canvas {
+    width: 100% !important;
+  }
+  
+  .apexcharts-legend {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+}
+
+// Buttons on mobile
+@media (max-width: 575.98px) {
+  .btn-group-mobile {
+    flex-direction: column;
+    width: 100%;
+    
+    .btn {
+      width: 100%;
+      margin-bottom: 0.5rem;
+    }
+  }
+  
+  .d-flex.gap-2 {
+    flex-wrap: wrap;
+    
+    .btn {
+      flex: 1 1 auto;
+      min-width: 120px;
+    }
+  }
+}
+
+// Form elements mobile
+@media (max-width: 575.98px) {
+  .form-control,
+  .form-select {
+    font-size: 16px !important; // Prevents iOS zoom
+  }
+}
+
+// Footer mobile
+@media (max-width: 767.98px) {
+  .nxl-footer {
+    padding: 0.75rem !important;
+    
+    .row {
+      flex-direction: column;
+      text-align: center;
+    }
+  }
+}
+
+// Hide elements on mobile
+.d-mobile-none {
+  @media (max-width: 767.98px) {
+    display: none !important;
+  }
+}
+
+// Show only on mobile
+.d-mobile-only {
+  display: none !important;
+  
+  @media (max-width: 767.98px) {
+    display: block !important;
+  }
+}
+
+// Touch-friendly interactions
+@media (hover: none) and (pointer: coarse) {
+  .btn,
+  .card,
+  .nav-link {
+    transition-duration: 0.1s !important;
+  }
+  
+  .hover-lift:hover,
+  .card-hover:hover {
+    transform: none !important;
+  }
+}

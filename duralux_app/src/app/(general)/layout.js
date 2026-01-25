@@ -6,10 +6,12 @@ import SupportDetails from "@/components/supportDetails";
 import useBootstrapUtils from "@/hooks/useBootstrapUtils";
 import { ToastProvider } from "@/components/shared/Toast";
 import CommandPalette from "@/components/shared/CommandPalette";
+import { useOnboardingTour } from "@/components/shared/OnboardingTour";
 
 const layout = ({ children }) => {
     const pathName = usePathname()
     useBootstrapUtils(pathName)
+    const { TourComponent } = useOnboardingTour()
 
     return (
         <ToastProvider>
@@ -22,6 +24,7 @@ const layout = ({ children }) => {
             </main>
             <SupportDetails />
             <CommandPalette />
+            {TourComponent && <TourComponent />}
         </ToastProvider>
     )
 }
