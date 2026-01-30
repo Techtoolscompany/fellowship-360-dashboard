@@ -44,11 +44,21 @@ $status-info-bg: rgba(59, 130, 246, 0.1);
 // ==============================================
 
 $shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
-$shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
-$shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-$shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
-$shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
-$shadow-card: 0 1px 4px rgba(12, 12, 13, 0.1), 0 1px 4px rgba(12, 12, 13, 0.05);
+$shadow-sm:
+  0 1px 3px 0 rgba(0, 0, 0, 0.05),
+  0 1px 2px -1px rgba(0, 0, 0, 0.05);
+$shadow-md:
+  0 4px 6px -1px rgba(0, 0, 0, 0.05),
+  0 2px 4px -2px rgba(0, 0, 0, 0.05);
+$shadow-lg:
+  0 10px 15px -3px rgba(0, 0, 0, 0.05),
+  0 4px 6px -4px rgba(0, 0, 0, 0.05);
+$shadow-xl:
+  0 20px 25px -5px rgba(0, 0, 0, 0.05),
+  0 8px 10px -6px rgba(0, 0, 0, 0.05);
+$shadow-card:
+  0 1px 4px rgba(12, 12, 13, 0.1),
+  0 1px 4px rgba(12, 12, 13, 0.05);
 $shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.08);
 
 // ==============================================
@@ -67,7 +77,13 @@ $radius-full: 360px;
 // TYPOGRAPHY
 // ==============================================
 
-$font-family-base: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+$font-family-base:
+  "Plus Jakarta Sans",
+  -apple-system,
+  BlinkMacSystemFont,
+  "Segoe UI",
+  Roboto,
+  sans-serif;
 $font-weight-normal: 400;
 $font-weight-medium: 500;
 $font-weight-semibold: 600;
@@ -85,7 +101,7 @@ $transition-slow: 300ms ease;
 // GLOBAL OVERRIDES
 // ==============================================
 
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap");
 
 :root {
   --accent-primary: #{$accent-primary};
@@ -100,10 +116,10 @@ $transition-slow: 300ms ease;
   --radius-2xl: #{$radius-2xl};
   --radius-full: #{$radius-full};
 
-  // Theme-aware design tokens
+  // Theme-aware design tokens - Light Mode (Pure White)
   --ds-bg-primary: #ffffff;
-  --ds-bg-secondary: #{$neutral-100};
-  --ds-bg-tertiary: #{$neutral-150};
+  --ds-bg-secondary: #ffffff;
+  --ds-bg-tertiary: #ffffff;
   --ds-bg-card: #ffffff;
   --ds-bg-elevated: #ffffff;
   --ds-bg-highlight: #{$accent-primary-subtle};
@@ -169,7 +185,9 @@ body {
   border: 1px solid var(--ds-border-primary);
   border-radius: $radius-2xl !important;
   box-shadow: none;
-  transition: box-shadow $transition-base, transform $transition-base;
+  transition:
+    box-shadow $transition-base,
+    transform $transition-base;
   overflow: hidden;
 
   &:hover {
@@ -213,62 +231,67 @@ body {
   transition: all $transition-base;
   border: none;
   font-family: $font-family-base;
-  
+
   &.btn-primary {
     background: $accent-primary;
     color: $dark-text;
-    
-    &:hover, &:focus {
+
+    &:hover,
+    &:focus {
       background: $accent-primary-dark;
       color: $dark-text;
       transform: translateY(-1px);
     }
   }
-  
+
   &.btn-outline-primary {
     border: 1px solid rgba(0, 0, 0, 0.2);
     background: transparent;
     color: $dark-text;
-    
-    &:hover, &:focus {
+
+    &:hover,
+    &:focus {
       border-color: $accent-primary;
       background: $accent-primary-subtle;
       color: $dark-text;
     }
   }
-  
+
   &.btn-secondary {
     background: $neutral-150;
     color: $dark-text;
-    
-    &:hover, &:focus {
+
+    &:hover,
+    &:focus {
       background: $neutral-200;
     }
   }
-  
+
   &.btn-dark {
     background: $dark-secondary;
     color: #ffffff;
-    
-    &:hover, &:focus {
+
+    &:hover,
+    &:focus {
       background: $dark-primary;
     }
   }
-  
+
   &.btn-white {
     background: #ffffff;
     color: $dark-text;
-    
-    &:hover, &:focus {
+
+    &:hover,
+    &:focus {
       background: $neutral-100;
     }
   }
-  
+
   &.btn-sm {
     padding: 6px 12px;
     font-size: 12px;
   }
-  
+
   &.btn-lg {
     padding: 12px 24px;
     font-size: 16px;
@@ -286,16 +309,16 @@ body {
   border-radius: $radius-full;
   background: $neutral-150;
   border: none;
-  
+
   &:hover {
     background: $neutral-200;
   }
-  
+
   &.btn-icon-sm {
     width: 32px;
     height: 32px;
   }
-  
+
   &.btn-icon-lg {
     width: 56px;
     height: 56px;
@@ -309,27 +332,34 @@ body {
   border-radius: $radius-full;
   font-size: 12px;
   font-family: $font-family-base;
-  
-  &.bg-primary, &.badge-primary {
+
+  &.bg-primary,
+  &.badge-primary {
     background: $accent-primary !important;
     color: #000329;
   }
-  
-  &.bg-success, &.badge-success, &.bg-soft-success {
+
+  &.bg-success,
+  &.badge-success,
+  &.bg-soft-success {
     background: $status-success-bg !important;
     color: $status-success;
   }
-  
-  &.bg-danger, &.badge-danger, &.bg-soft-danger {
+
+  &.bg-danger,
+  &.badge-danger,
+  &.bg-soft-danger {
     background: $status-danger-bg !important;
     color: $status-danger;
   }
-  
-  &.bg-info, &.badge-info, &.bg-soft-info {
+
+  &.bg-info,
+  &.badge-info,
+  &.bg-soft-info {
     background: $status-info-bg !important;
     color: $status-info;
   }
-  
+
   &.bg-soft-primary {
     background: $accent-primary-subtle !important;
     color: $dark-text;
@@ -345,26 +375,30 @@ body {
   border-radius: $radius-full;
   font-size: 12px;
   font-family: $font-family-base;
-  
+
   &.status-pending {
     background: $status-danger-bg;
     color: $status-danger;
   }
-  
-  &.status-done, &.status-success {
+
+  &.status-done,
+  &.status-success {
     background: $status-success-bg;
     color: $status-success;
   }
 }
 
 // Modern Form Controls
-.form-control, .form-select {
+.form-control,
+.form-select {
   border-radius: $radius-full;
   border: 1px solid var(--ds-border-primary);
   padding: 8px 12px;
   font-size: 12px;
   font-family: $font-family-base;
-  transition: border-color $transition-base, box-shadow $transition-base;
+  transition:
+    border-color $transition-base,
+    box-shadow $transition-base;
   background: transparent;
   color: var(--ds-text-primary);
 
@@ -388,7 +422,7 @@ body {
   border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: $radius-full;
   background: transparent;
-  
+
   .search-icon-bg {
     width: 48px;
     height: 48px;
@@ -398,7 +432,7 @@ body {
     align-items: center;
     justify-content: center;
   }
-  
+
   input {
     border: none;
     background: transparent;
@@ -406,7 +440,7 @@ body {
     font-size: 12px;
     color: $dark-text;
     flex: 1;
-    
+
     &::placeholder {
       color: $neutral-500;
     }
@@ -458,7 +492,7 @@ body {
   border-radius: $radius-full;
   background: $neutral-300;
   overflow: visible;
-  
+
   .progress-bar {
     background: $accent-primary;
     border-radius: $radius-full;
@@ -505,18 +539,18 @@ body {
   border-radius: $radius-2xl;
   padding: 16px;
   color: #ffffff;
-  
+
   .feature-title {
     font-size: 20px;
     font-weight: $font-weight-bold;
     text-transform: capitalize;
   }
-  
+
   .feature-subtitle {
     font-size: 16px;
     font-weight: $font-weight-normal;
   }
-  
+
   .feature-btn {
     width: 100%;
     padding: 12px 16px;
@@ -535,12 +569,12 @@ body {
   border: 1px solid $neutral-200;
   border-radius: $radius-2xl;
   padding: 24px;
-  
+
   .highlight-dots {
     display: flex;
     gap: 4px;
     margin-bottom: 16px;
-    
+
     span {
       width: 8px;
       height: 8px;
@@ -548,7 +582,7 @@ body {
       border-radius: 50%;
     }
   }
-  
+
   .highlight-title {
     font-size: 28px;
     font-weight: $font-weight-semibold;
@@ -611,7 +645,7 @@ body {
   color: #000329;
   border: none;
   cursor: pointer;
-  
+
   &:hover {
     background: $accent-primary-dark;
   }
@@ -625,7 +659,7 @@ body {
   padding: 6px 12px;
   background: $neutral-150;
   border-radius: $radius-full;
-  
+
   .date-icon-bg {
     padding: 8px;
     background: #ffffff;
@@ -634,7 +668,7 @@ body {
     align-items: center;
     justify-content: center;
   }
-  
+
   .date-text {
     font-size: 12px;
     color: $dark-text;
@@ -651,7 +685,7 @@ body {
   border-radius: $radius-full;
   color: #ffffff;
   font-size: 12px;
-  
+
   .toggle-icon-bg {
     padding: 8px;
     background: #ffffff;
@@ -670,13 +704,13 @@ body {
   padding: 4px 20px 4px 8px;
   border: 1px solid #d6d6d6;
   border-radius: $radius-full;
-  
+
   img {
     width: 32px;
     height: 32px;
     border-radius: 50%;
   }
-  
+
   span {
     font-size: 16px;
     font-weight: $font-weight-medium;
@@ -689,13 +723,13 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  
+
   .legend-dot {
     width: 12px;
     height: 12px;
     border-radius: 50%;
   }
-  
+
   .legend-text {
     font-size: 12px;
     color: $dark-text;
@@ -931,7 +965,7 @@ body {
       position: relative;
 
       &::before {
-        content: '';
+        content: "";
         position: absolute;
         left: 0;
         top: 4px;
@@ -966,7 +1000,7 @@ body {
     box-shadow: $shadow-md;
 
     &::before {
-      content: '';
+      content: "";
       position: absolute;
       right: 100%;
       top: 50%;
@@ -1134,6 +1168,7 @@ html.minimenu {
 
       .sidebar-tooltip {
         // Show on hover in collapsed mode
+        display: none;
       }
 
       &--active .sidebar-link::before {
@@ -1223,7 +1258,10 @@ html.app-skin-dark {
     background-color: var(--ds-bg-primary) !important;
     border-bottom-color: var(--ds-border-primary) !important;
 
-    h2, h3, h4, h5 {
+    h2,
+    h3,
+    h4,
+    h5 {
       color: var(--ds-text-primary) !important;
     }
 
@@ -1356,7 +1394,8 @@ html.app-skin-dark {
     .dropdown-item {
       color: var(--ds-text-primary) !important;
 
-      &:hover, &:focus {
+      &:hover,
+      &:focus {
         background: var(--ds-hover-bg) !important;
       }
     }
@@ -1420,8 +1459,18 @@ html.app-skin-dark {
   }
 
   // Typography overrides
-  h1, h2, h3, h4, h5, h6,
-  .h1, .h2, .h3, .h4, .h5, .h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  .h1,
+  .h2,
+  .h3,
+  .h4,
+  .h5,
+  .h6 {
     color: var(--ds-text-primary);
   }
 
@@ -1461,7 +1510,9 @@ html.app-skin-dark {
   }
 
   // Link colors
-  a:not(.btn):not(.nav-link):not(.sidebar-link):not(.sidebar-sublink):not(.dropdown-item) {
+  a:not(.btn):not(.nav-link):not(.sidebar-link):not(.sidebar-sublink):not(
+      .dropdown-item
+    ) {
     color: var(--ds-text-secondary);
 
     &:hover {

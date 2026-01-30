@@ -49,19 +49,22 @@ const Header = () => {
     useEffect(() => {
         const handleResize = () => {
             const newWindowWidth = window.innerWidth;
+            const navUp = document.querySelector('.navigation-up-1600');
+            const navDown = document.querySelector('.navigation-down-1600');
+            
             if (newWindowWidth <= 1024) {
                 document.documentElement.classList.remove('minimenu');
-                document.querySelector('.navigation-down-1600').style.display = 'none';
+                if (navDown) navDown.style.display = 'none';
             }
             else if (newWindowWidth >= 1025 && newWindowWidth <= 1400) {
                 document.documentElement.classList.add('minimenu');
-                document.querySelector('.navigation-up-1600').style.display = 'none';
-                document.querySelector('.navigation-down-1600').style.display = 'block';
+                if (navUp) navUp.style.display = 'none';
+                if (navDown) navDown.style.display = 'block';
             }
             else {
                 document.documentElement.classList.remove('minimenu');
-                document.querySelector('.navigation-up-1600').style.display = 'block';
-                document.querySelector('.navigation-down-1600').style.display = 'none';
+                if (navUp) navUp.style.display = 'block';
+                if (navDown) navDown.style.display = 'none';
             }
         };
 
@@ -141,29 +144,7 @@ const Header = () => {
         <header className="nxl-header">
             <div className="header-wrapper">
                 <div className="header-left d-flex align-items-center gap-4">
-                    <a href="#" className="nxl-head-mobile-toggler" onClick={(e) => {e.preventDefault(), setNavigationOpen(true)}} id="mobile-collapse">
-                        <div className={`hamburger hamburger--arrowturn ${navigationOpen ? "is-active" : ""}`}>
-                            <div className="hamburger-box">
-                                <div className="hamburger-inner"></div>
-                            </div>
-                        </div>
-                    </a>
-                    <div className="nxl-navigation-toggle navigation-up-1600">
-                        <a href="#" onClick={(e) => handleNavigationExpendUp(e, "show")} id="menu-mini-button" ref={miniButtonRef} style={{ display: navigationExpend ? "none" : "block" }}>
-                            <FiAlignLeft size={24} />
-                        </a>
-                        <a href="#" onClick={(e) => handleNavigationExpendUp(e, "hide")} id="menu-expend-button" ref={expendButtonRef} style={{ display: navigationExpend ? "block" : "none" }}>
-                            <FiArrowRight size={24} />
-                        </a>
-                    </div>
-                    <div className="nxl-navigation-toggle navigation-down-1600">
-                        <a href="#" onClick={(e) => handleNavigationExpendDown(e, "hide")} id="menu-mini-button" ref={miniButtonRef} style={{ display: navigationExpend ? "block" : "none" }}>
-                            <FiAlignLeft size={24} />
-                        </a>
-                        <a href="#" onClick={(e) => handleNavigationExpendDown(e, "show")} id="menu-expend-button" ref={expendButtonRef} style={{ display: navigationExpend ? "none" : "block" }}>
-                            <FiArrowRight size={24} />
-                        </a>
-                    </div>
+                    {/* Navigation controls removed for cleaner header */}
                 </div>
                 <div className="header-right ms-auto">
                     <div className="d-flex align-items-center">
