@@ -1,33 +1,49 @@
 'use client'
-import React, { useContext, useEffect, useState } from 'react'
+import React, { useContext, useEffect, useState, useCallback } from 'react'
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import PerfectScrollbar from "react-perfect-scrollbar";
 import Menus from './Menus';
 import { NavigationContext } from '@/contentApi/navigationProvider';
-import { FiChevronLeft, FiPlus, FiSearch } from 'react-icons/fi';
+import { FiChevronLeft, FiPlus } from 'react-icons/fi';
 
 const NavigationManu = () => {
     const { navigationOpen, setNavigationOpen } = useContext(NavigationContext)
     const [isCollapsed, setIsCollapsed] = useState(false)
     const pathName = usePathname()
-    
+
     useEffect(() => {
         setNavigationOpen(false)
     }, [pathName])
 
+    // Observe html.minimenu class changes (set by Header.jsx resize/toggle logic)
     useEffect(() => {
-        const saved = localStorage.getItem('sidebar_collapsed')
-        if (saved === 'true') {
-            setIsCollapsed(true)
+        const checkMinimenu = () => {
+            setIsCollapsed(document.documentElement.classList.contains('minimenu'))
         }
+
+        // Check initial state
+        checkMinimenu()
+
+        // Watch for class changes on <html>
+        const observer = new MutationObserver(checkMinimenu)
+        observer.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['class']
+        })
+
+        return () => observer.disconnect()
     }, [])
 
-    const toggleCollapse = () => {
-        const newState = !isCollapsed
-        setIsCollapsed(newState)
-        localStorage.setItem('sidebar_collapsed', String(newState))
-    }
+    const toggleCollapse = useCallback(() => {
+        const html = document.documentElement
+        if (html.classList.contains('minimenu')) {
+            html.classList.remove('minimenu')
+        } else {
+            html.classList.add('minimenu')
+        }
+        // MutationObserver will update isCollapsed state
+    }, [])
 
     const handleQuickAdd = () => {
         const event = new CustomEvent('openQuickAdd')
@@ -35,7 +51,7 @@ const NavigationManu = () => {
     }
 
     return (
-        <nav className={`nxl-navigation ${navigationOpen ? "mob-navigation-active" : ""} ${isCollapsed ? "collapsed" : ""}`}>
+        <nav className={`nxl-navigation ${navigationOpen ? "mob-navigation-active" : ""}`}>
             <div className="navbar-wrapper">
                 <div className="m-header">
                     <Link href="/home" className="b-brand">
@@ -48,47 +64,41 @@ const NavigationManu = () => {
                             <span className="fw-bold fs-5">360</span>
                         </div>
                     </Link>
-                    <button 
+                    <button
                         className="sidebar-collapse-btn d-none d-lg-flex"
                         onClick={toggleCollapse}
                         title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
                     >
-                        <FiChevronLeft size={14} />
+                        <FiChevronLeft
+                            size={14}
+                            style={{
+                                transform: isCollapsed ? 'rotate(180deg)' : 'none',
+                                transition: 'transform 0.2s ease'
+                            }}
+                        />
                     </button>
                 </div>
 
                 <div className="navbar-content">
                     <PerfectScrollbar>
-                        <ul className="nxl-navbar">
-                            <li className="nxl-item nxl-caption">
-                                <label>Navigation</label>
-                            </li>
+                        <ul className="nxl-navbar sidebar-nav">
                             <Menus isCollapsed={isCollapsed} />
                         </ul>
                         <div style={{ height: "80px" }}></div>
                     </PerfectScrollbar>
                 </div>
 
-                {!isCollapsed && (
-                    <div className="sidebar-quick-actions">
-                        <button className="quick-action-btn" onClick={handleQuickAdd}>
-                            <FiPlus size={16} />
-                            <span>Quick Add</span>
-                        </button>
-                    </div>
-                )}
-                {isCollapsed && (
-                    <div className="sidebar-quick-actions" style={{ padding: '12px 8px' }}>
-                        <button 
-                            className="quick-action-btn" 
-                            onClick={handleQuickAdd}
-                            style={{ padding: '10px', minWidth: 'auto' }}
-                            title="Quick Add"
-                        >
-                            <FiPlus size={18} />
-                        </button>
-                    </div>
-                )}
+                {/* Quick Add Button */}
+                <div className="sidebar-quick-actions">
+                    <button
+                        className="quick-action-btn"
+                        onClick={handleQuickAdd}
+                        title="Quick Add"
+                    >
+                        <FiPlus size={16} />
+                        {!isCollapsed && <span>Quick Add</span>}
+                    </button>
+                </div>
             </div>
             <div onClick={() => setNavigationOpen(false)} className={`${navigationOpen ? "nxl-menu-overlay" : ""}`}></div>
         </nav>

@@ -5,7 +5,7 @@
 $sidebar-width: 260px;
 $sidebar-collapsed-width: 96px;
 $sidebar-transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-$sidebar-bg: #f2f2f2;
+$sidebar-bg: #ffffff;
 $sidebar-bg-dark: #1a1d21;
 $sidebar-border: #e9e9e9;
 $sidebar-border-dark: #2d3238;
@@ -441,70 +441,81 @@ $accent-lime: #bbff00;
   visibility: visible;
 }
 
-// Dark mode styles
+// Dark mode styles - use app-skin-dark for consistency with ThemeCustomizer
 [data-menu-styles="dark"] .nxl-navigation,
-.dark-mode .nxl-navigation {
-  background: $sidebar-bg-dark;
-  border-right-color: $sidebar-border-dark;
-  
+.dark-mode .nxl-navigation,
+html.app-skin-dark .nxl-navigation {
+  background: var(--ds-bg-card, $sidebar-bg-dark) !important;
+  border-right-color: var(--ds-border-primary, $sidebar-border-dark) !important;
+
   .m-header {
-    border-bottom-color: $sidebar-border-dark;
+    border-bottom-color: var(--ds-border-primary, $sidebar-border-dark) !important;
   }
-  
+
   .sidebar-collapse-btn {
-    border-color: $sidebar-border-dark;
-    color: #9ca3af;
-    
+    border-color: var(--ds-border-secondary, $sidebar-border-dark);
+    color: var(--ds-text-tertiary, #9ca3af);
+    background: var(--ds-bg-card, $sidebar-bg-dark);
+
     &:hover {
-      background: #2d3238;
+      background: var(--ds-bg-tertiary, #2d3238);
     }
   }
-  
+
   .nxl-caption label {
-    color: #6b7280;
+    color: var(--ds-text-muted, #6b7280);
   }
-  
+
   .nxl-link {
-    color: #d1d5db;
-    
+    color: var(--ds-text-secondary, #d1d5db);
+
     &:hover {
-      background: #2d3238;
-      color: #ffffff;
+      background: var(--ds-hover-bg, #2d3238);
+      color: var(--ds-text-primary, #ffffff);
     }
-    
+
     .nxl-micon {
-      color: #9ca3af;
+      color: var(--ds-icon-muted, #9ca3af);
     }
   }
-  
+
   .nxl-submenu {
-    background: $sidebar-bg-dark;
-    
+    background: var(--ds-bg-card, $sidebar-bg-dark);
+
     .nxl-link {
-      color: #9ca3af;
-      
+      color: var(--ds-text-tertiary, #9ca3af);
+
       &:hover {
-        background: #2d3238;
-        color: #60a5fa;
+        background: var(--ds-hover-bg, #2d3238);
+        color: $accent-lime;
       }
-      
+
       &::before {
-        background: #4b5563;
+        background: var(--ds-text-muted, #4b5563);
       }
     }
-    
+
     .nxl-item.active .nxl-link {
-      background: rgba(59, 130, 246, 0.15);
-      color: #60a5fa;
-      
+      background: rgba(187, 255, 0, 0.1);
+      color: $accent-lime;
+
       &::before {
-        background: #60a5fa;
+        background: $accent-lime;
       }
     }
   }
-  
+
   .sidebar-quick-actions {
-    border-top-color: $sidebar-border-dark;
+    border-top-color: var(--ds-border-primary, $sidebar-border-dark) !important;
+    border-right-color: var(--ds-border-primary, $sidebar-border-dark) !important;
+    background: var(--ds-bg-card, $sidebar-bg-dark) !important;
+  }
+}
+
+// Dark mode scrollbar
+html.app-skin-dark .navbar-content {
+  &::-webkit-scrollbar-thumb {
+    background: var(--ds-scrollbar-thumb, #334155);
   }
 }
 
