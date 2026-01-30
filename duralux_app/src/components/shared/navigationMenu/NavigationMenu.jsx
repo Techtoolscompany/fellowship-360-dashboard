@@ -61,7 +61,7 @@ const NavigationManu = () => {
               <span className="fw-bold fs-4">Fellowship</span>
               <span className="fw-bold fs-4 ms-1 text-accent">360</span>
             </div>
-            <div className="logo logo-sm d-flex align-items-center">
+            <div className="logo logo-sm d-none align-items-center">
               <span className="fw-bold fs-5">F</span>
               <span className="fw-bold fs-5 text-accent">360</span>
             </div>
