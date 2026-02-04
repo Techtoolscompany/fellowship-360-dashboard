@@ -1,5 +1,6 @@
 'use client'
 import React from 'react'
+import { FiArrowRight } from 'react-icons/fi'
 
 const HighlightPromoCard = () => {
     return (
@@ -13,9 +14,11 @@ const HighlightPromoCard = () => {
                     overflow: 'hidden',
                     position: 'relative',
                     height: '334px',
+                    cursor: 'pointer',
                 }}
+                onClick={() => window.open('https://fellowship360.com/free', '_blank')}
             >
-                <div className="card-body p-4">
+                <div className="card-body p-4 d-flex flex-column justify-content-between">
                     {/* Decorative Dots */}
                     <div className="d-flex gap-1 mb-3">
                         {[...Array(5)].map((_, i) => (
@@ -38,13 +41,35 @@ const HighlightPromoCard = () => {
                             fontWeight: 600,
                             lineHeight: '36px',
                             color: 'var(--ds-text-primary, #343330)',
-                            textTransform: 'capitalize',
                             maxWidth: '268px',
                             marginBottom: 0,
                         }}
                     >
-                        Unlock the power of your ministry with Fellowship 360!
+                        Click here to learn how Fellowship 360 can be free!
                     </h2>
+
+                    {/* CTA Button */}
+                    <button
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '12px 24px',
+                            background: '#343330',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '360px',
+                            fontSize: '14px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            width: 'fit-content',
+                            marginTop: '16px',
+                            zIndex: 2,
+                        }}
+                    >
+                        Learn More
+                        <FiArrowRight size={16} />
+                    </button>
 
                     {/* Concentric Circles Decoration */}
                     <div

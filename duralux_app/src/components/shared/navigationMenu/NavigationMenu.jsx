@@ -52,7 +52,7 @@ const NavigationManu = () => {
 
   return (
     <nav
-      className={`nxl-navigation ${navigationOpen ? "mob-navigation-active" : ""}`}
+      className={`nxl-navigation ${navigationOpen ? "mob-navigation-active" : ""} ${isCollapsed ? "collapsed" : ""}`}
     >
       <div className="navbar-wrapper">
         <div className="m-header">

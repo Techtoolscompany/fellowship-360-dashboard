@@ -1,166 +1,148 @@
 'use client'
 import React from 'react'
-import { FiArrowDownLeft, FiArrowUpRight, FiEye } from 'react-icons/fi'
+import { FiUsers, FiUserPlus, FiDollarSign, FiClock, FiTrendingUp, FiTrendingDown } from 'react-icons/fi'
 
 const KpiStripCard = () => {
+    // Sample data - will be replaced with real data from database
+    const kpis = [
+        {
+            label: 'Active Members',
+            value: '247',
+            subtitle: 'Attended in last 30 days',
+            icon: FiUsers,
+            trend: '+12',
+            trendDirection: 'up',
+            iconBg: '#bbff00'
+        },
+        {
+            label: 'First-Time Visitors',
+            value: '8',
+            subtitle: 'This week',
+            icon: FiUserPlus,
+            trend: '+3',
+            trendDirection: 'up',
+            iconBg: '#bbff00'
+        },
+        {
+            label: 'Weekly Giving',
+            value: '$4,832',
+            subtitle: 'This week',
+            icon: FiDollarSign,
+            trend: '-5%',
+            trendDirection: 'down',
+            iconBg: '#bbff00'
+        },
+        {
+            label: 'Volunteer Hours',
+            value: '156',
+            subtitle: 'This month',
+            icon: FiClock,
+            trend: '+24',
+            trendDirection: 'up',
+            iconBg: '#bbff00'
+        }
+    ]
+
     return (
         <div className="col-12">
             <div
-                className="d-flex align-items-stretch"
+                className="d-flex align-items-stretch flex-wrap"
                 style={{
                     borderTop: '1px solid var(--ds-border-secondary)',
                     borderBottom: '1px solid var(--ds-border-secondary)',
                 }}
             >
-                {/* Total Balance Section */}
-                <div
-                    className="d-flex flex-column gap-2 py-4"
-                    style={{ flex: '0 0 auto', paddingRight: '32px' }}
-                >
-                    <p
-                        className="mb-0"
-                        style={{
-                            fontSize: '16px',
-                            fontWeight: 600,
-                            color: 'var(--ds-text-primary)',
-                            lineHeight: 1.5
-                        }}
-                    >
-                        Total Members
-                    </p>
-                    <div className="d-flex align-items-center gap-2">
-                        <span
-                            style={{
-                                fontSize: '14px',
-                                fontWeight: 500,
-                                color: 'var(--ds-text-primary)',
-                                textTransform: 'capitalize',
-                                lineHeight: '20px'
-                            }}
-                        >
-                            Active Members
-                        </span>
+                {kpis.map((kpi, index) => (
+                    <React.Fragment key={kpi.label}>
                         <div
-                            style={{
-                                width: '48px',
-                                height: '48px',
-                                borderRadius: '360px',
-                                background: 'var(--ds-bg-tertiary)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
+                            className="d-flex flex-column gap-2 py-4"
+                            style={{ 
+                                flex: '1 1 200px', 
+                                minWidth: '180px',
+                                paddingRight: '24px',
+                                paddingLeft: index > 0 ? '24px' : '0'
                             }}
                         >
-                            <FiEye size={20} style={{ color: 'var(--ds-icon-default)' }} />
+                            {/* Label and Icon Row */}
+                            <div className="d-flex align-items-center gap-2">
+                                <div
+                                    style={{
+                                        width: '32px',
+                                        height: '32px',
+                                        borderRadius: '6px',
+                                        background: kpi.iconBg,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                    }}
+                                >
+                                    <kpi.icon size={18} color="#343330" />
+                                </div>
+                                <span
+                                    style={{
+                                        fontSize: '14px',
+                                        fontWeight: 500,
+                                        color: 'var(--ds-text-secondary)',
+                                        lineHeight: 1.5
+                                    }}
+                                >
+                                    {kpi.label}
+                                </span>
+                            </div>
+                            
+                            {/* Value and Trend Row */}
+                            <div className="d-flex align-items-end gap-2">
+                                <p
+                                    className="mb-0"
+                                    style={{
+                                        fontSize: '28px',
+                                        fontWeight: 600,
+                                        color: 'var(--ds-text-primary)',
+                                        lineHeight: 1.2
+                                    }}
+                                >
+                                    {kpi.value}
+                                </p>
+                                <span
+                                    className="d-flex align-items-center gap-1 mb-1"
+                                    style={{
+                                        fontSize: '12px',
+                                        fontWeight: 500,
+                                        color: kpi.trendDirection === 'up' ? '#16a34a' : '#dc2626',
+                                    }}
+                                >
+                                    {kpi.trendDirection === 'up' ? (
+                                        <FiTrendingUp size={12} />
+                                    ) : (
+                                        <FiTrendingDown size={12} />
+                                    )}
+                                    {kpi.trend}
+                                </span>
+                            </div>
+                            
+                            {/* Subtitle */}
+                            <span
+                                style={{
+                                    fontSize: '12px',
+                                    color: 'var(--ds-text-muted)',
+                                }}
+                            >
+                                {kpi.subtitle}
+                            </span>
                         </div>
-                    </div>
-                </div>
 
-                {/* Vertical Divider */}
-                <div
-                    style={{
-                        width: '1px',
-                        background: 'var(--ds-border-secondary)',
-                        alignSelf: 'stretch',
-                        margin: '0 32px'
-                    }}
-                />
-
-                {/* Inflows Section */}
-                <div
-                    className="d-flex flex-column gap-2 py-4"
-                    style={{ flex: '0 0 auto', paddingRight: '32px' }}
-                >
-                    <div className="d-flex align-items-center gap-2">
-                        <div
-                            style={{
-                                width: '32px',
-                                height: '32px',
-                                borderRadius: '6px',
-                                background: '#bbff00',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                            }}
-                        >
-                            <FiArrowDownLeft size={20} color="#343330" />
-                        </div>
-                        <span
-                            style={{
-                                fontSize: '16px',
-                                fontWeight: 400,
-                                color: 'var(--ds-text-secondary)',
-                                lineHeight: 1.5
-                            }}
-                        >
-                            New This Month
-                        </span>
-                    </div>
-                    <p
-                        className="mb-0"
-                        style={{
-                            fontSize: '32px',
-                            fontWeight: 600,
-                            color: 'var(--ds-text-primary)',
-                            lineHeight: 1.5
-                        }}
-                    >
-                        + 38
-                    </p>
-                </div>
-
-                {/* Vertical Divider */}
-                <div
-                    style={{
-                        width: '1px',
-                        background: 'var(--ds-border-secondary)',
-                        alignSelf: 'stretch',
-                        margin: '0 32px'
-                    }}
-                />
-
-                {/* Outflows Section */}
-                <div
-                    className="d-flex flex-column gap-2 py-4"
-                    style={{ flex: '0 0 auto' }}
-                >
-                    <div className="d-flex align-items-center gap-2">
-                        <div
-                            style={{
-                                width: '32px',
-                                height: '32px',
-                                borderRadius: '6px',
-                                background: '#bbff00',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                            }}
-                        >
-                            <FiArrowUpRight size={20} color="#343330" />
-                        </div>
-                        <span
-                            style={{
-                                fontSize: '16px',
-                                fontWeight: 400,
-                                color: 'var(--ds-text-secondary)',
-                                lineHeight: 1.5
-                            }}
-                        >
-                            Total Count
-                        </span>
-                    </div>
-                    <p
-                        className="mb-0"
-                        style={{
-                            fontSize: '32px',
-                            fontWeight: 600,
-                            color: 'var(--ds-text-primary)',
-                            lineHeight: 1.5
-                        }}
-                    >
-                        1,247
-                    </p>
-                </div>
+                        {/* Vertical Divider - not after last item */}
+                        {index < kpis.length - 1 && (
+                            <div
+                                style={{
+                                    width: '1px',
+                                    background: 'var(--ds-border-secondary)',
+                                    alignSelf: 'stretch',
+                                }}
+                            />
+                        )}
+                    </React.Fragment>
+                ))}
             </div>
         </div>
     )

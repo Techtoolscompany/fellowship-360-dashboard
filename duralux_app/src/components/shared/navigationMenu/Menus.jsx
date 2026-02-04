@@ -54,20 +54,14 @@ const Menus = ({ isCollapsed = false }) => {
                         <span className="sidebar-link__icon">
                             {getIcon(icon)}
                         </span>
-                        {!isCollapsed && (
-                            <>
-                                <span className="sidebar-link__text">{name}</span>
-                                {badge && (
-                                    <span className={`sidebar-badge sidebar-badge--${badge.type}`}>
-                                        {badge.count}
-                                    </span>
-                                )}
-                            </>
+                        <span className="sidebar-link__text">{name}</span>
+                        {badge && (
+                            <span className={`sidebar-badge sidebar-badge--${badge.type}`}>
+                                {badge.count}
+                            </span>
                         )}
                     </Link>
-                    {isCollapsed && (
-                        <span className="sidebar-tooltip">{name}</span>
-                    )}
+                    <span className="sidebar-tooltip">{name}</span>
                 </li>
 
                 {/* Sub-items shown inline below parent (flat nav, no accordion) */}

@@ -1,11 +1,11 @@
 'use client'
 import React, { useState, useEffect } from 'react'
 import dynamic from 'next/dynamic'
-import { FiArrowUpRight } from 'react-icons/fi'
+import { FiTrendingUp, FiTrendingDown } from 'react-icons/fi'
 
 const ReactApexChart = dynamic(() => import('react-apexcharts'), { ssr: false })
 
-const NetWorthDonutChart = () => {
+const GivingTrendChart = () => {
     const [isDark, setIsDark] = useState(false)
 
     useEffect(() => {
@@ -16,67 +16,90 @@ const NetWorthDonutChart = () => {
         return () => observer.disconnect()
     }, [])
 
+    const lineColor = '#bbff00'
     const textColor = isDark ? '#94a3b8' : '#343330'
-    const strokeColor = isDark ? '#1a2236' : '#f2f2f2'
+    const gridColor = isDark ? '#334155' : '#e5e7eb'
+
+    // Weekly giving data for past 4 weeks
+    const weeklyData = [
+        { week: 'Week 1', amount: 4250 },
+        { week: 'Week 2', amount: 5120 },
+        { week: 'Week 3', amount: 4890 },
+        { week: 'Week 4', amount: 4832 },
+    ]
+
+    const totalGiving = weeklyData.reduce((sum, w) => sum + w.amount, 0)
+    const lastWeekChange = ((weeklyData[3].amount - weeklyData[2].amount) / weeklyData[2].amount * 100).toFixed(1)
+    const isPositive = parseFloat(lastWeekChange) >= 0
 
     const chartOptions = {
         chart: {
-            type: 'donut',
+            type: 'area',
             fontFamily: 'Plus Jakarta Sans, sans-serif',
+            toolbar: { show: false },
+            sparkline: { enabled: false },
         },
-        colors: ['#d9d9d9', '#bbff00', '#ffe500', '#ffd966', isDark ? '#64748b' : '#343330'],
-        labels: ['Outreach', 'Facilities', 'Tithes & Offerings', 'Staff', 'Other'],
+        colors: [lineColor],
+        stroke: {
+            curve: 'smooth',
+            width: 3,
+        },
+        fill: {
+            type: 'gradient',
+            gradient: {
+                shadeIntensity: 1,
+                opacityFrom: 0.4,
+                opacityTo: 0.1,
+                stops: [0, 100]
+            }
+        },
         dataLabels: { enabled: false },
         legend: { show: false },
-        plotOptions: {
-            pie: {
-                donut: {
-                    size: '70%',
-                    labels: {
-                        show: true,
-                        name: {
-                            show: true,
-                            fontSize: '11px',
-                            fontWeight: 400,
-                            color: textColor,
-                            offsetY: -8,
-                        },
-                        value: {
-                            show: true,
-                            fontSize: '22px',
-                            fontWeight: 600,
-                            color: textColor,
-                            offsetY: 4,
-                            formatter: (val) => '$ ' + Number(val).toLocaleString()
-                        },
-                        total: {
-                            show: true,
-                            label: 'Total Ministry Budget',
-                            fontSize: '11px',
-                            fontWeight: 400,
-                            color: textColor,
-                            formatter: (w) => '$ ' + w.globals.seriesTotals.reduce((a, b) => a + b, 0).toLocaleString()
-                        }
-                    }
+        grid: {
+            borderColor: gridColor,
+            strokeDashArray: 4,
+            xaxis: { lines: { show: false } },
+            yaxis: { lines: { show: true } },
+        },
+        xaxis: {
+            categories: weeklyData.map(w => w.week),
+            axisBorder: { show: false },
+            axisTicks: { show: false },
+            labels: {
+                style: {
+                    fontSize: '12px',
+                    fontWeight: 400,
+                    colors: textColor,
                 }
             }
         },
-        stroke: { width: 2, colors: [strokeColor] },
-        states: { hover: { filter: { type: 'darken', value: 0.9 } } },
+        yaxis: {
+            show: true,
+            labels: {
+                style: {
+                    fontSize: '11px',
+                    colors: textColor,
+                },
+                formatter: (val) => '$' + (val / 1000).toFixed(1) + 'k'
+            }
+        },
         tooltip: {
             enabled: true,
-            y: { formatter: (val) => '$ ' + val.toLocaleString() }
+            y: { formatter: (val) => '$' + val.toLocaleString() }
+        },
+        markers: {
+            size: 4,
+            colors: ['#fff'],
+            strokeColors: lineColor,
+            strokeWidth: 2,
+            hover: { size: 6 }
         }
     }
 
-    const series = [158000, 342000, 980000, 425000, 95000]
-
-    const legendItems = [
-        { label: 'Outreach', color: '#d9d9d9' },
-        { label: 'Facilities', color: '#bbff00' },
-        { label: 'Tithes & Offerings', color: '#ffe500' },
-        { label: 'Staff', color: '#ffd966' },
-    ]
+    const series = [{
+        name: 'Weekly Giving',
+        data: weeklyData.map(w => w.amount)
+    }]
 
     return (
         <div className="col-xxl-4 col-lg-6">
@@ -85,97 +108,72 @@ const NetWorthDonutChart = () => {
                 style={{
                     borderRadius: '24px',
                     overflow: 'hidden',
-                    position: 'relative',
                     height: '334px',
                 }}
             >
                 <div className="card-body p-4">
-                    <p
-                        className="mb-0"
-                        style={{
-                            fontSize: '20px',
-                            fontWeight: 600,
-                            color: 'var(--ds-text-primary)',
-                            lineHeight: '28px',
-                            textTransform: 'capitalize',
-                        }}
-                    >
-                        Ministry Overview
-                    </p>
-
-                    {/* Legend */}
-                    <div
-                        className="d-flex flex-column gap-2 mt-3"
-                        style={{ position: 'relative', zIndex: 2 }}
-                    >
-                        {legendItems.map((item, index) => (
-                            <div key={index} className="d-flex align-items-center gap-3">
-                                <div
-                                    style={{
-                                        width: '12px',
-                                        height: '12px',
-                                        borderRadius: '360px',
-                                        background: item.color,
-                                    }}
-                                />
-                                <span
-                                    style={{
-                                        fontSize: '12px',
-                                        fontWeight: 400,
-                                        color: 'var(--ds-text-secondary)',
-                                        textTransform: 'capitalize',
-                                    }}
-                                >
-                                    {item.label}
-                                </span>
-                            </div>
-                        ))}
-                    </div>
-
-                    {/* Trend Badge */}
-                    <div
-                        style={{
-                            position: 'absolute',
-                            bottom: '23px',
-                            left: '23px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            padding: '2px 12px',
-                            background: '#bbff00',
-                            borderRadius: '360px',
-                            zIndex: 2,
-                        }}
-                    >
-                        <span
+                    <div className="d-flex align-items-start justify-content-between mb-2">
+                        <div>
+                            <p
+                                className="mb-1"
+                                style={{
+                                    fontSize: '20px',
+                                    fontWeight: 600,
+                                    color: 'var(--ds-text-primary)',
+                                    lineHeight: '28px',
+                                }}
+                            >
+                                Giving Trends
+                            </p>
+                            <p
+                                className="mb-0"
+                                style={{
+                                    fontSize: '12px',
+                                    fontWeight: 400,
+                                    color: 'var(--ds-text-secondary)',
+                                }}
+                            >
+                                Week-to-week giving over past 4 weeks
+                            </p>
+                        </div>
+                        <div
+                            className="d-flex align-items-center gap-1"
                             style={{
-                                fontSize: '12px',
-                                fontWeight: 400,
-                                color: '#000329',
-                                textTransform: 'capitalize',
+                                padding: '4px 12px',
+                                background: isPositive ? '#dcfce7' : '#fee2e2',
+                                borderRadius: '360px',
+                                fontSize: '13px',
+                                fontWeight: 500,
+                                color: isPositive ? '#16a34a' : '#dc2626',
                             }}
                         >
-                            Increased by 12%
-                        </span>
-                        <FiArrowUpRight size={14} color="#000329" style={{ transform: 'rotate(45deg)' }} />
+                            {isPositive ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />}
+                            {isPositive ? '+' : ''}{lastWeekChange}%
+                        </div>
                     </div>
 
-                    {/* Chart */}
-                    <div
+                    {/* Total */}
+                    <p
+                        className="mb-0 mt-2"
                         style={{
-                            position: 'absolute',
-                            right: '-20px',
-                            top: '30px',
-                            width: '300px',
-                            height: '300px',
+                            fontSize: '28px',
+                            fontWeight: 600,
+                            color: 'var(--ds-text-primary)',
                         }}
                     >
+                        ${totalGiving.toLocaleString()}
+                    </p>
+                    <span style={{ fontSize: '12px', color: 'var(--ds-text-muted)' }}>
+                        Total over 4 weeks
+                    </span>
+
+                    <div style={{ marginTop: '12px', height: '160px' }}>
                         <ReactApexChart
                             key={isDark ? 'dark' : 'light'}
                             options={chartOptions}
                             series={series}
-                            type="donut"
-                            height={300}
+                            type="area"
+                            height={160}
                         />
                     </div>
                 </div>
@@ -184,4 +182,4 @@ const NetWorthDonutChart = () => {
     )
 }
 
-export default NetWorthDonutChart
+export default GivingTrendChart

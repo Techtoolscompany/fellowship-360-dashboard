@@ -4,11 +4,11 @@ import { FiMoreVertical, FiCheck, FiClock } from 'react-icons/fi'
 
 const TransactionHistoryCard = () => {
     const transactions = [
-        { date: '13/1/2025', amount: '$12,432', status: 'pending' },
-        { date: '12/1/2025', amount: '$184', status: 'done' },
-        { date: '10/1/2025', amount: '$235', status: 'pending' },
-        { date: '08/1/2025', amount: '$3,750', status: 'done' },
-        { date: '05/1/2025', amount: '$520', status: 'done' },
+        { date: '02/04/2025', type: 'Tithe', donor: 'Johnson Family', amount: '$850', status: 'done' },
+        { date: '02/04/2025', type: 'Offering', donor: 'Williams, M.', amount: '$125', status: 'done' },
+        { date: '02/03/2025', type: 'Building Fund', donor: 'Anonymous', amount: '$2,500', status: 'pending' },
+        { date: '02/02/2025', type: 'Missions', donor: 'Chen, D.', amount: '$200', status: 'done' },
+        { date: '02/01/2025', type: 'Tithe', donor: 'Garcia Family', amount: '$1,100', status: 'done' },
     ]
 
     const StatusBadge = ({ status }) => {

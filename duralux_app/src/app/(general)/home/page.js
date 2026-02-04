@@ -10,8 +10,7 @@ import {
     HighlightPromoCard,
     TransactionHistoryCard,
     DebtStatusCard,
-    NetWorthLineChart,
-    ThisMonthCard
+    NetWorthLineChart
 } from '@/components/dashboard'
 
 const HomePage = () => {
@@ -58,12 +57,9 @@ const HomePage = () => {
                     <TrendsBarChart />
                     <HighlightPromoCard />
 
-                    {/* Row 2: Left stacked cards + Line chart + Activity */}
+                    {/* Row 2: Giving YTD + Line chart + Activity */}
                     <div className="col-xxl-3 col-lg-6">
-                        <div className="d-flex flex-column gap-4 h-100">
-                            <DebtStatusCard />
-                            <ThisMonthCard />
-                        </div>
+                        <DebtStatusCard />
                     </div>
                     <NetWorthLineChart />
                     <TransactionHistoryCard />

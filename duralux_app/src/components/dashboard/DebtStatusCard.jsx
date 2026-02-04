@@ -1,10 +1,25 @@
 'use client'
 import React from 'react'
+import { FiTrendingUp, FiCalendar } from 'react-icons/fi'
 
-const DebtStatusCard = () => {
+const GivingYTDCard = () => {
+    // Sample YTD data
+    const ytdData = {
+        currentAmount: 42580,
+        goalAmount: 120000,
+        lastYearSameTime: 38200,
+        percentComplete: 35.5,
+        monthlyBreakdown: [
+            { month: 'Jan', amount: 22450 },
+            { month: 'Feb', amount: 20130 },
+        ]
+    }
+
+    const vsLastYear = ((ytdData.currentAmount - ytdData.lastYearSameTime) / ytdData.lastYearSameTime * 100).toFixed(1)
+
     return (
         <div
-            className="card"
+            className="card h-100"
             style={{
                 borderRadius: '24px',
                 border: '1px solid var(--ds-border-secondary, #b5b5b5)',
@@ -12,40 +27,70 @@ const DebtStatusCard = () => {
                 overflow: 'hidden',
             }}
         >
-            <div className="card-body p-4 d-flex flex-column justify-content-between">
-                <div>
-                    <p
-                        className="mb-1"
+            <div className="card-body p-4 d-flex flex-column">
+                {/* Header */}
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                    <div>
+                        <p
+                            className="mb-1"
+                            style={{
+                                fontSize: '20px',
+                                fontWeight: 700,
+                                color: '#fff',
+                            }}
+                        >
+                            Giving Year to Date
+                        </p>
+                        <div className="d-flex align-items-center gap-2">
+                            <FiCalendar size={14} color="#9ca3af" />
+                            <span style={{ fontSize: '12px', color: '#9ca3af' }}>
+                                Jan 1 - Feb 4, 2025
+                            </span>
+                        </div>
+                    </div>
+                    <div
+                        className="d-flex align-items-center gap-1"
                         style={{
-                            fontSize: '20px',
-                            fontWeight: 700,
-                            color: '#fff',
-                            textTransform: 'capitalize',
+                            padding: '4px 10px',
+                            background: 'rgba(187, 255, 0, 0.2)',
+                            borderRadius: '360px',
+                            fontSize: '12px',
+                            fontWeight: 500,
+                            color: '#bbff00',
                         }}
                     >
-                        Goal Progress
-                    </p>
+                        <FiTrendingUp size={12} />
+                        +{vsLastYear}% vs last year
+                    </div>
+                </div>
+
+                {/* Main Amount */}
+                <div className="mb-3">
                     <p
                         className="mb-0"
                         style={{
-                            fontSize: '16px',
-                            fontWeight: 400,
+                            fontSize: '36px',
+                            fontWeight: 700,
                             color: '#fff',
                         }}
                     >
-                        Annual Giving Goal
+                        ${ytdData.currentAmount.toLocaleString()}
                     </p>
+                    <span style={{ fontSize: '14px', color: '#9ca3af' }}>
+                        of ${ytdData.goalAmount.toLocaleString()} annual goal
+                    </span>
                 </div>
 
-                <div className="d-flex flex-column gap-3 mt-3">
+                {/* Progress Bar */}
+                <div className="mb-3">
                     <div
                         className="d-flex align-items-baseline"
                         style={{ paddingRight: '20px' }}
                     >
                         <div
                             style={{
-                                height: '19px',
-                                width: '62%',
+                                height: '24px',
+                                width: `${ytdData.percentComplete}%`,
                                 borderRadius: '360px',
                                 background: '#bbff00',
                                 marginRight: '-20px',
@@ -55,46 +100,61 @@ const DebtStatusCard = () => {
                         />
                         <div
                             style={{
-                                height: '19px',
+                                height: '24px',
                                 flex: 1,
                                 borderRadius: '360px',
-                                background: '#d9d9d9',
+                                background: '#4b4b47',
                                 zIndex: 1,
                             }}
                         />
                     </div>
-
-                    <div
-                        className="d-flex flex-column align-items-center gap-1"
-                        style={{ textAlign: 'center' }}
-                    >
-                        <span style={{ fontSize: '16px', fontWeight: 500, color: '#fff' }}>
-                            $156,000 of $250,000
+                    <div className="d-flex justify-content-between mt-2">
+                        <span style={{ fontSize: '14px', fontWeight: 500, color: '#fff' }}>
+                            {ytdData.percentComplete}% Complete
                         </span>
-                        <span style={{ fontSize: '16px', fontWeight: 400, color: '#fff' }}>
-                            62% Complete
+                        <span style={{ fontSize: '12px', color: '#9ca3af' }}>
+                            ${(ytdData.goalAmount - ytdData.currentAmount).toLocaleString()} remaining
                         </span>
                     </div>
-
-                    <button
-                        style={{
-                            width: '100%',
-                            padding: '12px 16px',
-                            borderRadius: '360px',
-                            background: '#fff',
-                            border: 'none',
-                            fontSize: '16px',
-                            fontWeight: 600,
-                            color: '#343330',
-                            cursor: 'pointer',
-                        }}
-                    >
-                        View Details
-                    </button>
                 </div>
+
+                {/* Monthly Breakdown */}
+                <div className="mt-auto">
+                    <p style={{ fontSize: '12px', fontWeight: 600, color: '#9ca3af', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        Monthly Breakdown
+                    </p>
+                    <div className="d-flex flex-column gap-2">
+                        {ytdData.monthlyBreakdown.map((month, index) => (
+                            <div key={index} className="d-flex justify-content-between align-items-center">
+                                <span style={{ fontSize: '14px', color: '#fff' }}>{month.month} 2025</span>
+                                <span style={{ fontSize: '14px', fontWeight: 600, color: '#bbff00' }}>
+                                    ${month.amount.toLocaleString()}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* View Details Button */}
+                <button
+                    style={{
+                        width: '100%',
+                        padding: '12px 16px',
+                        borderRadius: '360px',
+                        background: '#fff',
+                        border: 'none',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        color: '#343330',
+                        cursor: 'pointer',
+                        marginTop: '16px',
+                    }}
+                >
+                    View Full Report
+                </button>
             </div>
         </div>
     )
 }
 
-export default DebtStatusCard
+export default GivingYTDCard

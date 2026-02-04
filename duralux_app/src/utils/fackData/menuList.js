@@ -1,20 +1,20 @@
 export const menuList = [
     {
         id: 0,
-        name: "Home",
-        path: "/home",
-        icon: 'feather-home',
-        dropdownMenu: [
-            {
-                id: 1,
-                name: "Dashboard",
-                path: "/home",
-                subdropdownMenu: false
-            }
-        ]
+        name: "Grace AI",
+        path: "/grace/dashboard",
+        icon: 'feather-zap',
+        dropdownMenu: []
     },
     {
         id: 1,
+        name: "Ministry Overview",
+        path: "/home",
+        icon: 'feather-home',
+        dropdownMenu: []
+    },
+    {
+        id: 2,
         name: "People",
         path: "#",
         icon: 'feather-users',
@@ -34,7 +34,7 @@ export const menuList = [
         ]
     },
     {
-        id: 2,
+        id: 3,
         name: "Engage",
         path: '#',
         icon: 'feather-target',
@@ -54,7 +54,7 @@ export const menuList = [
         ]
     },
     {
-        id: 3,
+        id: 4,
         name: "Comms",
         path: "#",
         icon: 'feather-message-circle',
@@ -73,31 +73,17 @@ export const menuList = [
             },
             {
                 id: 3,
-                name: "Templates",
-                path: "/comms/templates",
-                subdropdownMenu: false
-            }
-        ],
-    },
-    {
-        id: 4,
-        name: "Grace AI",
-        path: "#",
-        icon: 'feather-phone',
-        dropdownMenu: [
-            {
-                id: 1,
                 name: "Calls",
                 path: "/grace/calls",
                 subdropdownMenu: false
             },
             {
-                id: 2,
-                name: "Settings",
-                path: "/grace/settings",
+                id: 4,
+                name: "Templates",
+                path: "/comms/templates",
                 subdropdownMenu: false
             }
-        ]
+        ],
     },
     {
         id: 5,
@@ -220,6 +206,12 @@ export const menuList = [
                 name: "Billing",
                 path: "/settings/billing",
                 subdropdownMenu: false
+            },
+            {
+                id: 5,
+                name: "Grace AI",
+                path: "/grace/settings",
+                subdropdownMenu: false
             }
         ]
     },
@@ -248,11 +240,11 @@ export const menuList = [
 export const menuSections = [
     {
         title: 'Main',
-        items: ['Home', 'People', 'Engage']
+        items: ['Grace AI', 'Ministry Overview', 'People', 'Engage']
     },
     {
         title: 'Communication',
-        items: ['Comms', 'Grace AI', 'Prayer & Care']
+        items: ['Comms', 'Prayer & Care']
     },
     {
         title: 'Operations',

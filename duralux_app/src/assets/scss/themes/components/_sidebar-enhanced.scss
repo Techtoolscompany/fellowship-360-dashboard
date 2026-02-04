@@ -41,7 +41,34 @@ $accent-lime: #bbff00;
       overflow: hidden;
     }
     
+    // Hide text labels and badges when collapsed
+    .sidebar-link__text,
+    .sidebar-badge {
+      opacity: 0;
+      width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      transition: opacity 0.15s ease, width 0.15s ease;
+    }
+    
+    // Hide section divider labels
+    .sidebar-divider__label {
+      opacity: 0;
+      width: 0;
+      overflow: hidden;
+    }
+    
     .nxl-arrow { opacity: 0; width: 0; }
+    
+    // Center icons in collapsed state
+    .sidebar-link {
+      justify-content: center;
+      padding: 10px !important;
+      
+      .sidebar-link__icon {
+        margin: 0;
+      }
+    }
     
     .nxl-link {
       justify-content: center;
@@ -53,6 +80,12 @@ $accent-lime: #bbff00;
         display: flex;
         justify-content: center;
       }
+    }
+    
+    // Show tooltips on hover when collapsed
+    .sidebar-item:hover .sidebar-tooltip {
+      opacity: 1;
+      visibility: visible;
     }
     
     .nxl-submenu {
@@ -85,6 +118,11 @@ $accent-lime: #bbff00;
     
     .sidebar-collapse-btn {
       transform: rotate(180deg);
+    }
+    
+    // Hide quick add text
+    .quick-action-btn span {
+      display: none;
     }
   }
 }
