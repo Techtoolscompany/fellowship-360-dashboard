@@ -8,15 +8,36 @@ import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
-  Boxes,
-  LifeBuoy,
+  Zap,
+  Home,
+  Users,
+  Layers,
+  Target,
+  CheckCircle,
+  MessageCircle,
+  Send,
+  Phone,
+  FileText,
+  Heart,
+  Calendar,
+  Clock,
+  UserCheck,
+  DollarSign,
+  UserPlus,
+  GitCommit,
+  BarChart2,
+  Globe,
+  Shield,
+  Link as LinkIcon,
+  Briefcase,
+  Sliders,
+  MapPin,
   Settings,
   Menu,
   ChevronLeft,
-  FileText,
-  Map,
+  ChevronDown,
+  ChevronRight,
   CreditCard,
-  Users,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -56,32 +77,34 @@ function NavItem({
   const pathname = usePathname();
   const isActive = pathname === href;
 
+  // Clean Style: No background overlay on active.
+  // Active = Dark Text + Lime Green Icon.
   const content = (
     <Link
       href={href}
       className={cn(
-        "group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+        "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
         isActive
-          ? "bg-primary text-primary-foreground"
-          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          ? "bg-transparent text-[#1a1d21]" // Active: No bg, Dark Text
+          : "text-[#64748b] hover:bg-[#f3f4f6] hover:text-[#1f2937]",
         isCollapsed && "justify-center px-2",
         className
       )}
     >
       <Icon
         className={cn(
-          "h-5 w-5",
-          "transition-transform duration-100",
-          isActive ? "text-inherit" : "text-inherit"
+          "h-5 w-5 shrink-0 transition-colors",
+          // Active Icon = Lime Green (#bbff00), Inactive = Gray
+          isActive ? "text-[#bbff00] fill-[#bbff00]/20" : "text-[#9ca3af] group-hover:text-[#1a1d21]"
         )}
       />
       {!isCollapsed && (
         <>
-          <span>{children}</span>
+          <span className="truncate">{children}</span>
           {isNew && (
             <Badge
               variant="secondary"
-              className="ml-auto text-[10px] h-4 bg-accent/10 text-accent font-medium"
+              className="ml-auto text-[10px] h-4 bg-[#bbff00]/20 text-[#4a6b00] font-medium border-none"
             >
               New
             </Badge>
@@ -108,91 +131,138 @@ function NavItem({
 
 function SidebarContent({ className, isCollapsed }: { className?: string; isCollapsed?: boolean }) {
   const { user } = useUser();
+  const [collapsedSections, setCollapsedSections] = React.useState<Record<string, boolean>>({});
+
+  const toggleSection = (section: string) => {
+    setCollapsedSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  const SectionHeader = ({ title, section }: { title: string; section: string }) => {
+    if (isCollapsed) return null;
+    return (
+      <button
+        onClick={() => toggleSection(section)}
+        className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 hover:text-muted-foreground"
+      >
+        {title}
+        {collapsedSections[section] ? (
+          <ChevronRight className="h-3 w-3" />
+        ) : (
+          <ChevronDown className="h-3 w-3" />
+        )}
+      </button>
+    );
+  };
 
   return (
     <div className={cn("flex flex-col h-full", className)}>
-      {/* Organization Switcher */}
-      <div className={cn("mb-6", isCollapsed ? "px-2" : "px-2")}>
+      {/* Organization Switcher (Church Switcher) */}
+      <div className={cn("mb-4", isCollapsed ? "px-2" : "px-2")}>
         <OrganizationSwitcher isCollapsed={isCollapsed} />
       </div>
 
       {/* Main Navigation */}
-      <nav className={cn("space-y-1 flex-1", isCollapsed ? "px-2" : "px-2")}>
-        <NavItem href="/app" icon={LayoutDashboard} isCollapsed={isCollapsed}>
-          Dashboard
-        </NavItem>
-        <NavItem href="/app/stuff" icon={Boxes} isCollapsed={isCollapsed}>
-          Stuff
-        </NavItem>
-        <NavItem href="/app/support" icon={LifeBuoy} isCollapsed={isCollapsed}>
-          Support
-        </NavItem>
-        <NavItem
-          href="https://docs.indiekit.com"
-          icon={FileText}
-          isCollapsed={isCollapsed}
-          className="text-muted-foreground! hover:text-accent-foreground!"
-        >
-          Documentation
-        </NavItem>
-        <NavItem
-          href="https://roadmap.indiekit.com"
-          icon={Map}
-          isCollapsed={isCollapsed}
-          className="text-muted-foreground! hover:text-accent-foreground!"
-        >
-          Roadmap
-        </NavItem>
+      <nav className={cn("space-y-1 flex-1 overflow-y-auto", isCollapsed ? "px-2" : "px-2")}>
+        {/* Main Section */}
+        <SectionHeader title="Main" section="main" />
+        {!collapsedSections.main && (
+          <div className="space-y-0.5">
+            <NavItem href="/app" icon={Zap} isCollapsed={isCollapsed} isNew>
+              Grace AI
+            </NavItem>
+            <NavItem href="/app/home" icon={Home} isCollapsed={isCollapsed}>
+              Ministry Overview
+            </NavItem>
+            <NavItem href="/app/contacts" icon={Users} isCollapsed={isCollapsed}>
+              Contacts
+            </NavItem>
+            <NavItem href="/app/segments" icon={Layers} isCollapsed={isCollapsed}>
+              Segments
+            </NavItem>
+            <NavItem href="/app/pipeline" icon={Target} isCollapsed={isCollapsed}>
+              Pipeline
+            </NavItem>
+            <NavItem href="/app/tasks" icon={CheckCircle} isCollapsed={isCollapsed}>
+              Tasks
+            </NavItem>
+          </div>
+        )}
+
+        {/* Communication Section */}
+        <SectionHeader title="Communication" section="communication" />
+        {!collapsedSections.communication && (
+          <div className="space-y-0.5">
+            <NavItem href="/app/conversations" icon={MessageCircle} isCollapsed={isCollapsed}>
+              Conversations
+            </NavItem>
+            <NavItem href="/app/broadcasts" icon={Send} isCollapsed={isCollapsed}>
+              Broadcasts
+            </NavItem>
+            <NavItem href="/app/calls" icon={Phone} isCollapsed={isCollapsed}>
+              Calls
+            </NavItem>
+            <NavItem href="/app/templates" icon={FileText} isCollapsed={isCollapsed}>
+              Templates
+            </NavItem>
+            <NavItem href="/app/prayer-requests" icon={Heart} isCollapsed={isCollapsed}>
+              Prayer Requests
+            </NavItem>
+          </div>
+        )}
+
+        {/* Operations Section */}
+        <SectionHeader title="Operations" section="operations" />
+        {!collapsedSections.operations && (
+          <div className="space-y-0.5">
+            <NavItem href="/app/calendar" icon={Calendar} isCollapsed={isCollapsed}>
+              Calendar
+            </NavItem>
+            <NavItem href="/app/appointments" icon={Clock} isCollapsed={isCollapsed}>
+              Appointments
+            </NavItem>
+            <NavItem href="/app/volunteers" icon={UserCheck} isCollapsed={isCollapsed}>
+              Volunteers
+            </NavItem>
+            <NavItem href="/app/donations" icon={DollarSign} isCollapsed={isCollapsed}>
+              Donations
+            </NavItem>
+            <NavItem href="/app/donors" icon={UserPlus} isCollapsed={isCollapsed}>
+              Donors
+            </NavItem>
+            <NavItem href="/app/pledges" icon={GitCommit} isCollapsed={isCollapsed}>
+              Pledges
+            </NavItem>
+            <NavItem href="/app/reports" icon={BarChart2} isCollapsed={isCollapsed}>
+              Reports
+            </NavItem>
+          </div>
+        )}
+
+        {/* Administration Section */}
+        <SectionHeader title="Administration" section="administration" />
+        {!collapsedSections.administration && (
+          <div className="space-y-0.5">
+            <NavItem href="/app/settings" icon={Globe} isCollapsed={isCollapsed}>
+              Church Profile
+            </NavItem>
+            <NavItem href="/app/settings/team" icon={Shield} isCollapsed={isCollapsed}>
+              Users & Roles
+            </NavItem>
+            <NavItem href="/app/settings/integrations" icon={LinkIcon} isCollapsed={isCollapsed}>
+              Integrations
+            </NavItem>
+            <NavItem href="/app/settings/billing" icon={CreditCard} isCollapsed={isCollapsed}>
+              Billing
+            </NavItem>
+            <NavItem href="/app/settings/grace" icon={Sliders} isCollapsed={isCollapsed}>
+              Grace AI Settings
+            </NavItem>
+          </div>
+        )}
       </nav>
 
-      {/* Divider */}
-      <div
-        className={cn(
-          "my-2 border-t border-border/40",
-          isCollapsed ? "mx-2" : "mx-2"
-        )}
-      />
-
-      {/* Bottom Navigation */}
-      <div className={cn("space-y-1", isCollapsed ? "px-2" : "px-2")}>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              className={cn(
-                "w-full justify-start gap-3 px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                "rounded-md",
-                isCollapsed && "justify-center px-2"
-              )}
-            >
-              <Settings className="h-5 w-5 text-inherit" />
-              {!isCollapsed && "Settings"}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align={isCollapsed ? "center" : "start"}
-            className="w-48"
-          >
-            <DropdownMenuItem asChild>
-              <Link href="/app/settings" className="flex items-center font-medium">
-                <Settings className="h-4 w-4 mr-2 text-inherit" />
-                General
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href="/app/settings/team" className="flex items-center font-medium">
-                <Users className="h-4 w-4 mr-2 text-inherit" />
-                Team
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href="/app/settings/billing" className="flex items-center font-medium">
-                <CreditCard className="h-4 w-4 mr-2 text-inherit" />
-                Billing
-              </Link>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+      {/* User Dropdown at bottom */}
+      <div className={cn("border-t border-border/40 pt-3", isCollapsed ? "px-2" : "px-2")}>
         <UserDropdown 
           user={user || null} 
           variant={isCollapsed ? "compact" : "full"} 
