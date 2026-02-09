@@ -16,6 +16,7 @@
     "@aws-sdk/client-ses": "^3.940.0",
     "@aws-sdk/s3-presigned-post": "^3.940.0",
     "@aws-sdk/s3-request-presigner": "^3.940.0",
+    "@hello-pangea/dnd": "^18.0.1",
     "@hookform/resolvers": "^3.10.0",
     "@neondatabase/serverless": "^0.10.4",
     "@next/mdx": "16.0.5",

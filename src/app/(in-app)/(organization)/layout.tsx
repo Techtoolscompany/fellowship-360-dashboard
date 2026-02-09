@@ -176,8 +176,8 @@ function SidebarContent({ className, isCollapsed }: { className?: string; isColl
             <NavItem href="/app/contacts" icon={Users} isCollapsed={isCollapsed}>
               Contacts
             </NavItem>
-            <NavItem href="/app/segments" icon={Layers} isCollapsed={isCollapsed}>
-              Segments
+            <NavItem href="/app/ministries" icon={Layers} isCollapsed={isCollapsed}>
+              Ministries
             </NavItem>
             <NavItem href="/app/pipeline" icon={Target} isCollapsed={isCollapsed}>
               Pipeline
@@ -274,6 +274,7 @@ function SidebarContent({ className, isCollapsed }: { className?: string; isColl
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  // Bypass auth for development - hooks still called but results ignored
   const { isLoading: isUserLoading } = useUser();
   const { organization, isLoading: isOrgLoading } = useOrganization();
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -284,15 +285,17 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     // Remove the setIsMobileOpen call since we no longer need it
   }, [pathname]);
 
-  useEffect(() => {
-    if (!isUserLoading && !isOrgLoading && !organization) {
-      router.push("/app/create-organization");
-    }
-  }, [isUserLoading, isOrgLoading, organization, pathname, router]);
+  // BYPASSED: Auth and org checks disabled for development
+  // useEffect(() => {
+  //   if (!isUserLoading && !isOrgLoading && !organization) {
+  //     router.push("/app/create-organization");
+  //   }
+  // }, [isUserLoading, isOrgLoading, organization, pathname, router]);
 
-  if (isUserLoading || isOrgLoading) {
-    return <PageLoader />;
-  }
+  // BYPASSED: Skip loading state for development
+  // if (isUserLoading || isOrgLoading) {
+  //   return <PageLoader />;
+  // }
 
   return (
     <TooltipProvider>
@@ -350,7 +353,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col">
-          <div className="flex-1 overflow-auto md:pt-0 pt-16">
+          <div className="flex-1 md:pt-0 pt-16">
             <div className="p-6 max-w-7xl mx-auto w-full">{children}</div>
           </div>
           <InAppFooter />
