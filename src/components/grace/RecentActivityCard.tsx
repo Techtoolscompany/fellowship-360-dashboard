@@ -2,89 +2,32 @@
 import React from "react";
 import {
   FiMoreVertical,
-  FiPhone,
-  FiMail,
-  FiMessageSquare,
-  FiCalendar,
+  FiDollarSign,
   FiHeart,
+  FiCalendar,
+  FiMessageSquare,
   FiUser,
 } from "react-icons/fi";
 
-const RecentActivityCard = () => {
-  const activities = [
-    {
-      id: 1,
-      type: "call",
-      icon: FiPhone,
-      iconBg: "#bbff00",
-      iconColor: "#343330",
-      title: "Call with Sarah Johnson",
-      subtitle: "Follow-up call - Connected",
-      time: "10:32 AM",
-      status: "completed",
-    },
-    {
-      id: 2,
-      type: "prayer",
-      icon: FiHeart,
-      iconBg: "#fef3c7",
-      iconColor: "#d97706",
-      title: "Prayer Request Received",
-      subtitle: "Michael Davis - Health concern",
-      time: "10:15 AM",
-      status: "new",
-    },
-    {
-      id: 3,
-      type: "appointment",
-      icon: FiCalendar,
-      iconBg: "#e0e7ff",
-      iconColor: "#4f46e5",
-      title: "Appointment Scheduled",
-      subtitle: "Emily White - Counseling at 3:00 PM",
-      time: "9:48 AM",
-      status: "scheduled",
-    },
-    {
-      id: 4,
-      type: "email",
-      icon: FiMail,
-      iconBg: "#818cf8",
-      iconColor: "#fff",
-      title: "Email Sent",
-      subtitle: "Welcome message to Robert Brown",
-      time: "9:30 AM",
-      status: "sent",
-    },
-    {
-      id: 5,
-      type: "inquiry",
-      icon: FiMessageSquare,
-      iconBg: "#d1fae5",
-      iconColor: "#059669",
-      title: "Inquiry Received",
-      subtitle: "Jennifer Martinez - Volunteer interest",
-      time: "9:12 AM",
-      status: "new",
-    },
-    {
-      id: 6,
-      type: "visitor",
-      icon: FiUser,
-      iconBg: "#343330",
-      iconColor: "#bbff00",
-      title: "Visitor Added to Pipeline",
-      subtitle: "David Chen - First time visitor",
-      time: "8:45 AM",
-      status: "new",
-    },
-  ];
+interface DonationRow {
+  id: string;
+  amount: string;
+  fund: string;
+  method: string;
+  date: Date | string;
+  donorName: string;
+}
 
-  const statusColors: any = {
-    completed: { bg: "#dcfce7", text: "#16a34a" },
-    new: { bg: "#fef3c7", text: "#d97706" },
-    scheduled: { bg: "#e0e7ff", text: "#4f46e5" },
-    sent: { bg: "#f3f4f6", text: "#6b7280" },
+const RecentActivityCard = ({ donations }: { donations?: DonationRow[] }) => {
+  const items = donations ?? [];
+
+  const getIcon = (method: string) => {
+    switch (method?.toLowerCase()) {
+      case "stripe": return { icon: FiDollarSign, bg: "#bbff00", color: "#343330" };
+      case "check": return { icon: FiDollarSign, bg: "#e0e7ff", color: "#4f46e5" };
+      case "cash": return { icon: FiDollarSign, bg: "#d1fae5", color: "#059669" };
+      default: return { icon: FiDollarSign, bg: "#fef3c7", color: "#d97706" };
+    }
   };
 
   return (
@@ -101,121 +44,75 @@ const RecentActivityCard = () => {
         <div className="p-0">
           <div className="flex items-center justify-between p-6 pb-3">
             <div>
-              <p
-                className="mb-0"
-                style={{
-                  fontSize: "20px",
-                  fontWeight: 600,
-                  color: "var(--ds-text-primary, #171717)",
-                }}
-              >
+              <p className="mb-0" style={{ fontSize: "20px", fontWeight: 600, color: "var(--ds-text-primary, #171717)" }}>
                 Recent Activity
               </p>
-              <p
-                className="mb-0"
-                style={{
-                  fontSize: "12px",
-                  color: "var(--ds-text-secondary, #737373)",
-                }}
-              >
-                All communications and requests
+              <p className="mb-0" style={{ fontSize: "12px", color: "var(--ds-text-secondary, #737373)" }}>
+                Latest donations and transactions
               </p>
             </div>
             <button
               style={{
-                width: "40px",
-                height: "40px",
-                borderRadius: "360px",
-                background: "var(--ds-bg-tertiary, #f5f5f5)",
-                border: "none",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
+                width: "40px", height: "40px", borderRadius: "360px",
+                background: "var(--ds-bg-tertiary, #f5f5f5)", border: "none",
+                display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
               }}
             >
-              <FiMoreVertical
-                size={20}
-                style={{ color: "var(--ds-icon-default, #6b7280)" }}
-              />
+              <FiMoreVertical size={20} style={{ color: "var(--ds-icon-default, #6b7280)" }} />
             </button>
           </div>
 
           <div className="flex flex-col px-6 pb-6">
-            {activities.map((activity, index) => (
-              <div
-                key={activity.id}
-                className="flex items-center gap-3 py-3"
-                style={{
-                  borderBottom:
-                    index < activities.length - 1
-                      ? "1px solid var(--ds-border-secondary, #e5e5e5)"
-                      : "none",
-                }}
-              >
+            {items.length === 0 ? (
+              <p style={{ fontSize: "13px", color: "var(--ds-text-muted, #a3a3a3)", textAlign: "center", padding: "20px 0" }}>
+                No recent activity
+              </p>
+            ) : items.map((activity, index) => {
+              const iconConfig = getIcon(activity.method);
+              const Icon = iconConfig.icon;
+              return (
                 <div
+                  key={activity.id}
+                  className="flex items-center gap-3 py-3"
                   style={{
-                    width: "40px",
-                    height: "40px",
-                    borderRadius: "10px",
-                    background: activity.iconBg,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
+                    borderBottom: index < items.length - 1 ? "1px solid var(--ds-border-secondary, #e5e5e5)" : "none",
                   }}
                 >
-                  <activity.icon size={18} color={activity.iconColor} />
-                </div>
+                  <div
+                    style={{
+                      width: "40px", height: "40px", borderRadius: "10px",
+                      background: iconConfig.bg, display: "flex",
+                      alignItems: "center", justifyContent: "center", flexShrink: 0,
+                    }}
+                  >
+                    <Icon size={18} color={iconConfig.color} />
+                  </div>
 
-                <div className="flex-grow">
-                  <p
-                    className="mb-0"
-                    style={{
-                      fontSize: "14px",
-                      fontWeight: 500,
-                      color: "var(--ds-text-primary, #171717)",
-                    }}
-                  >
-                    {activity.title}
-                  </p>
-                  <span
-                    style={{
-                      fontSize: "12px",
-                      color: "var(--ds-text-muted, #a3a3a3)",
-                    }}
-                  >
-                    {activity.subtitle}
-                  </span>
-                </div>
+                  <div className="flex-grow">
+                    <p className="mb-0" style={{ fontSize: "14px", fontWeight: 500, color: "var(--ds-text-primary, #171717)" }}>
+                      ${Number(activity.amount).toLocaleString()} — {activity.fund}
+                    </p>
+                    <span style={{ fontSize: "12px", color: "var(--ds-text-muted, #a3a3a3)" }}>
+                      {activity.donorName || "Anonymous"} · {activity.method}
+                    </span>
+                  </div>
 
-                <div className="text-right">
-                  <span
-                    style={{
-                      fontSize: "11px",
-                      fontWeight: 500,
-                      padding: "4px 8px",
-                      borderRadius: "360px",
-                      background:
-                        statusColors[activity.status]?.bg || "#f3f4f6",
-                      color:
-                        statusColors[activity.status]?.text || "#6b7280",
-                    }}
-                  >
-                    {activity.status}
-                  </span>
-                  <p
-                    className="mb-0 mt-1"
-                    style={{
-                      fontSize: "11px",
-                      color: "var(--ds-text-muted, #a3a3a3)",
-                    }}
-                  >
-                    {activity.time}
-                  </p>
+                  <div className="text-right">
+                    <span
+                      style={{
+                        fontSize: "11px", fontWeight: 500, padding: "4px 8px", borderRadius: "360px",
+                        background: "#dcfce7", color: "#16a34a",
+                      }}
+                    >
+                      received
+                    </span>
+                    <p className="mb-0 mt-1" style={{ fontSize: "11px", color: "var(--ds-text-muted, #a3a3a3)" }}>
+                      {new Date(activity.date).toLocaleDateString()}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

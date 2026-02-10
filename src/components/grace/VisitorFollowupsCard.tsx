@@ -3,17 +3,15 @@ import React from "react";
 import Link from "next/link";
 import { FiArrowRight, FiUsers } from "react-icons/fi";
 
-const VisitorFollowupsCard = () => {
-  const data = {
-    inPipeline: 12,
-    newThisWeek: 5,
-    needsAttention: 3,
-    stages: [
-      { name: "First Visit", count: 5 },
-      { name: "Second Visit", count: 4 },
-      { name: "Connecting", count: 3 },
-    ],
-  };
+interface PipelineData {
+  total: number;
+  stages: { name: string; count: number }[];
+}
+
+const VisitorFollowupsCard = ({ data }: { data?: PipelineData }) => {
+  const d = data ?? { total: 0, stages: [] };
+  const stagesPreview = d.stages.slice(0, 3);
+  const needsAttention = stagesPreview.length > 0 ? stagesPreview[0].count : 0;
 
   return (
     <div className="w-full h-full">
@@ -41,7 +39,7 @@ const VisitorFollowupsCard = () => {
             >
               <FiUsers size={20} color="#bbff00" />
             </div>
-            {data.needsAttention > 0 && (
+            {needsAttention > 0 && (
               <span
                 style={{
                   fontSize: "11px",
@@ -52,7 +50,7 @@ const VisitorFollowupsCard = () => {
                   color: "#343330",
                 }}
               >
-                {data.needsAttention} need attention
+                {needsAttention} new visitors
               </span>
             )}
           </div>
@@ -67,50 +65,28 @@ const VisitorFollowupsCard = () => {
           >
             Visitor Follow-ups
           </h3>
-          <p
-            style={{
-              fontSize: "12px",
-              color: "#9ca3af",
-              marginBottom: "12px",
-            }}
-          >
+          <p style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "12px" }}>
             Linked to Engage Pipeline
           </p>
 
           <div className="flex gap-4 mb-3">
             <div>
-              <p
-                className="mb-0"
-                style={{
-                  fontSize: "24px",
-                  fontWeight: 700,
-                  color: "#bbff00",
-                }}
-              >
-                {data.inPipeline}
+              <p className="mb-0" style={{ fontSize: "24px", fontWeight: 700, color: "#bbff00" }}>
+                {d.total}
               </p>
-              <span style={{ fontSize: "11px", color: "#9ca3af" }}>
-                In Pipeline
-              </span>
+              <span style={{ fontSize: "11px", color: "#9ca3af" }}>In Pipeline</span>
             </div>
             <div>
-              <p
-                className="mb-0"
-                style={{
-                  fontSize: "24px",
-                  fontWeight: 700,
-                  color: "#fff",
-                }}
-              >
-                {data.newThisWeek}
+              <p className="mb-0" style={{ fontSize: "24px", fontWeight: 700, color: "#fff" }}>
+                {d.stages.length}
               </p>
-              <span style={{ fontSize: "11px", color: "#9ca3af" }}>New</span>
+              <span style={{ fontSize: "11px", color: "#9ca3af" }}>Stages</span>
             </div>
           </div>
 
           {/* Mini Pipeline Preview */}
           <div className="flex gap-2 mb-3">
-            {data.stages.map((stage, i) => (
+            {stagesPreview.map((stage, i) => (
               <div key={i} className="text-center" style={{ flex: 1 }}>
                 <div
                   style={{
@@ -128,7 +104,7 @@ const VisitorFollowupsCard = () => {
           </div>
 
           <Link
-            href="/engage/pipeline"
+            href="/app/pipeline"
             className="flex items-center gap-1 mt-auto"
             style={{
               fontSize: "13px",

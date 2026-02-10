@@ -3,13 +3,15 @@ import React from "react";
 import Link from "next/link";
 import { FiArrowRight } from "react-icons/fi";
 
-const AppointmentsCard = () => {
-  const data = {
-    today: 4,
-    thisWeek: 18,
-    pendingConfirmation: 2,
-    nextUp: { time: "2:30 PM", contact: "Sarah Johnson", type: "Counseling" },
-  };
+interface AppointmentData {
+  total: number;
+  pending: number;
+  confirmed: number;
+  completed: number;
+}
+
+const AppointmentsCard = ({ data }: { data?: AppointmentData }) => {
+  const d = data ?? { total: 0, pending: 0, confirmed: 0, completed: 0 };
 
   return (
     <div className="w-full h-full">
@@ -25,7 +27,7 @@ const AppointmentsCard = () => {
         <div className="p-6 h-full flex flex-col">
           <div className="flex items-center justify-between mb-3">
             <span style={{ fontSize: "28px" }}>📅</span>
-            {data.pendingConfirmation > 0 && (
+            {d.pending > 0 && (
               <span
                 style={{
                   fontSize: "11px",
@@ -36,7 +38,7 @@ const AppointmentsCard = () => {
                   color: "#fff",
                 }}
               >
-                {data.pendingConfirmation} pending
+                {d.pending} pending
               </span>
             )}
           </div>
@@ -54,53 +56,27 @@ const AppointmentsCard = () => {
 
           <div className="flex gap-4 mb-3">
             <div>
-              <p
-                className="mb-0"
-                style={{
-                  fontSize: "24px",
-                  fontWeight: 700,
-                  color: "#3730a3",
-                }}
-              >
-                {data.today}
+              <p className="mb-0" style={{ fontSize: "24px", fontWeight: 700, color: "#3730a3" }}>
+                {d.total}
               </p>
-              <span style={{ fontSize: "11px", color: "#4338ca" }}>Today</span>
+              <span style={{ fontSize: "11px", color: "#4338ca" }}>Total</span>
             </div>
             <div>
-              <p
-                className="mb-0"
-                style={{
-                  fontSize: "24px",
-                  fontWeight: 700,
-                  color: "#3730a3",
-                }}
-              >
-                {data.thisWeek}
+              <p className="mb-0" style={{ fontSize: "24px", fontWeight: 700, color: "#3730a3" }}>
+                {d.confirmed}
               </p>
-              <span style={{ fontSize: "11px", color: "#4338ca" }}>
-                This Week
-              </span>
+              <span style={{ fontSize: "11px", color: "#4338ca" }}>Confirmed</span>
+            </div>
+            <div>
+              <p className="mb-0" style={{ fontSize: "24px", fontWeight: 700, color: "#3730a3" }}>
+                {d.completed}
+              </p>
+              <span style={{ fontSize: "11px", color: "#4338ca" }}>Completed</span>
             </div>
           </div>
 
-          {data.nextUp && (
-            <div
-              className="p-2 mb-2"
-              style={{
-                background: "rgba(255,255,255,0.5)",
-                borderRadius: "8px",
-                fontSize: "11px",
-              }}
-            >
-              <span style={{ color: "#4338ca", fontWeight: 600 }}>Next: </span>
-              <span style={{ color: "#3730a3" }}>
-                {data.nextUp.time} - {data.nextUp.contact}
-              </span>
-            </div>
-          )}
-
           <Link
-            href="/scheduling/appointments"
+            href="/app/appointments"
             className="flex items-center gap-1 mt-auto"
             style={{
               fontSize: "13px",

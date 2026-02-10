@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "concurrently \"next dev --turbopack\" \"inngest-cli dev -p 8288\" \"npx react-email dev --dir ./src/emails --port 3001\"",
-    "build": "next build",
+    "build": "BROWSERSLIST_IGNORE_OLD_DATA=1 BASELINE_BROWSER_MAPPING_IGNORE_OLD_DATA=1 next build",
     "start": "next start",
     "lint": "eslint .",
     "script": "tsx --import './scripts/_bootstrap/index.ts'",
@@ -123,7 +123,7 @@
     "@types/pg": "^8.15.6",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
-    "baseline-browser-mapping": "^2.8.32",
+    "baseline-browser-mapping": "^2.9.19",
     "concurrently": "^9.2.1",
     "drizzle-kit": "0.31.1",
     "eslint": "^9.39.1",

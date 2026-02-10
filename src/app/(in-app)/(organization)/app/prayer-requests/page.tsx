@@ -1,36 +1,54 @@
 "use client";
 
-import React from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import React, { useState, useEffect, useCallback } from "react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Filter, Heart, Clock, CheckCircle, MoreHorizontal, User } from "lucide-react";
+import { Plus, Search, Filter, Heart, Clock, CheckCircle, MoreHorizontal, User, Loader2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-const prayerRequests = [
-  { id: 1, requester: "Sarah Johnson", request: "Please pray for my mother's surgery next week. She's having heart surgery on Tuesday.", category: "Health", date: "Feb 8, 2025", status: "active", prayerCount: 24, isPrivate: false },
-  { id: 2, requester: "Anonymous", request: "Struggling with job loss. Please pray for provision and new opportunities.", category: "Financial", date: "Feb 7, 2025", status: "active", prayerCount: 18, isPrivate: true },
-  { id: 3, requester: "Michael Davis", request: "Praise report! My wife and I are expecting our first child. Prayers for a healthy pregnancy.", category: "Praise", date: "Feb 6, 2025", status: "answered", prayerCount: 45, isPrivate: false },
-  { id: 4, requester: "The Williams Family", request: "Our teenage son is going through a difficult time. Please pray for wisdom and healing.", category: "Family", date: "Feb 5, 2025", status: "active", prayerCount: 32, isPrivate: false },
-  { id: 5, requester: "Pastor James Wilson", request: "Pray for our upcoming missions trip to Guatemala. Safety and open hearts.", category: "Missions", date: "Feb 4, 2025", status: "active", prayerCount: 67, isPrivate: false },
-];
-
-const kpiStats = [
-  { title: "Active Requests", value: "28", icon: Heart, color: "rose" },
-  { title: "Prayers This Week", value: "342", icon: Heart, color: "violet" },
-  { title: "Answered (MTD)", value: "12", icon: CheckCircle, color: "emerald" },
-  { title: "Avg Response Time", value: "2 hrs", icon: Clock, color: "blue" },
-];
+import useOrganization from "@/lib/organizations/useOrganization";
+import { getPrayerRequests, updatePrayerRequest } from "@/app/actions/prayer";
 
 export default function PrayerRequestsPage() {
+  const { organization } = useOrganization();
+  const orgId = organization?.id;
+  const [requests, setRequests] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchRequests = useCallback(async () => {
+    if (!orgId) return;
+    setLoading(true);
+    try {
+      const data = await getPrayerRequests(orgId);
+      setRequests(data);
+    } catch (err) {
+      console.error("Failed to fetch prayer requests:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [orgId]);
+
+  useEffect(() => { fetchRequests(); }, [fetchRequests]);
+
+  const handleMarkAnswered = async (id: string) => {
+    await updatePrayerRequest(id, { status: "answered" });
+    await fetchRequests();
+  };
+
+  const kpiStats = [
+    { title: "Active Requests", value: String(requests.filter(r => r.status === "active").length), icon: Heart, color: "rose" },
+    { title: "Total Requests", value: String(requests.length), icon: Heart, color: "violet" },
+    { title: "Answered", value: String(requests.filter(r => r.status === "answered").length), icon: CheckCircle, color: "emerald" },
+    { title: "Urgent", value: String(requests.filter(r => r.urgency === "urgent" || r.urgency === "critical").length), icon: Clock, color: "blue" },
+  ];
+
   return (
     <div className="flex flex-col gap-6">
-      {/* Page Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <p className="text-muted-foreground mb-1 text-base">Support Your Community in Prayer</p>
@@ -44,7 +62,6 @@ export default function PrayerRequestsPage() {
         </div>
       </div>
 
-      {/* KPI Strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {kpiStats.map((stat, index) => (
           <Card key={index}>
@@ -63,69 +80,59 @@ export default function PrayerRequestsPage() {
         ))}
       </div>
 
-      {/* Search Bar */}
       <div className="flex items-center gap-3 bg-card p-4 rounded-xl border border-border">
         <div className="relative flex-1 max-w-sm">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="text"
-            className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm"
-            placeholder="Search prayer requests..."
-          />
+          <input type="text" className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm" placeholder="Search prayer requests..." />
         </div>
       </div>
 
-      {/* Prayer Requests Cards */}
-      <div className="grid gap-4">
-        {prayerRequests.map((pr) => (
-          <Card key={pr.id} className="hover:shadow-md transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center">
-                      {pr.isPrivate ? <Heart className="w-5 h-5 text-rose-600" /> : <User className="w-5 h-5 text-rose-600" />}
+      {loading ? (
+        <div className="text-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#bbff00] mx-auto" /></div>
+      ) : requests.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">No prayer requests yet.</div>
+      ) : (
+        <div className="grid gap-4">
+          {requests.map((pr) => (
+            <Card key={pr.id} className="hover:shadow-md transition-shadow">
+              <CardContent className="p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center">
+                        {pr.isAnonymous === "true" ? <Heart className="w-5 h-5 text-rose-600" /> : <User className="w-5 h-5 text-rose-600" />}
+                      </div>
+                      <div>
+                        <h4 className="font-semibold">{pr.isAnonymous === "true" ? "Anonymous" : (pr.contactName || "Member")}</h4>
+                        <p className="text-xs text-muted-foreground">{new Date(pr.createdAt).toLocaleDateString()}</p>
+                      </div>
+                      <Badge variant="secondary" className={
+                        pr.urgency === "urgent" || pr.urgency === "critical" ? "bg-rose-100 text-rose-600" :
+                        "bg-blue-100 text-blue-600"
+                      }>{pr.urgency}</Badge>
+                      {pr.status === "answered" && (
+                        <Badge variant="secondary" className="bg-emerald-100 text-emerald-600">
+                          <CheckCircle className="w-3 h-3 mr-1" />Answered
+                        </Badge>
+                      )}
                     </div>
-                    <div>
-                      <h4 className="font-semibold">{pr.requester}</h4>
-                      <p className="text-xs text-muted-foreground">{pr.date}</p>
-                    </div>
-                    <Badge variant="secondary" className={
-                      pr.category === "Praise" ? "bg-emerald-100 text-emerald-600" :
-                      pr.category === "Health" ? "bg-rose-100 text-rose-600" :
-                      pr.category === "Financial" ? "bg-amber-100 text-amber-600" :
-                      "bg-blue-100 text-blue-600"
-                    }>
-                      {pr.category}
-                    </Badge>
-                    {pr.status === "answered" && (
-                      <Badge variant="secondary" className="bg-emerald-100 text-emerald-600">
-                        <CheckCircle className="w-3 h-3 mr-1" />Answered
-                      </Badge>
-                    )}
+                    <p className="text-sm text-muted-foreground line-clamp-2">{pr.content}</p>
                   </div>
-                  <p className="text-sm text-muted-foreground line-clamp-2">{pr.request}</p>
-                  <div className="flex items-center gap-4 mt-3">
-                    <Button variant="outline" size="sm" className="gap-2">
-                      <Heart className="w-4 h-4" />Praying ({pr.prayerCount})
-                    </Button>
-                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon"><MoreHorizontal className="w-4 h-4" /></Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem>View Full Request</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleMarkAnswered(pr.id)}>Mark as Answered</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon"><MoreHorizontal className="w-4 h-4" /></Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem>View Full Request</DropdownMenuItem>
-                    <DropdownMenuItem>Mark as Answered</DropdownMenuItem>
-                    <DropdownMenuItem>Send Encouragement</DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

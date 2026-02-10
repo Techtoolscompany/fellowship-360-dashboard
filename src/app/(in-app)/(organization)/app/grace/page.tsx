@@ -1,5 +1,6 @@
 "use client";
 
+import React, { useState, useEffect, useCallback } from "react";
 import GraceKpiStrip from "@/components/grace/GraceKpiStrip";
 import CallActivityChart from "@/components/grace/CallActivityChart";
 import RequestTypesChart from "@/components/grace/RequestTypesChart";
@@ -10,10 +11,40 @@ import InquiriesCard from "@/components/grace/InquiriesCard";
 import VisitorFollowupsCard from "@/components/grace/VisitorFollowupsCard";
 import RecentActivityCard from "@/components/grace/RecentActivityCard";
 import { Button } from "@/components/ui/button";
-import { Calendar, ArrowRight, Filter, Phone, Settings } from "lucide-react";
+import { Calendar, ArrowRight, Filter, Phone, Settings, Loader2 } from "lucide-react";
 import Link from "next/link";
+import useOrganization from "@/lib/organizations/useOrganization";
+import { getGraceDashboardData } from "@/app/actions/dashboard";
 
 export default function GraceDashboardPage() {
+  const { organization } = useOrganization();
+  const orgId = organization?.id;
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchData = useCallback(async () => {
+    if (!orgId) return;
+    setLoading(true);
+    try {
+      const d = await getGraceDashboardData(orgId);
+      setData(d);
+    } catch (err) {
+      console.error("Failed to fetch dashboard data:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [orgId]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-[#bbff00]" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {/* Page Header */}
@@ -24,10 +55,10 @@ export default function GraceDashboardPage() {
             <div className="bg-muted p-1 rounded">
               <Calendar className="w-4 h-4 text-foreground" />
             </div>
-            <span className="text-sm font-medium">Feb 1 - Feb 4, 2025</span>
+            <span className="text-sm font-medium">{new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
           </div>
 
-          {/* Period Toggle (Mock) */}
+          {/* Period Toggle */}
           <div className="hidden sm:flex items-center gap-2 bg-card border border-border px-3 py-2 rounded-md shadow-sm cursor-pointer hover:bg-accent/50 transition-colors">
             <span className="text-sm font-medium">Today</span>
             <div className="bg-muted p-1 rounded">
@@ -55,14 +86,14 @@ export default function GraceDashboardPage() {
           </div>
           <div className="flex gap-2">
             <Link
-              href="/grace/calls"
+              href="/app/calls"
               className="btn flex items-center gap-2 bg-[#bbff00] text-[#343330] px-5 py-2.5 rounded-full font-semibold text-sm hover:bg-[#a3df00] transition-colors"
             >
               <Phone size={16} />
               View All Calls
             </Link>
             <Link
-              href="/grace/settings"
+              href="/app/settings"
               className="btn flex items-center gap-2 bg-secondary text-foreground px-5 py-2.5 rounded-full font-medium text-sm border border-border hover:bg-secondary/80 transition-colors"
             >
               <Settings size={16} />
@@ -73,27 +104,27 @@ export default function GraceDashboardPage() {
 
         <div className="grid gap-6">
           {/* KPI Strip */}
-          <GraceKpiStrip />
+          <GraceKpiStrip data={data?.kpi} />
 
           {/* Row 1: Charts + Broadcasts */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <CallActivityChart />
-            <RequestTypesChart />
-            <RecentBroadcastsCard />
+            <CallActivityChart conversations={data?.conversations} tasks={data?.tasks} />
+            <RequestTypesChart prayer={data?.prayer} appointments={data?.appointments} conversations={data?.conversations} pipeline={data?.pipeline} />
+            <RecentBroadcastsCard broadcasts={data?.recentBroadcasts} />
           </div>
 
           {/* Row 2: Request Overview Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-            <PrayerRequestsCard />
-            <AppointmentsCard />
-            <InquiriesCard />
-            <VisitorFollowupsCard />
+            <PrayerRequestsCard data={data?.prayer} />
+            <AppointmentsCard data={data?.appointments} />
+            <InquiriesCard data={data?.conversations} />
+            <VisitorFollowupsCard data={data?.pipeline} />
           </div>
 
           {/* Row 3: Recent Activity */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-8">
-              <RecentActivityCard />
+              <RecentActivityCard donations={data?.recentDonations} />
             </div>
           </div>
         </div>

@@ -3,13 +3,16 @@ import React from "react";
 import Link from "next/link";
 import { FiArrowRight } from "react-icons/fi";
 
-const PrayerRequestsCard = () => {
-  const data = {
-    new: 5,
-    inProgress: 3,
-    resolvedThisWeek: 12,
-    urgent: 2,
-  };
+interface PrayerData {
+  total: number;
+  pending: number;
+  inProgress: number;
+  answered: number;
+  urgent: number;
+}
+
+const PrayerRequestsCard = ({ data }: { data?: PrayerData }) => {
+  const d = data ?? { total: 0, pending: 0, inProgress: 0, answered: 0, urgent: 0 };
 
   return (
     <div className="w-full h-full">
@@ -25,7 +28,7 @@ const PrayerRequestsCard = () => {
         <div className="p-6 h-full flex flex-col">
           <div className="flex items-center justify-between mb-3">
             <span style={{ fontSize: "28px" }}>🙏</span>
-            {data.urgent > 0 && (
+            {d.urgent > 0 && (
               <span
                 style={{
                   fontSize: "11px",
@@ -36,7 +39,7 @@ const PrayerRequestsCard = () => {
                   color: "#fff",
                 }}
               >
-                {data.urgent} urgent
+                {d.urgent} urgent
               </span>
             )}
           </div>
@@ -54,52 +57,27 @@ const PrayerRequestsCard = () => {
 
           <div className="flex gap-4 mb-3">
             <div>
-              <p
-                className="mb-0"
-                style={{
-                  fontSize: "24px",
-                  fontWeight: 700,
-                  color: "#78350f",
-                }}
-              >
-                {data.new}
+              <p className="mb-0" style={{ fontSize: "24px", fontWeight: 700, color: "#78350f" }}>
+                {d.pending}
               </p>
               <span style={{ fontSize: "11px", color: "#92400e" }}>New</span>
             </div>
             <div>
-              <p
-                className="mb-0"
-                style={{
-                  fontSize: "24px",
-                  fontWeight: 700,
-                  color: "#78350f",
-                }}
-              >
-                {data.inProgress}
+              <p className="mb-0" style={{ fontSize: "24px", fontWeight: 700, color: "#78350f" }}>
+                {d.inProgress}
               </p>
-              <span style={{ fontSize: "11px", color: "#92400e" }}>
-                In Progress
-              </span>
+              <span style={{ fontSize: "11px", color: "#92400e" }}>In Progress</span>
             </div>
             <div>
-              <p
-                className="mb-0"
-                style={{
-                  fontSize: "24px",
-                  fontWeight: 700,
-                  color: "#78350f",
-                }}
-              >
-                {data.resolvedThisWeek}
+              <p className="mb-0" style={{ fontSize: "24px", fontWeight: 700, color: "#78350f" }}>
+                {d.answered}
               </p>
-              <span style={{ fontSize: "11px", color: "#92400e" }}>
-                Resolved
-              </span>
+              <span style={{ fontSize: "11px", color: "#92400e" }}>Answered</span>
             </div>
           </div>
 
           <Link
-            href="/care/prayer-requests"
+            href="/app/prayer-requests"
             className="flex items-center gap-1 mt-auto"
             style={{
               fontSize: "13px",

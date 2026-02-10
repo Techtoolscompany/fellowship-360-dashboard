@@ -10,51 +10,50 @@ import {
   FiTrendingDown,
 } from "react-icons/fi";
 
-const GraceKpiStrip = () => {
+interface KpiData {
+  totalContacts: number;
+  totalDonations: number;
+  donationCount: number;
+  broadcastsSent: number;
+  totalRecipients: number;
+}
+
+const GraceKpiStrip = ({ data }: { data?: KpiData }) => {
   const kpis = [
     {
-      label: "Calls Today",
-      value: "24",
-      subtitle: "Outbound calls made",
+      label: "Total Members",
+      value: data ? String(data.totalContacts) : "—",
+      subtitle: "Active contacts",
+      icon: FiUsers,
+      trend: "",
+      trendDirection: "neutral",
+      iconBg: "#bbff00",
+    },
+    {
+      label: "Donations",
+      value: data ? `$${data.totalDonations.toLocaleString()}` : "—",
+      subtitle: `${data?.donationCount ?? 0} gifts received`,
       icon: FiPhoneOutgoing,
-      trend: "+8",
-      trendDirection: "up",
-      iconBg: "#bbff00",
-    },
-    {
-      label: "Connected",
-      value: "18",
-      subtitle: "75% connection rate",
-      icon: FiPhone,
-      trend: "+5%",
-      trendDirection: "up",
-      iconBg: "#bbff00",
-    },
-    {
-      label: "Inbound Calls",
-      value: "12",
-      subtitle: "Received today",
-      icon: FiPhoneIncoming,
-      trend: "+3",
-      trendDirection: "up",
+      trend: "",
+      trendDirection: "neutral",
       iconBg: "#bbff00",
     },
     {
       label: "Broadcasts Sent",
-      value: "3",
-      subtitle: "This week",
+      value: data ? String(data.broadcastsSent) : "—",
+      subtitle: "Campaigns delivered",
       icon: FiMessageSquare,
-      trend: "0",
+      trend: "",
       trendDirection: "neutral",
       iconBg: "#bbff00",
     },
     {
       label: "People Reached",
-      value: "847",
+      value: data ? data.totalRecipients.toLocaleString() : "—",
       subtitle: "Via all channels",
       icon: FiUsers,
-      trend: "+124",
-      trendDirection: "up",
+      trend: "",
+      trendDirection: "neutral",
       iconBg: "#bbff00",
     },
   ];
@@ -117,24 +116,6 @@ const GraceKpiStrip = () => {
                 >
                   {kpi.value}
                 </p>
-                {kpi.trendDirection !== "neutral" && (
-                  <span
-                    className="flex items-center gap-1 mb-1"
-                    style={{
-                      fontSize: "12px",
-                      fontWeight: 500,
-                      color:
-                        kpi.trendDirection === "up" ? "#16a34a" : "#dc2626",
-                    }}
-                  >
-                    {kpi.trendDirection === "up" ? (
-                      <FiTrendingUp size={12} />
-                    ) : (
-                      <FiTrendingDown size={12} />
-                    )}
-                    {kpi.trend}
-                  </span>
-                )}
               </div>
 
               <span

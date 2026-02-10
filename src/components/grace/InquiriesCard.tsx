@@ -3,13 +3,15 @@ import React from "react";
 import Link from "next/link";
 import { FiArrowRight } from "react-icons/fi";
 
-const InquiriesCard = () => {
-  const data = {
-    new: 8,
-    awaitingResponse: 4,
-    resolvedToday: 6,
-    avgResponseTime: "2.4 hrs",
-  };
+interface ConversationData {
+  total: number;
+  open: number;
+  waiting: number;
+  resolved: number;
+}
+
+const InquiriesCard = ({ data }: { data?: ConversationData }) => {
+  const d = data ?? { total: 0, open: 0, waiting: 0, resolved: 0 };
 
   return (
     <div className="w-full h-full">
@@ -25,18 +27,20 @@ const InquiriesCard = () => {
         <div className="p-6 h-full flex flex-col">
           <div className="flex items-center justify-between mb-3">
             <span style={{ fontSize: "28px" }}>💬</span>
-            <span
-              style={{
-                fontSize: "11px",
-                fontWeight: 500,
-                padding: "4px 10px",
-                borderRadius: "360px",
-                background: "rgba(255,255,255,0.6)",
-                color: "#047857",
-              }}
-            >
-              Avg: {data.avgResponseTime}
-            </span>
+            {d.waiting > 0 && (
+              <span
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 500,
+                  padding: "4px 10px",
+                  borderRadius: "360px",
+                  background: "rgba(255,255,255,0.6)",
+                  color: "#047857",
+                }}
+              >
+                {d.waiting} awaiting
+              </span>
+            )}
           </div>
 
           <h3
@@ -47,57 +51,32 @@ const InquiriesCard = () => {
               marginBottom: "12px",
             }}
           >
-            General Inquiries
+            Conversations
           </h3>
 
           <div className="flex gap-4 mb-3">
             <div>
-              <p
-                className="mb-0"
-                style={{
-                  fontSize: "24px",
-                  fontWeight: 700,
-                  color: "#065f46",
-                }}
-              >
-                {data.new}
+              <p className="mb-0" style={{ fontSize: "24px", fontWeight: 700, color: "#065f46" }}>
+                {d.open}
               </p>
-              <span style={{ fontSize: "11px", color: "#047857" }}>New</span>
+              <span style={{ fontSize: "11px", color: "#047857" }}>Open</span>
             </div>
             <div>
-              <p
-                className="mb-0"
-                style={{
-                  fontSize: "24px",
-                  fontWeight: 700,
-                  color: "#065f46",
-                }}
-              >
-                {data.awaitingResponse}
+              <p className="mb-0" style={{ fontSize: "24px", fontWeight: 700, color: "#065f46" }}>
+                {d.waiting}
               </p>
-              <span style={{ fontSize: "11px", color: "#047857" }}>
-                Awaiting
-              </span>
+              <span style={{ fontSize: "11px", color: "#047857" }}>Waiting</span>
             </div>
             <div>
-              <p
-                className="mb-0"
-                style={{
-                  fontSize: "24px",
-                  fontWeight: 700,
-                  color: "#065f46",
-                }}
-              >
-                {data.resolvedToday}
+              <p className="mb-0" style={{ fontSize: "24px", fontWeight: 700, color: "#065f46" }}>
+                {d.resolved}
               </p>
-              <span style={{ fontSize: "11px", color: "#047857" }}>
-                Resolved
-              </span>
+              <span style={{ fontSize: "11px", color: "#047857" }}>Resolved</span>
             </div>
           </div>
 
           <Link
-            href="/comms/conversations"
+            href="/app/conversations"
             className="flex items-center gap-1 mt-auto"
             style={{
               fontSize: "13px",
