@@ -38,6 +38,7 @@ import {
   ChevronDown,
   ChevronRight,
   CreditCard,
+  Bot,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -169,6 +170,9 @@ function SidebarContent({ className, isCollapsed }: { className?: string; isColl
           <div className="space-y-0.5">
             <NavItem href="/app" icon={Zap} isCollapsed={isCollapsed} isNew>
               Grace AI
+            </NavItem>
+            <NavItem href="/app/grace-center" icon={Bot} isCollapsed={isCollapsed}>
+              Grace Center
             </NavItem>
             <NavItem href="/app/home" icon={Home} isCollapsed={isCollapsed}>
               Ministry Overview

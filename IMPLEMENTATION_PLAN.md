@@ -1,305 +1,175 @@
-# Fellowship 360 — Master Implementation Plan
+# Fellowship 360 — Implementation Plan
 
-> **Last Updated:** February 9, 2025
-> **Status:** Phase 1 complete, Phases 2-5 pending
-> **Project:** Church CRM with Grace AI (AI-powered communication assistant)
+> **Last Updated:** February 10, 2026
+> **Status:** Phases 1-5 complete, Phase 6 next
+> **Project:** Church CRM with Grace AI (organization-scoped, DB-backed)
 
 ---
 
 ## Current State Summary
 
-### What's Done ✅
+### Completed ✅
 
-- Grace AI Dashboard is the main landing page (`/app`)
-- Pipeline page has working drag-and-drop kanban (local state via `@hello-pangea/dnd`)
-- 18 app pages exist as UI shells with hardcoded mock data
-- Auth system exists (bypassed for development)
-- Organization system works (from IndieKit boilerplate)
-- Billing/Stripe integration exists (test keys)
-- Database connected: Drizzle ORM + Neon PostgreSQL
-- Email infrastructure: React Email + AWS SES
+- Database schemas implemented for church operations, communications, pipeline, ministries, finances, and prayer.
+- Server actions implemented under `src/app/actions/` for CRUD and aggregated dashboard/report data.
+- Core app pages wired to real data (organization scoped), including dashboards.
+- Missing pages from earlier scope now exist and are wired:
+  - `/app/calls`
+  - `/app/reports`
+  - `/app/seed`
+- Reports export implemented (client-side CSV download).
+- Build passes (`pnpm build`).
 
-### What's NOT Working ❌
+### Known Non-Blocking Issues ⚠️
 
-- All pages use hardcoded data (nothing reads from or writes to DB)
-- Two sidebar pages don't exist: `/app/calls`, `/app/reports`
-- No AI integration
-- No SMS/calling capability
-- No real communication engine
-- Auth is bypassed
+- `baseline-browser-mapping` warning still appears during build despite package update and suppression env vars.
+- `tailwind.config.ts` module type warning still appears during build.
 
 ---
 
-## Phase 1: Database Schemas (Foundation) ⏳
+## Phase 1: Database Schemas ✅
 
-Create Drizzle schemas in `src/db/schema/` for all app features.
+Implemented in `src/db/schema/`:
 
-### Existing schemas (from boilerplate):
+- `church-contacts.ts`
+- `pipeline.ts`
+- `communications.ts`
+- `ministries.ts`
+- `operations.ts`
+- `finances.ts`
+- `prayer.ts`
 
-- `user.ts` — Users and auth
-- `organization.ts` — Churches/orgs
-- `organization-membership.ts` — User-org relationships
-- `plans.ts` — Subscription plans
-- `invitation.ts` — Org invites
-- `contact.ts` — Basic contact (needs expansion)
-
-### New schemas needed:
-
-#### `src/db/schema/contacts.ts`
-
-- [ ] `contacts` table — firstName, lastName, email, phone, memberStatus (visitor/member/leader), familyId, tags, source, organizationId, createdAt, updatedAt
-- [ ] `families` table — familyName, address, organizationId
-- [ ] `contact_tags` table — contactId, tag
-
-#### `src/db/schema/pipeline.ts`
-
-- [ ] `pipeline_stages` table — name, order, color, organizationId
-- [ ] `pipeline_items` table — contactId, stageId, order, assigneeId, priority, notes, lastContactDate, nextActionDate
-
-#### `src/db/schema/communications.ts`
-
-- [ ] `conversations` table — contactId, channel (phone/sms/email/web), status, assigneeId, organizationId
-- [ ] `messages` table — conversationId, content, direction (inbound/outbound), sentAt, senderType (human/ai)
-- [ ] `broadcasts` table — title, content, channel, audienceFilter, sentAt, stats (delivered/opened/clicked)
-- [ ] `templates` table — name, content, category, variables, organizationId
-
-#### `src/db/schema/ministries.ts`
-
-- [ ] `ministries` table — name, description, leaderId, meetingSchedule, organizationId
-- [ ] `ministry_members` table — ministryId, contactId, role
-
-#### `src/db/schema/operations.ts`
-
-- [ ] `events` table — title, description, startDate, endDate, location, recurring, organizationId
-- [ ] `appointments` table — contactId, staffId, dateTime, status, type, notes
-- [ ] `tasks` table — title, description, assigneeId, dueDate, priority, status, organizationId
-- [ ] `volunteers` table — contactId, role, totalHours, status
-- [ ] `volunteer_shifts` table — volunteerId, eventId, date, hours
-
-#### `src/db/schema/finances.ts`
-
-- [ ] `donations` table — contactId, amount, date, method, fund, receiptSent, organizationId
-- [ ] `pledges` table — contactId, amount, startDate, endDate, frequency, amountPaid
-- [ ] `donors` table — (view/extension of contacts with giving summary)
-
-#### `src/db/schema/prayer.ts`
-
-- [ ] `prayer_requests` table — contactId, content, urgency, status (new/praying/answered/archived), assignedTeam, organizationId
-
-### Migration commands:
-
-```bash
-# After creating schemas:
-pnpm drizzle-kit generate   # Generate migration SQL
-pnpm drizzle-kit push        # Push to Neon DB (dev)
-# OR
-pnpm drizzle-kit migrate     # Run migrations (production)
-```
+Index exports updated in `src/db/schema/index.ts`.
 
 ---
 
-## Phase 2: CRUD + Page Wiring ⏳
+## Phase 2: Server Actions ✅
 
-Connect every page to its database schema via Server Actions (`src/app/actions/`).
+Implemented in `src/app/actions/`:
 
-### Server Actions to create:
-
-#### `src/app/actions/contacts.ts`
-
-- [ ] `getContacts(orgId, filters)` — List with search, pagination
-- [ ] `getContact(id)` — Single contact detail
-- [ ] `createContact(data)` — Add new contact
-- [ ] `updateContact(id, data)` — Edit contact
-- [ ] `deleteContact(id)` — Remove contact
-- [ ] `importContacts(csvData)` — Bulk CSV import
-- [ ] `exportContacts(orgId)` — CSV export
-
-#### `src/app/actions/pipeline.ts`
-
-- [ ] `getPipelineData(orgId)` — Fetch stages + items
-- [ ] `updateItemStage(itemId, stageId, order)` — Drag-drop persistence
-- [ ] `createPipelineItem(data)` — Add visitor to pipeline
-- [ ] `seedDefaultStages(orgId)` — Create default stages for new org
-
-#### `src/app/actions/tasks.ts`
-
-- [ ] `getTasks(orgId, filters)` — List tasks
-- [ ] `createTask(data)` — New task
-- [ ] `updateTask(id, data)` — Edit/complete task
-- [ ] `deleteTask(id)` — Remove task
-
-#### `src/app/actions/calendar.ts`
-
-- [ ] `getEvents(orgId, dateRange)` — Events for calendar view
-- [ ] `createEvent(data)` — New event
-- [ ] `updateEvent(id, data)` — Edit event
-- [ ] `deleteEvent(id)` — Remove event
-
-#### `src/app/actions/prayer.ts`
-
-- [ ] `getPrayerRequests(orgId)` — List requests
-- [ ] `createPrayerRequest(data)` — Submit prayer
-- [ ] `updatePrayerRequest(id, data)` — Update status/add notes
-
-#### `src/app/actions/finances.ts`
-
-- [ ] `getDonations(orgId, dateRange)` — List donations
-- [ ] `createDonation(data)` — Record donation
-- [ ] `getPledges(orgId)` — List pledges
-- [ ] `createPledge(data)` — New pledge
-- [ ] `getDonorSummary(orgId)` — Donor list with totals
-
-#### `src/app/actions/ministries.ts`
-
-- [ ] `getMinistries(orgId)` — List ministries
-- [ ] `createMinistry(data)` — New ministry
-- [ ] `addMember(ministryId, contactId)` — Add member
-
-#### `src/app/actions/operations.ts`
-
-- [ ] `getAppointments(orgId)` — List appointments
-- [ ] `createAppointment(data)` — Schedule appointment
-- [ ] `getVolunteers(orgId)` — List volunteers
-
-### Pages to update:
-
-- [ ] `/app/contacts` — Wire to contacts actions, real search, add/edit modals
-- [ ] `/app/pipeline` — Persist drag-drop to DB
-- [ ] `/app/tasks` — Wire to tasks actions
-- [ ] `/app/calendar` — Wire to events actions
-- [ ] `/app/prayer-requests` — Wire to prayer actions
-- [ ] `/app/donations` — Wire to finances actions
-- [ ] `/app/donors` — Wire to donor summary
-- [ ] `/app/pledges` — Wire to pledges actions
-- [ ] `/app/ministries` — Wire to ministries actions
-- [ ] `/app/appointments` — Wire to appointments actions
-- [ ] `/app/volunteers` — Wire to volunteers actions
-- [ ] `/app/conversations` — Wire to conversations actions
-- [ ] `/app/broadcasts` — Wire to broadcasts actions
-- [ ] `/app/templates` — Wire to templates actions
-- [ ] `/app/home` — Wire KPIs to real aggregate queries
-
-### Missing pages to create:
-
-- [ ] `/app/calls` — Call log page with history and click-to-call
-- [ ] `/app/reports` — Customizable reports dashboard
+- `contacts.ts`
+- `pipeline.ts`
+- `tasks.ts`
+- `calendar.ts`
+- `prayer.ts`
+- `finances.ts`
+- `ministries.ts`
+- `operations.ts`
+- `communications.ts`
+- `dashboard.ts`
+- `reports.ts`
+- `seed.ts`
 
 ---
 
-## Phase 3: Communication Engine ⏳
+## Phase 3: Wire App Pages to Real Data ✅
 
-### Prerequisites (USER decisions needed):
+Wired pages include:
 
-- [ ] **SMS Provider:** Twilio account + API credentials + phone number
-- [ ] **Email:** Already have AWS SES — just need to wire it up
-- [ ] **Voice/Calls:** Decide on provider (see Phase 4)
-
-### Implementation:
-
-- [ ] `src/lib/twilio/` — SMS send/receive helpers
-- [ ] `src/app/api/webhooks/twilio/` — Inbound SMS/call webhook handlers
-- [ ] `src/lib/email/send.ts` — Email sending via SES (partially exists)
-- [ ] Broadcast composer — Select audience, compose, send via SMS/email
-- [ ] Template engine — Variable substitution ({firstName}, {churchName}, etc.)
-- [ ] `/app/conversations` — Real-time inbox pulling from messages table
-- [ ] `/app/broadcasts` — Compose + send + track delivery
+- `contacts`, `pipeline`, `tasks`, `calendar`, `prayer-requests`
+- `donations`, `donors`, `pledges`
+- `ministries`, `appointments`, `volunteers`
+- `conversations`, `broadcasts`, `templates`
 
 ---
 
-## Phase 4: Grace AI Integration ⏳
+## Phase 4: Wire Dashboards ✅
 
-### Prerequisites (USER decisions needed):
+Completed:
 
-- [ ] **LLM Provider:** OpenAI / Anthropic / Google — need API key
-  - Recommendation: **OpenAI GPT-4o** for conversation + function calling
-- [ ] **Voice AI Provider:** Choose one:
-  - **Vapi.ai** — Easiest, all-in-one AI voice agent (recommended for MVP)
-  - **Twilio + OpenAI Realtime API** — More control, complex setup
-  - **Bland.ai** — Alternative all-in-one
-- [ ] **Grace AI Behavior Definition:**
-  - What should Grace do on outbound calls? (visitor follow-up, prayer check-in, reminders)
-  - What should Grace do on inbound calls? (answer office phone, route to staff, take messages)
-  - What tone/personality? (warm pastoral, professional, casual)
-  - Should AI send messages autonomously or draft for human approval?
-
-### Implementation:
-
-- [ ] `src/lib/ai/` — AI client config and helpers
-- [ ] `src/lib/ai/prompts.ts` — System prompts for Grace AI personality
-- [ ] `src/lib/ai/functions.ts` — Function definitions for AI tool use (look up contact, schedule appointment, log prayer request, etc.)
-- [ ] `src/app/api/ai/chat/` — Chat completion endpoint
-- [ ] `src/app/api/ai/voice/` — Voice agent webhook handlers
-- [ ] Grace AI Settings page (`/app/settings/grace`) — Configure AI behavior, call hours, scripts
-- [ ] AI response suggestions in conversations inbox
-- [ ] Automated call scheduling and logging
-- [ ] Sentiment analysis on conversations
+- Grace dashboard (`/app/grace`) wired to live aggregates.
+- Ministry dashboard (`/app/home`) wired to live aggregates.
+- Donor-name query robustness fixed in dashboard action.
+- Full build verification completed.
 
 ---
 
-## Phase 5: Polish & Production ⏳
+## Phase 5: Remaining Page Wiring ✅
 
-- [ ] Re-enable authentication (remove bypass in layout.tsx)
-- [ ] Role-based access control (admin, staff, volunteer)
-- [ ] Add `.env` to `.gitignore` (currently committed with keys!)
-- [ ] Error handling and loading states on all pages
-- [ ] Mobile responsiveness testing
-- [ ] Data seeding script for demo/development
-- [ ] Production deployment (Vercel recommended)
-- [ ] Domain setup and SSL
+Completed:
+
+- `/app/calls`: wired to real phone conversation data and KPIs.
+- `/app/reports`: wired to real aggregated reporting data with timeframe toggles.
+- `/app/seed`: functional + guard rails improved.
+- Reports export button now performs CSV export.
 
 ---
 
-## Environment Variables Needed
+## Review Before Phase 6
 
-```env
-# Already configured:
-DATABASE_URL=             # ✅ Neon PostgreSQL
-AUTH_SECRET=              # ✅ NextAuth
-STRIPE_SECRET_KEY=        # ✅ Stripe (test)
-STRIPE_PUBLISHABLE_KEY=   # ✅ Stripe (test)
+### Findings
 
-# Phase 3 — Communication:
-TWILIO_ACCOUNT_SID=       # ⏳ For SMS/calls
-TWILIO_AUTH_TOKEN=         # ⏳
-TWILIO_PHONE_NUMBER=      # ⏳
+1. Medium: Build warning noise remains from baseline-browser-mapping.
+   - Impact: no runtime break, but noisy CI/build logs.
+   - Recommendation: treat as tooling warning; continue shipping.
 
-# Phase 4 — AI:
-OPENAI_API_KEY=           # ⏳ For GPT-4o (or ANTHROPIC_API_KEY)
-VAPI_API_KEY=             # ⏳ For AI voice agent (if using Vapi)
-```
+2. Medium: Reports export is client-generated CSV only.
+   - Impact: no server audit trail or signed exports.
+   - Recommendation: acceptable for MVP; move server-side export to backlog if compliance/audit is needed.
 
----
+3. Medium: Some pages still have UI-only search/filter interactions.
+   - Impact: UX inconsistency as data grows.
+   - Recommendation: prioritize server/query-backed filters in next polish pass.
 
-## File Structure Reference
+4. Low: Build warning for module type (`tailwind.config.ts`) remains.
+   - Impact: performance warning only.
+   - Recommendation: optional cleanup when touching build/tooling configs.
 
-```
-src/
-├── app/
-│   ├── (in-app)/(organization)/app/   # All dashboard pages
-│   ├── actions/                        # Server Actions (TO CREATE)
-│   └── api/                            # API routes
-├── components/
-│   ├── grace/                          # Grace AI dashboard components
-│   ├── dashboard/                      # Ministry overview components
-│   └── ui/                             # shadcn/ui components
-├── db/
-│   ├── schema/                         # Drizzle schemas
-│   └── index.ts                        # DB connection
-└── lib/
-    ├── ai/                             # AI helpers (TO CREATE)
-    ├── twilio/                         # SMS/call helpers (TO CREATE)
-    └── ...                             # Existing auth, org, etc.
-```
+### Decision
+
+- **Proceed to Phase 6.**
+- No blocking defects found for Phase 6 execution.
 
 ---
 
-## Quick Start for Next Session
+## Phase 6: Create/Edit Forms (Next)
 
-To resume work:
+Goal: Convert remaining “Add” / static actions into real create/edit workflows with validation.
+
+### Priority Order
+
+1. Appointments
+- Add create modal
+- Add edit flow
+
+2. Prayer Requests
+- Add create modal
+- Add edit/status flow
+
+3. Broadcasts
+- Add compose/send flow
+- Add edit draft flow
+
+4. Ministries
+- Add create modal
+- Add edit flow
+
+5. Pledges
+- Add create modal
+- Add edit flow
+
+6. Calendar Events
+- Add create/edit event modals
+
+### Execution Standards
+
+- Use server actions for mutations.
+- Add form validation (`zod` + `react-hook-form` where appropriate).
+- Preserve org scoping on all writes.
+- Add success/error toasts and loading states.
+- Ensure empty states and error states render cleanly.
+
+### Verification for Each Page
+
+1. Create succeeds and record appears without refresh issues.
+2. Edit persists and reflects immediately.
+3. Validation errors display clearly.
+4. No console errors and `pnpm build` still passes.
+
+---
+
+## Quick Resume
 
 1. `cd /Users/studiocomp/Documents/fellowship-360-app`
-2. `pnpm dev` to start the server
-3. Auth is bypassed — go straight to `http://localhost:3000/app`
-4. Pick a phase above and start implementing
-
-**Recommended order:** Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5
+2. `pnpm dev`
+3. Open `/app` and continue with Phase 6 forms in the priority order above.
