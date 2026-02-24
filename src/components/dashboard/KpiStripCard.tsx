@@ -4,18 +4,16 @@ import React from "react";
 import {
   Users,
   UserPlus,
-  DollarSign,
   Clock,
   TrendingUp,
   TrendingDown,
   CheckCircle,
+  Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface KpiData {
   totalContacts: number;
-  totalDonations: number;
-  donationCount: number;
   broadcastsSent: number;
   totalRecipients: number;
 }
@@ -39,10 +37,10 @@ const KpiStripCard = ({ data, contacts, tasks }: { data?: KpiData; contacts?: nu
       iconBg: "#bbff00",
     },
     {
-      label: "Total Giving",
-      value: data ? `$${data.totalDonations.toLocaleString()}` : "—",
-      subtitle: `${data?.donationCount ?? 0} gifts received`,
-      icon: DollarSign,
+      label: "People Reached",
+      value: data ? data.totalRecipients.toLocaleString() : "—",
+      subtitle: "Via broadcasts",
+      icon: Megaphone,
       trend: "",
       trendDirection: "neutral",
       iconBg: "#bbff00",

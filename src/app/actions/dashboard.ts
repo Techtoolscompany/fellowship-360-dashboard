@@ -3,7 +3,6 @@
 import { db } from "@/db";
 import {
   churchContacts,
-  donations,
   prayerRequests,
   appointments,
   conversations,
@@ -21,23 +20,15 @@ export async function getGraceDashboardData(orgId: string) {
   // Run all queries in parallel
   const [
     contactCount,
-    donationData,
     prayerData,
     appointmentData,
     conversationData,
     broadcastData,
     taskData,
     pipelineData,
-    recentDonations,
   ] = await Promise.all([
     // Total contacts
     db.select({ count: count() }).from(churchContacts).where(eq(churchContacts.organizationId, orgId)),
-
-    // Donation stats
-    db.select({
-      total: sum(donations.amount),
-      count: count(),
-    }).from(donations).where(eq(donations.organizationId, orgId)),
 
     // Prayer request stats (statuses: new, praying, answered, archived)
     db.select({
@@ -85,20 +76,6 @@ export async function getGraceDashboardData(orgId: string) {
     }).from(pipelineItems)
       .innerJoin(pipelineStages, eq(pipelineItems.stageId, pipelineStages.id))
       .where(eq(pipelineStages.organizationId, orgId)),
-
-    // Recent donations for transaction history
-    db.select({
-      id: donations.id,
-      amount: donations.amount,
-      fund: donations.fund,
-      method: donations.method,
-      date: donations.date,
-      donorName: sql<string>`CONCAT(${churchContacts.firstName}, ' ', ${churchContacts.lastName})`,
-    }).from(donations)
-      .leftJoin(churchContacts, eq(churchContacts.id, donations.contactId))
-      .where(eq(donations.organizationId, orgId))
-      .orderBy(desc(donations.date))
-      .limit(5),
   ]);
 
   // Recent broadcasts
@@ -128,8 +105,6 @@ export async function getGraceDashboardData(orgId: string) {
   return {
     kpi: {
       totalContacts: contactCount[0]?.count ?? 0,
-      totalDonations: Number(donationData[0]?.total ?? 0),
-      donationCount: donationData[0]?.count ?? 0,
       broadcastsSent: broadcastData[0]?.sent ?? 0,
       totalRecipients: Number(broadcastData[0]?.totalRecipients ?? 0),
     },
@@ -162,7 +137,6 @@ export async function getGraceDashboardData(orgId: string) {
       total: pipelineData[0]?.total ?? 0,
       stages: stagesWithCounts,
     },
-    recentDonations,
     recentBroadcasts,
   };
 }

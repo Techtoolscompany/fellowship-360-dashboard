@@ -52,15 +52,15 @@ const CallActivityChart = ({ conversations, tasks }: { conversations?: Conversat
     <div className="w-full h-full">
       <div
         className="bg-card w-full h-full"
-        style={{ borderRadius: "24px", overflow: "hidden", border: "1px solid var(--ds-border-secondary, #e2e8f0)", minHeight: "334px" }}
+        style={{ borderRadius: "24px", overflow: "hidden", border: "1px solid var(--border)", minHeight: "334px" }}
       >
         <div className="p-6">
           <div className="flex items-start justify-between mb-2">
             <div>
-              <p className="mb-1" style={{ fontSize: "20px", fontWeight: 600, color: "var(--ds-text-primary, #171717)" }}>
+              <p className="mb-1" style={{ fontSize: "20px", fontWeight: 600, color: "var(--foreground)" }}>
                 Activity Overview
               </p>
-              <p className="mb-0" style={{ fontSize: "12px", color: "var(--ds-text-secondary, #737373)" }}>
+              <p className="mb-0" style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>
                 Conversations & Tasks progress
               </p>
             </div>
@@ -69,11 +69,11 @@ const CallActivityChart = ({ conversations, tasks }: { conversations?: Conversat
           <div className="flex gap-4 mb-2">
             <div>
               <span style={{ fontSize: "20px", fontWeight: 600, color: "#bbff00" }}>{convTotal}</span>
-              <span style={{ fontSize: "11px", color: "var(--ds-text-muted, #a3a3a3)", marginLeft: "4px" }}>conversations</span>
+              <span style={{ fontSize: "11px", color: "var(--muted-foreground)", marginLeft: "4px" }}>conversations</span>
             </div>
             <div>
-              <span style={{ fontSize: "20px", fontWeight: 600, color: "var(--ds-text-primary, #171717)" }}>{taskTotal}</span>
-              <span style={{ fontSize: "11px", color: "var(--ds-text-muted, #a3a3a3)", marginLeft: "4px" }}>tasks</span>
+              <span style={{ fontSize: "20px", fontWeight: 600, color: "var(--foreground)" }}>{taskTotal}</span>
+              <span style={{ fontSize: "11px", color: "var(--muted-foreground)", marginLeft: "4px" }}>tasks</span>
             </div>
           </div>
 

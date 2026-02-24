@@ -4,9 +4,9 @@ import {
   BarChart3,
   TrendingUp,
   Users,
-  DollarSign,
   Heart,
   Calendar,
+  CheckCircle,
   Download,
   ArrowUpRight,
   ArrowDownRight,
@@ -23,14 +23,14 @@ type Timeframe = "week" | "month" | "quarter" | "year";
 const ICON_MAP = {
   users: Users,
   calendar: Calendar,
-  dollar: DollarSign,
+  check: CheckCircle,
   heart: Heart,
 } as const;
 
 const KPI_COLOR_MAP = {
   users: "text-[#bbff00]",
   calendar: "text-blue-400",
-  dollar: "text-green-400",
+  check: "text-green-400",
   heart: "text-purple-400",
 } as const;
 const TIMEFRAMES: Timeframe[] = ["week", "month", "quarter", "year"];
@@ -79,7 +79,7 @@ export default function ReportsPage() {
     }
 
     for (const item of data.monthlyTrends) {
-      lines.push(`monthly_trend,${JSON.stringify(item.month)},${item.giving},${JSON.stringify(`visitors=${item.visitors}; members=${item.members}`)}`);
+      lines.push(`monthly_trend,${JSON.stringify(item.month)},${item.visitors},${JSON.stringify(`members=${item.members}`)}`);
     }
 
     for (const item of data.ministries) {
@@ -182,7 +182,7 @@ export default function ReportsPage() {
                     </div>
                   </div>
                   <div className="text-right w-20">
-                    <span className="text-xs text-muted-foreground">${(month.giving / 1000).toFixed(1)}k</span>
+                    <span className="text-xs text-muted-foreground">{month.members} mbrs</span>
                   </div>
                 </div>
               ))}
@@ -192,7 +192,7 @@ export default function ReportsPage() {
                   <div className="w-3 h-3 rounded-full bg-[#bbff00]"></div>
                   <span>Visitors</span>
                 </div>
-                <span className="w-20 text-right">Giving</span>
+                <span className="w-20 text-right">Members</span>
               </div>
             </div>
           </CardContent>

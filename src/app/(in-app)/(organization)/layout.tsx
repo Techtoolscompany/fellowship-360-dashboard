@@ -22,9 +22,6 @@ import {
   Calendar,
   Clock,
   UserCheck,
-  DollarSign,
-  UserPlus,
-  GitCommit,
   BarChart2,
   Globe,
   Shield,
@@ -59,6 +56,8 @@ import { InAppFooter } from "@/components/layout/in-app-footer";
 import { UserDropdown } from "@/components/in-app/user-dropdown";
 import { PageLoader } from "@/components/in-app/page-loader";
 import { OrganizationSwitcher } from "@/components/in-app/organization-switcher";
+import { ThemeSwitcher } from "@/components/theme-switcher";
+import { GraceFab } from "@/components/grace/GraceFab";
 
 function NavItem({
   href,
@@ -86,8 +85,8 @@ function NavItem({
       className={cn(
         "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
         isActive
-          ? "bg-transparent text-[#1a1d21]" // Active: No bg, Dark Text
-          : "text-[#64748b] hover:bg-[#f3f4f6] hover:text-[#1f2937]",
+          ? "bg-transparent text-foreground"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground",
         isCollapsed && "justify-center px-2",
         className
       )}
@@ -95,8 +94,7 @@ function NavItem({
       <Icon
         className={cn(
           "h-5 w-5 shrink-0 transition-colors",
-          // Active Icon = Lime Green (#bbff00), Inactive = Gray
-          isActive ? "text-[#bbff00] fill-[#bbff00]/20" : "text-[#9ca3af] group-hover:text-[#1a1d21]"
+          isActive ? "text-primary fill-primary/20" : "text-muted-foreground group-hover:text-foreground"
         )}
       />
       {!isCollapsed && (
@@ -105,7 +103,7 @@ function NavItem({
           {isNew && (
             <Badge
               variant="secondary"
-              className="ml-auto text-[10px] h-4 bg-[#bbff00]/20 text-[#4a6b00] font-medium border-none"
+              className="ml-auto text-[10px] h-4 bg-primary/20 text-primary-foreground font-medium border-none"
             >
               New
             </Badge>
@@ -227,15 +225,7 @@ function SidebarContent({ className, isCollapsed }: { className?: string; isColl
             <NavItem href="/app/volunteers" icon={UserCheck} isCollapsed={isCollapsed}>
               Volunteers
             </NavItem>
-            <NavItem href="/app/donations" icon={DollarSign} isCollapsed={isCollapsed}>
-              Donations
-            </NavItem>
-            <NavItem href="/app/donors" icon={UserPlus} isCollapsed={isCollapsed}>
-              Donors
-            </NavItem>
-            <NavItem href="/app/pledges" icon={GitCommit} isCollapsed={isCollapsed}>
-              Pledges
-            </NavItem>
+
             <NavItem href="/app/reports" icon={BarChart2} isCollapsed={isCollapsed}>
               Reports
             </NavItem>
@@ -315,22 +305,25 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="p-3 flex-1">
             <SidebarContent isCollapsed={isCollapsed} />
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="mb-3 mx-auto hover:bg-accent"
-            onClick={() => setIsCollapsed(!isCollapsed)}
-          >
-            <ChevronLeft
-              className={cn(
-                "h-4 w-4 text-inherit transition-transform duration-100",
-                isCollapsed && "rotate-180"
-              )}
-            />
-            <span className="sr-only">
-              {isCollapsed ? "Expand" : "Collapse"} Sidebar
-            </span>
-          </Button>
+          <div className="flex items-center justify-center gap-1 mb-3 px-2">
+            <ThemeSwitcher />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hover:bg-accent"
+              onClick={() => setIsCollapsed(!isCollapsed)}
+            >
+              <ChevronLeft
+                className={cn(
+                  "h-4 w-4 text-inherit transition-transform duration-100",
+                  isCollapsed && "rotate-180"
+                )}
+              />
+              <span className="sr-only">
+                {isCollapsed ? "Expand" : "Collapse"} Sidebar
+              </span>
+            </Button>
+          </div>
         </div>
 
         {/* Mobile Header */}
@@ -362,6 +355,9 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
           <InAppFooter />
         </div>
+
+        {/* Grace AI Floating Chat Button */}
+        <GraceFab />
       </div>
     </TooltipProvider>
   );

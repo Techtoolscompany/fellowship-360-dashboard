@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import ContactCard from "@/components/shared/ContactCard";
+import { CreateContactDialog } from "@/components/dialogs/CreateContactDialog";
 import { Button } from "@/components/ui/button";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { getContacts, createContact, deleteContact } from "@/app/actions/contacts";
@@ -23,18 +24,9 @@ export default function ContactsPage() {
 
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState("list");
   const [searchQuery, setSearchQuery] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newContact, setNewContact] = useState({
-    first_name: "",
-    last_name: "",
-    email: "",
-    phone: "",
-    member_status: "visitor",
-    notes: "",
-  });
-  const [saving, setSaving] = useState(false);
+  const [viewMode, setViewMode] = useState("list");
 
   const fetchContacts = useCallback(async () => {
     if (!orgId) return;
@@ -77,29 +69,6 @@ export default function ContactsPage() {
     return phone;
   };
 
-  const handleAddContact = async () => {
-    if (!orgId) return;
-    setSaving(true);
-    try {
-      await createContact({
-        firstName: newContact.first_name,
-        lastName: newContact.last_name,
-        email: newContact.email || undefined,
-        phone: newContact.phone || undefined,
-        memberStatus: newContact.member_status,
-        notes: newContact.notes || undefined,
-        organizationId: orgId,
-      });
-      setShowAddModal(false);
-      setNewContact({ first_name: "", last_name: "", email: "", phone: "", member_status: "visitor", notes: "" });
-      await fetchContacts();
-    } catch (err) {
-      console.error("Failed to add contact:", err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleDeleteContact = async (id: string) => {
     if (confirm("Are you sure you want to delete this contact?")) {
       try {
@@ -129,9 +98,15 @@ export default function ContactsPage() {
         <div className="flex gap-2">
           <Button variant="outline" size="sm" className="gap-2"><Filter size={14} /> Filter</Button>
           <Button variant="outline" size="sm" className="gap-2"><Download size={14} /> Export</Button>
-          <Button size="sm" className="gap-2 bg-[#bbff00] text-[#1a1d21] hover:bg-[#a3df00]" onClick={() => setShowAddModal(true)}>
-            <Plus size={14} /> Add Contact
-          </Button>
+          <CreateContactDialog 
+            open={showAddModal} 
+            onOpenChange={setShowAddModal} 
+            onSuccess={fetchContacts}
+          >
+            <Button size="sm" className="gap-2 bg-[#bbff00] text-[#1a1d21] hover:bg-[#a3df00]">
+              <Plus size={14} /> Add Contact
+            </Button>
+          </CreateContactDialog>
         </div>
       </div>
 
@@ -237,61 +212,6 @@ export default function ContactsPage() {
           </div>
         )}
       </div>
-
-      {/* Add Contact Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-card w-full max-w-lg rounded-xl shadow-xl border border-border overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="flex items-center justify-between p-4 border-b border-border">
-              <h5 className="text-lg font-semibold text-foreground">Add Contact</h5>
-              <button type="button" className="text-muted-foreground hover:text-foreground transition-colors" onClick={() => setShowAddModal(false)}>
-                <X size={20} />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">First Name *</label>
-                  <input type="text" className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring" value={newContact.first_name} onChange={(e) => setNewContact({ ...newContact, first_name: e.target.value })} />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Last Name *</label>
-                  <input type="text" className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring" value={newContact.last_name} onChange={(e) => setNewContact({ ...newContact, last_name: e.target.value })} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Email</label>
-                  <input type="email" className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring" value={newContact.email} onChange={(e) => setNewContact({ ...newContact, email: e.target.value })} />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Phone</label>
-                  <input type="tel" className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring" value={newContact.phone} onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })} />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Status</label>
-                <select className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring" value={newContact.member_status} onChange={(e) => setNewContact({ ...newContact, member_status: e.target.value })}>
-                  <option value="visitor">Visitor</option>
-                  <option value="member">Member</option>
-                  <option value="volunteer">Volunteer</option>
-                  <option value="leader">Leader</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Notes</label>
-                <textarea className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring min-h-[80px]" value={newContact.notes} onChange={(e) => setNewContact({ ...newContact, notes: e.target.value })}></textarea>
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-3 p-4 border-t border-border bg-muted/20">
-              <Button variant="outline" onClick={() => setShowAddModal(false)} className="gap-2"><X size={16} /> Cancel</Button>
-              <Button onClick={handleAddContact} disabled={saving} className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
-                <Check size={16} /> {saving ? "Saving..." : "Add Contact"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

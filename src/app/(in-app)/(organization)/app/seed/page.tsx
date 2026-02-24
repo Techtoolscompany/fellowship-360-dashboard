@@ -64,7 +64,6 @@ export default function SeedPage() {
             <p>• 12 church contacts with various statuses</p>
             <p>• 6 pipeline stages with 9 pipeline items</p>
             <p>• 5 tasks, 5 events, 5 prayer requests</p>
-            <p>• 30 donations across 5 months + 3 pledges</p>
             <p>• 4 ministries with 7 members</p>
             <p>• 4 appointments, 5 volunteers</p>
             <p>• 4 conversations with messages</p>

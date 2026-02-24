@@ -66,7 +66,7 @@ export default function VolunteersPage() {
                   <p className="text-muted-foreground text-sm mb-1">{stat.title}</p>
                   <h3 className="text-2xl font-bold">{loading ? "..." : stat.value}</h3>
                 </div>
-                <div className="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
                   <stat.icon className="w-5 h-5 text-violet-600" />
                 </div>
               </div>
@@ -111,7 +111,7 @@ export default function VolunteersPage() {
                       <td className="px-6 py-4 text-muted-foreground">{vol.volunteer.role || "—"}</td>
                       <td className="px-6 py-4 text-muted-foreground">{new Date(vol.volunteer.joinedAt).toLocaleDateString()}</td>
                       <td className="px-6 py-4">
-                        <Badge variant="secondary" className={vol.volunteer.status === "active" ? "bg-emerald-100 text-emerald-600" : "bg-gray-100 text-gray-600"}>
+                        <Badge variant="secondary" className={vol.volunteer.status === "active" ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}>
                           {vol.volunteer.status}
                         </Badge>
                       </td>

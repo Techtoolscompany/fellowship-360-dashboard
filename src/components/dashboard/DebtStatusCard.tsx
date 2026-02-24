@@ -2,17 +2,19 @@
 import React from "react";
 import { FiTrendingUp, FiCalendar } from "react-icons/fi";
 
-const DebtStatusCard = ({ totalDonations }: { totalDonations?: number }) => {
-  const currentAmount = totalDonations ?? 0;
-  const goalAmount = 120000;
-  const percentComplete = goalAmount > 0 ? Math.min(((currentAmount / goalAmount) * 100), 100).toFixed(1) : "0";
+const DebtStatusCard = () => {
+  // MVP placeholder — will be wired to real ministry goal data
+  const goalLabel = "Member Engagement";
+  const current = 67;
+  const target = 100;
+  const percentComplete = Math.min(((current / target) * 100), 100).toFixed(1);
 
   return (
     <div
       className="h-full"
       style={{
         borderRadius: "24px",
-        border: "1px solid var(--ds-border-secondary, #b5b5b5)",
+        border: "1px solid var(--border)",
         background: "#343330",
         overflow: "hidden",
       }}
@@ -21,7 +23,7 @@ const DebtStatusCard = ({ totalDonations }: { totalDonations?: number }) => {
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="mb-1" style={{ fontSize: "20px", fontWeight: 700, color: "#fff" }}>
-              Giving Year to Date
+              Ministry Goals
             </p>
             <div className="flex items-center gap-2">
               <FiCalendar size={14} color="#9ca3af" />
@@ -34,10 +36,10 @@ const DebtStatusCard = ({ totalDonations }: { totalDonations?: number }) => {
 
         <div className="mb-4">
           <p className="mb-0" style={{ fontSize: "36px", fontWeight: 700, color: "#fff" }}>
-            ${currentAmount.toLocaleString()}
+            {current}%
           </p>
           <span style={{ fontSize: "14px", color: "#9ca3af" }}>
-            of ${goalAmount.toLocaleString()} annual goal
+            {goalLabel} target: {target}%
           </span>
         </div>
 
@@ -69,7 +71,7 @@ const DebtStatusCard = ({ totalDonations }: { totalDonations?: number }) => {
               {percentComplete}% Complete
             </span>
             <span style={{ fontSize: "12px", color: "#9ca3af" }}>
-              ${(goalAmount - currentAmount).toLocaleString()} remaining
+              {target - current}% remaining
             </span>
           </div>
         </div>

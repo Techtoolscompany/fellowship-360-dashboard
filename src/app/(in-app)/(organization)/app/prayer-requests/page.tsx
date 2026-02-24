@@ -12,6 +12,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import useOrganization from "@/lib/organizations/useOrganization";
+import { CreatePrayerRequestDialog } from "@/components/dialogs/CreatePrayerRequestDialog";
+import { EditPrayerRequestDialog } from "@/components/dialogs/EditPrayerRequestDialog";
 import { getPrayerRequests, updatePrayerRequest } from "@/app/actions/prayer";
 
 export default function PrayerRequestsPage() {
@@ -19,6 +21,9 @@ export default function PrayerRequestsPage() {
   const orgId = organization?.id;
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editRequest, setEditRequest] = useState<any>(null);
 
   const fetchRequests = useCallback(async () => {
     if (!orgId) return;
@@ -56,9 +61,22 @@ export default function PrayerRequestsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm"><Filter className="w-4 h-4 mr-2" />Filter</Button>
-          <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
-            <Plus className="w-4 h-4 mr-2" />Submit Request
-          </Button>
+          <CreatePrayerRequestDialog
+            open={showAddModal}
+            onOpenChange={setShowAddModal}
+            onSuccess={fetchRequests}
+          >
+            <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
+              <Plus className="w-4 h-4 mr-2" />Submit Request
+            </Button>
+          </CreatePrayerRequestDialog>
+
+          <EditPrayerRequestDialog
+            open={!!editRequest}
+            onOpenChange={(open) => !open && setEditRequest(null)}
+            onSuccess={fetchRequests}
+            prayerRequest={editRequest}
+          />
         </div>
       </div>
 
@@ -123,8 +141,10 @@ export default function PrayerRequestsPage() {
                       <Button variant="ghost" size="icon"><MoreHorizontal className="w-4 h-4" /></Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem>View Full Request</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleMarkAnswered(pr.id)}>Mark as Answered</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setEditRequest(pr)}>Edit Request</DropdownMenuItem>
+                      {pr.status !== "answered" && (
+                        <DropdownMenuItem onClick={() => handleMarkAnswered(pr.id)}>Mark as Answered</DropdownMenuItem>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>

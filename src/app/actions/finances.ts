@@ -106,13 +106,19 @@ export async function createPledge(data: {
 export async function updatePledge(
   id: string,
   data: Partial<{
+    contactId: string | null;
+    totalAmount: number;
     amountPaid: number;
+    frequency: string;
+    fund: string;
+    startDate: Date;
+    endDate: Date | null;
     notes: string | null;
   }>
 ) {
   const [pledge] = await db
     .update(pledges)
-    .set({ ...data, updatedAt: new Date() })
+    .set({ ...data, updatedAt: new Date() } as any)
     .where(eq(pledges.id, id))
     .returning();
   return pledge;

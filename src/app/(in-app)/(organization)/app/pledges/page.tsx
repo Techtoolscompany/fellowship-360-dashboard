@@ -14,12 +14,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { getPledges } from "@/app/actions/finances";
+import { CreatePledgeDialog } from "@/components/dialogs/CreatePledgeDialog";
+import { EditPledgeDialog } from "@/components/dialogs/EditPledgeDialog";
 
 export default function PledgesPage() {
   const { organization } = useOrganization();
   const orgId = organization?.id;
   const [pledgeList, setPledgeList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editPledgeState, setEditPledgeState] = useState<any>(null);
 
   const fetchData = useCallback(async () => {
     if (!orgId) return;
@@ -57,9 +62,18 @@ export default function PledgesPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm"><Filter className="w-4 h-4 mr-2" />Filter</Button>
-          <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
-            <Plus className="w-4 h-4 mr-2" />Record Pledge
-          </Button>
+          <CreatePledgeDialog open={showAddModal} onOpenChange={setShowAddModal} onSuccess={fetchData}>
+            <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
+              <Plus className="w-4 h-4 mr-2" />Record Pledge
+            </Button>
+          </CreatePledgeDialog>
+
+          <EditPledgeDialog
+            open={!!editPledgeState}
+            onOpenChange={(open) => !open && setEditPledgeState(null)}
+            onSuccess={fetchData}
+            pledge={editPledgeState}
+          />
         </div>
       </div>
 
@@ -129,8 +143,7 @@ export default function PledgesPage() {
                               <Button variant="ghost" size="icon"><MoreHorizontal className="w-4 h-4" /></Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem>View Details</DropdownMenuItem>
-                              <DropdownMenuItem>Record Payment</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setEditPledgeState(row.pledge)}>Edit Pledge</DropdownMenuItem>
                               <DropdownMenuItem>Send Reminder</DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>

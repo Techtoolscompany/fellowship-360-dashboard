@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"next dev --turbopack\" \"inngest-cli dev -p 8288\" \"npx react-email dev --dir ./src/emails --port 3001\"",
+    "dev": "concurrently \"next dev -p 3005\" \"inngest-cli dev -p 8288\" \"npx react-email dev --dir ./src/emails --port 3001\"",
     "build": "BROWSERSLIST_IGNORE_OLD_DATA=1 BASELINE_BROWSER_MAPPING_IGNORE_OLD_DATA=1 next build",
     "start": "next start",
     "lint": "eslint .",
@@ -16,6 +16,8 @@
     "@aws-sdk/client-ses": "^3.940.0",
     "@aws-sdk/s3-presigned-post": "^3.940.0",
     "@aws-sdk/s3-request-presigner": "^3.940.0",
+    "@elevenlabs/react": "^0.14.0",
+    "@google/generative-ai": "^0.24.1",
     "@hello-pangea/dnd": "^18.0.1",
     "@hookform/resolvers": "^3.10.0",
     "@neondatabase/serverless": "^0.10.4",

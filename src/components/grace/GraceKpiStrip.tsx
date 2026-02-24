@@ -3,7 +3,6 @@ import React from "react";
 import {
   FiPhone,
   FiPhoneIncoming,
-  FiPhoneOutgoing,
   FiMessageSquare,
   FiUsers,
   FiTrendingUp,
@@ -12,8 +11,6 @@ import {
 
 interface KpiData {
   totalContacts: number;
-  totalDonations: number;
-  donationCount: number;
   broadcastsSent: number;
   totalRecipients: number;
 }
@@ -25,15 +22,6 @@ const GraceKpiStrip = ({ data }: { data?: KpiData }) => {
       value: data ? String(data.totalContacts) : "—",
       subtitle: "Active contacts",
       icon: FiUsers,
-      trend: "",
-      trendDirection: "neutral",
-      iconBg: "#bbff00",
-    },
-    {
-      label: "Donations",
-      value: data ? `$${data.totalDonations.toLocaleString()}` : "—",
-      subtitle: `${data?.donationCount ?? 0} gifts received`,
-      icon: FiPhoneOutgoing,
       trend: "",
       trendDirection: "neutral",
       iconBg: "#bbff00",
@@ -63,8 +51,8 @@ const GraceKpiStrip = ({ data }: { data?: KpiData }) => {
       <div
         className="flex items-stretch min-w-max"
         style={{
-          borderTop: "1px solid var(--ds-border-secondary, #e5e5e5)",
-          borderBottom: "1px solid var(--ds-border-secondary, #e5e5e5)",
+          borderTop: "1px solid var(--border)",
+          borderBottom: "1px solid var(--border)",
         }}
       >
         {kpis.map((kpi, index) => (
@@ -96,7 +84,7 @@ const GraceKpiStrip = ({ data }: { data?: KpiData }) => {
                   style={{
                     fontSize: "13px",
                     fontWeight: 500,
-                    color: "var(--ds-text-secondary, #737373)",
+                    color: "var(--muted-foreground)",
                     lineHeight: 1.4,
                   }}
                 >
@@ -110,7 +98,7 @@ const GraceKpiStrip = ({ data }: { data?: KpiData }) => {
                   style={{
                     fontSize: "28px",
                     fontWeight: 600,
-                    color: "var(--ds-text-primary, #171717)",
+                    color: "var(--foreground)",
                     lineHeight: 1.2,
                   }}
                 >
@@ -121,7 +109,7 @@ const GraceKpiStrip = ({ data }: { data?: KpiData }) => {
               <span
                 style={{
                   fontSize: "11px",
-                  color: "var(--ds-text-muted, #a3a3a3)",
+                  color: "var(--muted-foreground)",
                 }}
               >
                 {kpi.subtitle}
@@ -132,7 +120,7 @@ const GraceKpiStrip = ({ data }: { data?: KpiData }) => {
               <div
                 style={{
                   width: "1px",
-                  background: "var(--ds-border-secondary, #e5e5e5)",
+                  background: "var(--border)",
                   alignSelf: "stretch",
                 }}
               />

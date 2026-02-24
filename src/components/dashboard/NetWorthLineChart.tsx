@@ -136,7 +136,7 @@ const NetWorthLineChart = () => {
         style={{
           borderRadius: "24px",
           overflow: "hidden",
-          border: "1px solid var(--ds-border-secondary, #e2e8f0)",
+          border: "1px solid var(--border)",
           minHeight: "334px",
         }}
       >
@@ -148,7 +148,7 @@ const NetWorthLineChart = () => {
               style={{
                 fontSize: "20px",
                 fontWeight: 600,
-                color: "var(--ds-text-primary, #343330)",
+                color: "var(--foreground)",
                 lineHeight: "28px",
                 textTransform: "capitalize",
               }}

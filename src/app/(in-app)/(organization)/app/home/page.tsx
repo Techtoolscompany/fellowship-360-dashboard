@@ -91,13 +91,13 @@ export default function MinistryDashboardPage() {
         {/* Row 2: Giving YTD + Line chart + Activity */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-3">
-            <DebtStatusCard totalDonations={data?.kpi?.totalDonations ?? 0} />
+            <DebtStatusCard />
           </div>
           <div className="lg:col-span-5">
             <NetWorthLineChart />
           </div>
           <div className="lg:col-span-4">
-            <TransactionHistoryCard donations={data?.recentDonations} />
+            <TransactionHistoryCard />
           </div>
         </div>
       </div>

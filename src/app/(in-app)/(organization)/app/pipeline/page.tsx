@@ -46,9 +46,9 @@ export default function PipelinePage() {
     items.filter(i => i.item.stageId === stageId).sort((a, b) => a.item.order - b.item.order);
 
   const priorityColors: Record<string, string> = {
-    high: "bg-rose-100 text-rose-600",
-    medium: "bg-amber-100 text-amber-600",
-    low: "bg-gray-100 text-gray-600",
+    high: "bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400",
+    medium: "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400",
+    low: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
   };
 
   return (
@@ -103,7 +103,7 @@ export default function PipelinePage() {
                       <div key={row.item.id} className="p-3 bg-muted/30 rounded-lg border border-border hover:shadow-sm transition-shadow group">
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                            <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
                               <User className="w-4 h-4 text-blue-600" />
                             </div>
                             <div className="min-w-0">
@@ -129,7 +129,7 @@ export default function PipelinePage() {
                           </DropdownMenu>
                         </div>
                         <div className="flex items-center gap-2 mt-2">
-                          <Badge variant="secondary" className={`text-[10px] ${priorityColors[row.item.priority] || "bg-gray-100 text-gray-600"}`}>
+                          <Badge variant="secondary" className={`text-[10px] ${priorityColors[row.item.priority] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}>
                             {row.item.priority}
                           </Badge>
                           {row.item.notes && (

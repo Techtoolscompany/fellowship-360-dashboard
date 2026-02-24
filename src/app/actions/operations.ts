@@ -67,8 +67,13 @@ export async function createAppointment(data: {
 export async function updateAppointment(
   id: string,
   data: Partial<{
+    contactId: string | null;
+    staffId: string | null;
+    title: string;
     status: string;
     dateTime: Date;
+    duration: number;
+    type: string | null;
     notes: string | null;
   }>
 ) {

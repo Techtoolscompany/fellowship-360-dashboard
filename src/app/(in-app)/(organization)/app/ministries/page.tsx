@@ -12,11 +12,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import useOrganization from "@/lib/organizations/useOrganization";
-import { getMinistries } from "@/app/actions/ministries";
+import { getMinistries, deleteMinistry } from "@/app/actions/ministries";
+import { CreateMinistryDialog } from "@/components/dialogs/CreateMinistryDialog";
+import { EditMinistryDialog } from "@/components/dialogs/EditMinistryDialog";
 
 const MINISTRY_COLORS = ["#8b5cf6", "#f59e0b", "#10b981", "#ec4899", "#ef4444", "#3b82f6", "#84cc16", "#6366f1"];
 
-function MinistryCard({ ministry, index }: { ministry: any; index: number }) {
+function MinistryCard({ ministry, index, onEdit, onDelete }: { ministry: any; index: number; onEdit: (m: any) => void; onDelete: (id: string) => void }) {
   const color = MINISTRY_COLORS[index % MINISTRY_COLORS.length];
 
   return (
@@ -43,9 +45,9 @@ function MinistryCard({ ministry, index }: { ministry: any; index: number }) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem>View Details</DropdownMenuItem>
-              <DropdownMenuItem>Edit Ministry</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onEdit(ministry.ministry)}>Edit Ministry</DropdownMenuItem>
               <DropdownMenuItem>View Members</DropdownMenuItem>
-              <DropdownMenuItem className="text-destructive">Archive</DropdownMenuItem>
+              <DropdownMenuItem className="text-destructive" onClick={() => onDelete(ministry.ministry.id)}>Delete</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -75,6 +77,9 @@ export default function MinistriesPage() {
   const [ministriesList, setMinistriesList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editMinistryState, setEditMinistryState] = useState<any>(null);
+
   const fetchMinistries = useCallback(async () => {
     if (!orgId) return;
     setLoading(true);
@@ -89,6 +94,13 @@ export default function MinistriesPage() {
   }, [orgId]);
 
   useEffect(() => { fetchMinistries(); }, [fetchMinistries]);
+
+  const handleDelete = async (id: string) => {
+    if (confirm("Are you sure you want to delete this ministry?")) {
+      await deleteMinistry(id);
+      await fetchMinistries();
+    }
+  };
 
   const totalMembers = ministriesList.reduce((sum, m) => sum + Number(m.memberCount), 0);
 
@@ -111,9 +123,20 @@ export default function MinistriesPage() {
               <p className="text-xs text-muted-foreground">Total Members</p>
             </div>
           </div>
-          <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600] font-semibold">
-            <Plus className="w-4 h-4 mr-2" />Add Ministry
-          </Button>
+          
+          <CreateMinistryDialog open={showAddModal} onOpenChange={setShowAddModal} onSuccess={fetchMinistries}>
+            <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600] font-semibold">
+              <Plus className="w-4 h-4 mr-2" />Add Ministry
+            </Button>
+          </CreateMinistryDialog>
+
+          <EditMinistryDialog
+            open={!!editMinistryState}
+            onOpenChange={(open) => !open && setEditMinistryState(null)}
+            onSuccess={fetchMinistries}
+            ministry={editMinistryState}
+          />
+
         </div>
       </div>
 
@@ -124,7 +147,13 @@ export default function MinistriesPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
           {ministriesList.map((ministry, i) => (
-            <MinistryCard key={ministry.ministry.id} ministry={ministry} index={i} />
+            <MinistryCard 
+              key={ministry.ministry.id} 
+              ministry={ministry} 
+              index={i} 
+              onEdit={setEditMinistryState}
+              onDelete={handleDelete}
+            />
           ))}
         </div>
       )}

@@ -126,7 +126,7 @@ async function BlogDetailPage({ params }: Props) {
       />
 
       {/* Breadcrumbs */}
-      <nav aria-label="Breadcrumb" className="flex items-center space-x-2 text-sm text-gray-600 mb-6">
+      <nav aria-label="Breadcrumb" className="flex items-center space-x-2 text-sm text-muted-foreground mb-6">
         <Link href="/" className="hover:text-primary flex items-center">
           <Home className="w-4 h-4" aria-hidden="true" />
           <span className="sr-only">Home</span>
@@ -163,7 +163,7 @@ async function BlogDetailPage({ params }: Props) {
           </header>
 
           {/* Metadata */}
-          <div className="flex flex-wrap items-center gap-4 md:gap-6 text-sm text-gray-600 mb-6 md:mb-8">
+          <div className="flex flex-wrap items-center gap-4 md:gap-6 text-sm text-muted-foreground mb-6 md:mb-8">
             <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4" aria-hidden="true" />
               <time dateTime={blog.frontmatter.createdDate}>

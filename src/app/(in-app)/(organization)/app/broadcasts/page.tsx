@@ -12,13 +12,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import useOrganization from "@/lib/organizations/useOrganization";
-import { getBroadcasts } from "@/app/actions/communications";
+import { getBroadcasts, updateBroadcastStatus } from "@/app/actions/communications";
+import { CreateBroadcastDialog } from "@/components/dialogs/CreateBroadcastDialog";
+import { EditBroadcastDialog } from "@/components/dialogs/EditBroadcastDialog";
 
 export default function BroadcastsPage() {
   const { organization } = useOrganization();
   const orgId = organization?.id;
   const [broadcastList, setBroadcastList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editBroadcast, setEditBroadcast] = useState<any>(null);
 
   const fetchData = useCallback(async () => {
     if (!orgId) return;
@@ -35,13 +40,26 @@ export default function BroadcastsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  const handleSend = async (id: string, currentTotal?: number) => {
+    // Mocking recipient count for now before send integration
+    await updateBroadcastStatus(id, "sent", { totalRecipients: currentTotal || Math.floor(Math.random() * 200) + 50 });
+    await fetchData();
+  };
+
+  const handleDelete = async (id: string) => {
+    // Use an archived status for deletion in UI, or a true delete if needed
+    // Assuming archived for soft-delete. If true delete is needed, add deleteBroadcast to actions.
+    await updateBroadcastStatus(id, "archived");
+    await fetchData();
+  };
+
   const sentCount = broadcastList.filter(b => b.status === "sent").length;
   const totalRecipients = broadcastList.reduce((sum, b) => sum + (b.totalRecipients || 0), 0);
 
   const kpiStats = [
     { title: "Sent This Month", value: String(sentCount), icon: Send },
     { title: "Total Recipients", value: totalRecipients.toLocaleString(), icon: Users },
-    { title: "Total Broadcasts", value: String(broadcastList.length), icon: Eye },
+    { title: "Total Broadcasts", value: String(broadcastList.filter(b => b.status !== "archived").length), icon: Eye },
     { title: "Drafts", value: String(broadcastList.filter(b => b.status === "draft").length), icon: MousePointer },
   ];
 
@@ -54,9 +72,22 @@ export default function BroadcastsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm"><Filter className="w-4 h-4 mr-2" />Filter</Button>
-          <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
-            <Plus className="w-4 h-4 mr-2" />Create Broadcast
-          </Button>
+          <CreateBroadcastDialog
+            open={showAddModal}
+            onOpenChange={setShowAddModal}
+            onSuccess={fetchData}
+          >
+            <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
+              <Plus className="w-4 h-4 mr-2" />Create Broadcast
+            </Button>
+          </CreateBroadcastDialog>
+
+          <EditBroadcastDialog
+            open={!!editBroadcast}
+            onOpenChange={(open) => !open && setEditBroadcast(null)}
+            onSuccess={fetchData}
+            broadcast={editBroadcast}
+          />
         </div>
       </div>
 
@@ -69,7 +100,7 @@ export default function BroadcastsPage() {
                   <p className="text-muted-foreground text-sm mb-1">{stat.title}</p>
                   <h3 className="text-2xl font-bold">{loading ? "..." : stat.value}</h3>
                 </div>
-                <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
                   <stat.icon className="w-5 h-5 text-blue-600" />
                 </div>
               </div>
@@ -103,11 +134,11 @@ export default function BroadcastsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {broadcastList.map((bc) => (
+                  {broadcastList.filter(bc => bc.status !== 'archived').map((bc) => (
                     <tr key={bc.id} className="hover:bg-muted/30">
                       <td className="px-6 py-4 font-semibold">{bc.title}</td>
                       <td className="px-6 py-4">
-                        <Badge variant="secondary" className={bc.channel === "email" ? "bg-blue-100 text-blue-600" : "bg-violet-100 text-violet-600"}>
+                        <Badge variant="secondary" className={bc.channel === "email" ? "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" : "bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400"}>
                           {bc.channel === "email" ? <Mail className="w-3 h-3 mr-1" /> : <MessageSquare className="w-3 h-3 mr-1" />}
                           {bc.channel}
                         </Badge>
@@ -115,7 +146,7 @@ export default function BroadcastsPage() {
                       <td className="px-6 py-4">{bc.totalRecipients ? bc.totalRecipients.toLocaleString() : "—"}</td>
                       <td className="px-6 py-4 text-muted-foreground">{bc.sentAt ? new Date(bc.sentAt).toLocaleDateString() : "—"}</td>
                       <td className="px-6 py-4">
-                        <Badge variant="secondary" className={bc.status === "sent" ? "bg-emerald-100 text-emerald-600" : "bg-gray-100 text-gray-600"}>
+                        <Badge variant="secondary" className={bc.status === "sent" ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}>
                           {bc.status}
                         </Badge>
                       </td>
@@ -125,9 +156,16 @@ export default function BroadcastsPage() {
                             <Button variant="ghost" size="icon"><MoreHorizontal className="w-4 h-4" /></Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>View Report</DropdownMenuItem>
-                            <DropdownMenuItem>Duplicate</DropdownMenuItem>
-                            <DropdownMenuItem>Delete</DropdownMenuItem>
+                            {bc.status === "draft" && (
+                              <>
+                                <DropdownMenuItem onClick={() => setEditBroadcast(bc)}>Edit Draft</DropdownMenuItem>
+                                <DropdownMenuItem className="text-emerald-600" onClick={() => handleSend(bc.id, bc.totalRecipients)}>Send Broadcast</DropdownMenuItem>
+                              </>
+                            )}
+                            {bc.status === "sent" && (
+                              <DropdownMenuItem>View Report</DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem className="text-red-600" onClick={() => handleDelete(bc.id)}>Delete</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </td>

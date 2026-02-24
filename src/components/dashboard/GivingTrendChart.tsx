@@ -135,7 +135,7 @@ const GivingTrendChart = () => {
                 style={{
                   fontSize: "20px",
                   fontWeight: 600,
-                  color: isDark ? "#fff" : "var(--ds-text-primary, #343330)",
+                  color: "var(--foreground)",
                   lineHeight: "28px",
                 }}
               >
@@ -146,7 +146,7 @@ const GivingTrendChart = () => {
                 style={{
                   fontSize: "12px",
                   fontWeight: 400,
-                  color: "var(--ds-text-secondary, #64748b)",
+                  color: "var(--muted-foreground)",
                 }}
               >
                 Week-to-week giving over past 4 weeks
@@ -179,13 +179,13 @@ const GivingTrendChart = () => {
             style={{
               fontSize: "28px",
               fontWeight: 600,
-              color: isDark ? "#fff" : "var(--ds-text-primary, #343330)",
+              color: "var(--foreground)",
             }}
           >
             ${totalGiving.toLocaleString()}
           </p>
           <span
-            style={{ fontSize: "12px", color: "var(--ds-text-muted, #94a3b8)" }}
+            style={{ fontSize: "12px", color: "var(--muted-foreground)" }}
           >
             Total over 4 weeks
           </span>

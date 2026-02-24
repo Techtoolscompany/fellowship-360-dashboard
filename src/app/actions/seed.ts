@@ -8,8 +8,6 @@ import {
   tasks,
   events,
   prayerRequests,
-  donations,
-  pledges,
   ministries,
   ministryMembers,
   appointments,
@@ -98,36 +96,7 @@ export async function seedDemoData(orgId: string) {
     { contactId: insertedContacts[3].id, contactName: "David Kim", content: "Thanksgiving for new baby — healthy delivery!", urgency: "normal" as const, status: "answered" as const, response: "Baby born healthy, 7lbs 3oz!", organizationId: orgId },
   ]);
 
-  // ── 6. Donations ──
-  const months = [0, 1, 2, 3, 4].map((m) => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - m);
-    return d;
-  });
-  const donationValues = [];
-  for (const month of months) {
-    for (let i = 0; i < 6; i++) {
-      const contact = insertedContacts[Math.floor(Math.random() * insertedContacts.length)];
-      donationValues.push({
-        contactId: contact.id,
-        amount: Math.round((Math.random() * 500 + 25) * 100) / 100,
-        date: new Date(month.getFullYear(), month.getMonth(), Math.floor(Math.random() * 28) + 1),
-        method: (["cash", "check", "card", "online"] as const)[Math.floor(Math.random() * 4)],
-        fund: ["General", "Building Fund", "Missions", "Youth"][Math.floor(Math.random() * 4)],
-        organizationId: orgId,
-      });
-    }
-  }
-  await db.insert(donations).values(donationValues);
-
-  // ── 7. Pledges ──
-  await db.insert(pledges).values([
-    { contactId: insertedContacts[4].id, totalAmount: 5000, amountPaid: 2500, frequency: "monthly" as const, fund: "Building Fund", startDate: new Date(2024, 0, 1), endDate: new Date(2024, 11, 31), organizationId: orgId },
-    { contactId: insertedContacts[9].id, totalAmount: 12000, amountPaid: 8000, frequency: "monthly" as const, fund: "General", startDate: new Date(2024, 0, 1), organizationId: orgId },
-    { contactId: insertedContacts[3].id, totalAmount: 1200, amountPaid: 300, frequency: "quarterly" as const, fund: "Missions", startDate: new Date(2024, 3, 1), organizationId: orgId },
-  ]);
-
-  // ── 8. Ministries ──
+  // ── 6. Ministries ──
   const insertedMinistries = await db.insert(ministries).values([
     { name: "Worship Team", description: "Music and worship leading", meetingDay: "Wednesday", meetingTime: "7:00 PM", meetingLocation: "Sanctuary", leaderId: insertedContacts[4].id, organizationId: orgId },
     { name: "Children's Ministry", description: "Sunday school and kids programs", meetingDay: "Sunday", meetingTime: "9:30 AM", meetingLocation: "Kids Wing", leaderId: insertedContacts[9].id, organizationId: orgId },
@@ -146,7 +115,7 @@ export async function seedDemoData(orgId: string) {
     { ministryId: insertedMinistries[3].id, contactId: insertedContacts[7].id, role: "member" as const },
   ]);
 
-  // ── 9. Appointments ──
+  // ── 7. Appointments ──
   await db.insert(appointments).values([
     { contactId: insertedContacts[0].id, title: "New Visitor Welcome Meeting", dateTime: new Date(Date.now() + 2 * 86400000), duration: 30, status: "scheduled" as const, type: "Welcome", organizationId: orgId },
     { contactId: insertedContacts[5].id, title: "Membership Interview", dateTime: new Date(Date.now() + 5 * 86400000), duration: 45, status: "confirmed" as const, type: "Membership", organizationId: orgId },
@@ -154,7 +123,7 @@ export async function seedDemoData(orgId: string) {
     { contactId: insertedContacts[2].id, title: "Follow-up Call", dateTime: new Date(Date.now() + 86400000), duration: 15, status: "scheduled" as const, type: "Follow Up", organizationId: orgId },
   ]);
 
-  // ── 10. Volunteers ──
+  // ── 8. Volunteers ──
   await db.insert(volunteers).values([
     { contactId: insertedContacts[4].id, role: "Worship Leader", status: "active" as const, totalHours: 120, organizationId: orgId },
     { contactId: insertedContacts[6].id, role: "Greeter", status: "active" as const, totalHours: 45, organizationId: orgId },
@@ -163,7 +132,7 @@ export async function seedDemoData(orgId: string) {
     { contactId: insertedContacts[5].id, role: "Parking Lot", status: "inactive" as const, totalHours: 30, organizationId: orgId },
   ]);
 
-  // ── 11. Conversations ──
+  // ── 9. Conversations ──
   const insertedConvos = await db.insert(conversations).values([
     { contactId: insertedContacts[4].id, channel: "phone" as const, status: "resolved" as const, subject: "Thank you call", lastMessageAt: new Date(Date.now() - 600000), organizationId: orgId },
     { contactId: insertedContacts[5].id, channel: "sms" as const, status: "open" as const, subject: "Small group inquiry", lastMessageAt: new Date(Date.now() - 1500000), organizationId: orgId },
@@ -180,14 +149,14 @@ export async function seedDemoData(orgId: string) {
     { conversationId: insertedConvos[3].id, content: "Is there volunteer training this weekend?", direction: "inbound" as const, senderType: "human" as const },
   ]);
 
-  // ── 12. Broadcasts ──
+  // ── 10. Broadcasts ──
   await db.insert(broadcasts).values([
     { title: "Weekly Update: Sunday Service", content: "Join us this Sunday for a special message from Pastor James.", channel: "email" as const, status: "sent" as const, sentAt: new Date(Date.now() - 86400000), totalRecipients: 150, totalDelivered: 142, totalOpened: 89, organizationId: orgId },
     { title: "Prayer Night Reminder", content: "Don't forget — special prayer night this Wednesday at 7 PM.", channel: "sms" as const, status: "sent" as const, sentAt: new Date(Date.now() - 3 * 86400000), totalRecipients: 85, totalDelivered: 82, organizationId: orgId },
     { title: "Easter Event Invite", content: "You're invited to our Easter celebration!", channel: "email" as const, status: "draft" as const, organizationId: orgId },
   ]);
 
-  // ── 13. Templates ──
+  // ── 11. Templates ──
   await db.insert(messageTemplates).values([
     { name: "Welcome Visitor", content: "Hi {firstName}, thank you for visiting {churchName}! We'd love to connect with you.", category: "Welcome", channel: "sms" as const, variables: ["firstName", "churchName"], organizationId: orgId },
     { name: "Event Reminder", content: "Don't forget: {eventName} is happening on {eventDate} at {eventLocation}.", category: "Events", channel: "sms" as const, variables: ["eventName", "eventDate", "eventLocation"], organizationId: orgId },

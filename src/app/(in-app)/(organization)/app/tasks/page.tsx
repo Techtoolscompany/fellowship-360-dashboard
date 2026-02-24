@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import useOrganization from "@/lib/organizations/useOrganization";
+import { CreateTaskDialog } from "@/components/dialogs/CreateTaskDialog";
 import { getTasks, updateTask, deleteTask } from "@/app/actions/tasks";
 
 export default function TasksPage() {
@@ -19,6 +20,8 @@ export default function TasksPage() {
   const orgId = organization?.id;
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [showAddModal, setShowAddModal] = useState(false);
 
   const fetchTasks = useCallback(async () => {
     if (!orgId) return;
@@ -61,9 +64,15 @@ export default function TasksPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm"><Filter className="w-4 h-4 mr-2" />Filter</Button>
-          <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
-            <Plus className="w-4 h-4 mr-2" />Add Task
-          </Button>
+          <CreateTaskDialog
+            open={showAddModal}
+            onOpenChange={setShowAddModal}
+            onSuccess={fetchTasks}
+          >
+            <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
+              <Plus className="w-4 h-4 mr-2" />Add Task
+            </Button>
+          </CreateTaskDialog>
         </div>
       </div>
 
@@ -96,7 +105,7 @@ export default function TasksPage() {
               {tasks.map((task) => (
                 <div key={task.id} className="p-4 hover:bg-muted/30 flex items-center gap-4">
                   <button onClick={() => task.status !== "completed" && handleComplete(task.id)} className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                    task.status === "completed" ? "bg-emerald-500 border-emerald-500 text-white" : "border-gray-300 hover:border-gray-400"
+                    task.status === "completed" ? "bg-emerald-500 border-emerald-500 text-white" : "border-gray-300 hover:border-gray-400 dark:border-gray-600 dark:hover:border-gray-500"
                   }`}>
                     {task.status === "completed" && <CheckSquare className="w-3 h-3" />}
                   </button>
@@ -106,9 +115,9 @@ export default function TasksPage() {
                         {task.title}
                       </h4>
                       <Badge variant="secondary" className={
-                        task.priority === "high" ? "bg-rose-100 text-rose-600" :
-                        task.priority === "medium" ? "bg-amber-100 text-amber-600" :
-                        "bg-gray-100 text-gray-600"
+                        task.priority === "high" ? "bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400" :
+                        task.priority === "medium" ? "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" :
+                        "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
                       }>{task.priority}</Badge>
                     </div>
                     <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
@@ -117,9 +126,9 @@ export default function TasksPage() {
                     </div>
                   </div>
                   <Badge variant="secondary" className={
-                    task.status === "completed" ? "bg-emerald-100 text-emerald-600" :
-                    task.status === "in_progress" ? "bg-blue-100 text-blue-600" :
-                    "bg-gray-100 text-gray-600"
+                    task.status === "completed" ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" :
+                    task.status === "in_progress" ? "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" :
+                    "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
                   }>{task.status}</Badge>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

@@ -63,15 +63,15 @@ const RequestTypesChart = ({
     <div className="w-full h-full">
       <div
         className="bg-card w-full h-full"
-        style={{ borderRadius: "24px", overflow: "hidden", border: "1px solid var(--ds-border-secondary, #e2e8f0)", minHeight: "334px" }}
+        style={{ borderRadius: "24px", overflow: "hidden", border: "1px solid var(--border)", minHeight: "334px" }}
       >
         <div className="p-6">
           <div className="flex items-start justify-between mb-2">
             <div>
-              <p className="mb-1" style={{ fontSize: "20px", fontWeight: 600, color: "var(--ds-text-primary, #171717)" }}>
+              <p className="mb-1" style={{ fontSize: "20px", fontWeight: 600, color: "var(--foreground)" }}>
                 Request Types
               </p>
-              <p className="mb-0" style={{ fontSize: "12px", color: "var(--ds-text-secondary, #737373)" }}>
+              <p className="mb-0" style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>
                 Distribution by category
               </p>
             </div>
@@ -80,19 +80,19 @@ const RequestTypesChart = ({
           <div className="flex gap-3 mb-2 flex-wrap">
             <div>
               <span style={{ fontSize: "18px", fontWeight: 600, color: prayerColor }}>{totals.prayer}</span>
-              <span style={{ fontSize: "10px", color: "var(--ds-text-muted, #a3a3a3)", marginLeft: "4px" }}>prayer</span>
+              <span style={{ fontSize: "10px", color: "var(--muted-foreground)", marginLeft: "4px" }}>prayer</span>
             </div>
             <div>
               <span style={{ fontSize: "18px", fontWeight: 600, color: appointmentColor }}>{totals.appointments}</span>
-              <span style={{ fontSize: "10px", color: "var(--ds-text-muted, #a3a3a3)", marginLeft: "4px" }}>appts</span>
+              <span style={{ fontSize: "10px", color: "var(--muted-foreground)", marginLeft: "4px" }}>appts</span>
             </div>
             <div>
               <span style={{ fontSize: "18px", fontWeight: 600, color: inquiryColor }}>{totals.inquiries}</span>
-              <span style={{ fontSize: "10px", color: "var(--ds-text-muted, #a3a3a3)", marginLeft: "4px" }}>convos</span>
+              <span style={{ fontSize: "10px", color: "var(--muted-foreground)", marginLeft: "4px" }}>convos</span>
             </div>
             <div>
               <span style={{ fontSize: "18px", fontWeight: 600, color: visitorColor }}>{totals.visitors}</span>
-              <span style={{ fontSize: "10px", color: "var(--ds-text-muted, #a3a3a3)", marginLeft: "4px" }}>pipeline</span>
+              <span style={{ fontSize: "10px", color: "var(--muted-foreground)", marginLeft: "4px" }}>pipeline</span>
             </div>
           </div>
 

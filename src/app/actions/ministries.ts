@@ -50,6 +50,25 @@ export async function createMinistry(data: {
   return ministry;
 }
 
+export async function updateMinistry(
+  id: string,
+  data: Partial<{
+    name: string;
+    description: string | null;
+    meetingDay: string | null;
+    meetingTime: string | null;
+    meetingLocation: string | null;
+    leaderId: string | null;
+  }>
+) {
+  const [ministry] = await db
+    .update(ministries)
+    .set({ ...data, updatedAt: new Date() } as any)
+    .where(eq(ministries.id, id))
+    .returning();
+  return ministry;
+}
+
 export async function addMinistryMember(
   ministryId: string,
   contactId: string,

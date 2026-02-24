@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Plus, ChevronLeft, ChevronRight, MapPin, Clock, Loader2 } from "lucide-react";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { getEvents } from "@/app/actions/calendar";
+import { CreateEventDialog } from "@/components/dialogs/CreateEventDialog";
+import { EditEventDialog } from "@/components/dialogs/EditEventDialog";
 
 export default function CalendarPage() {
   const { organization } = useOrganization();
@@ -13,6 +15,9 @@ export default function CalendarPage() {
   const [eventList, setEventList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
+
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editEventState, setEditEventState] = useState<any>(null);
 
   const fetchData = useCallback(async () => {
     if (!orgId) return;
@@ -66,9 +71,19 @@ export default function CalendarPage() {
           <p className="text-muted-foreground mb-1 text-base">Church Events & Schedule</p>
           <h1 className="text-3xl font-bold text-foreground">Calendar</h1>
         </div>
-        <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
-          <Plus className="w-4 h-4 mr-2" />Add Event
-        </Button>
+        
+        <CreateEventDialog open={showAddModal} onOpenChange={setShowAddModal} onSuccess={fetchData}>
+          <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
+            <Plus className="w-4 h-4 mr-2" />Add Event
+          </Button>
+        </CreateEventDialog>
+
+        <EditEventDialog
+          open={!!editEventState}
+          onOpenChange={(open) => !open && setEditEventState(null)}
+          onSuccess={fetchData}
+          event={editEventState}
+        />
       </div>
 
       {loading ? (
@@ -91,14 +106,18 @@ export default function CalendarPage() {
                     key={index}
                     className={`min-h-[80px] p-2 border rounded-lg text-sm ${
                       cell.day && isToday(cell.day) ? "bg-blue-50 border-blue-200" : "border-border"
-                    } ${cell.day ? "hover:bg-muted/50 cursor-pointer" : ""}`}
+                    } hover:bg-muted/50 transition-colors`}
                   >
                     {cell.day && (
                       <>
                         <span className={`font-medium ${isToday(cell.day) ? "text-blue-600" : ""}`}>{cell.day}</span>
                         <div className="mt-1 space-y-1">
                           {cell.events.slice(0, 2).map((event, i) => (
-                            <div key={event.id} className={`text-[10px] bg-${eventColors[i % eventColors.length]}-100 text-${eventColors[i % eventColors.length]}-700 rounded px-1 py-0.5 truncate`}>
+                            <div 
+                              key={event.id} 
+                              onClick={() => setEditEventState(event)}
+                              className={`text-[10px] bg-${eventColors[i % eventColors.length]}-100 text-${eventColors[i % eventColors.length]}-700 rounded px-1 py-0.5 truncate cursor-pointer hover:opacity-80`}
+                            >
                               {event.title}
                             </div>
                           ))}
@@ -122,7 +141,11 @@ export default function CalendarPage() {
               {upcomingEvents.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No upcoming events.</p>
               ) : upcomingEvents.map((event) => (
-                <div key={event.id} className="p-3 rounded-lg border border-border hover:bg-muted/30 transition-colors">
+                <div 
+                  key={event.id} 
+                  onClick={() => setEditEventState(event)}
+                  className="p-3 rounded-lg border border-border hover:bg-muted/30 transition-colors cursor-pointer"
+                >
                   <h4 className="font-semibold text-sm">{event.title}</h4>
                   <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
                     <Clock className="w-3 h-3" />

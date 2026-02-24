@@ -52,6 +52,10 @@ export async function createPrayerRequest(data: {
 export async function updatePrayerRequest(
   id: string,
   data: Partial<{
+    contactId: string | null;
+    contactName: string | null;
+    content: string;
+    isAnonymous: boolean | string;
     status: string;
     urgency: string;
     assignedTeam: string | null;

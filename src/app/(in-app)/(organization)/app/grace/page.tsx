@@ -124,7 +124,7 @@ export default function GraceDashboardPage() {
           {/* Row 3: Recent Activity */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-8">
-              <RecentActivityCard donations={data?.recentDonations} />
+              <RecentActivityCard />
             </div>
           </div>
         </div>

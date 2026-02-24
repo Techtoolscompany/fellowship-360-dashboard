@@ -6,7 +6,6 @@ import {
   broadcasts,
   churchContacts,
   conversations,
-  donations,
   ministries,
   ministryMembers,
   prayerRequests,
@@ -73,8 +72,6 @@ export async function getReportsData(orgId: string, timeframe: Timeframe = "mont
     memberGrowthCurrentRow,
     memberGrowthPreviousRow,
     activeVolunteersRow,
-    givingCurrentRow,
-    givingPreviousRow,
     appointmentsCurrentRow,
     appointmentsPreviousRow,
     tasksStatsRow,
@@ -82,7 +79,6 @@ export async function getReportsData(orgId: string, timeframe: Timeframe = "mont
     prayerStatsRow,
     broadcastStatsRow,
     ministryRows,
-    donationRows,
     contactRows,
   ] = await Promise.all([
     db
@@ -115,25 +111,6 @@ export async function getReportsData(orgId: string, timeframe: Timeframe = "mont
       })
       .from(volunteers)
       .where(eq(volunteers.organizationId, orgId)),
-    db
-      .select({ total: sql<number>`coalesce(sum(${donations.amount}), 0)` })
-      .from(donations)
-      .where(
-        and(
-          eq(donations.organizationId, orgId),
-          gte(donations.date, windowStart)
-        )
-      ),
-    db
-      .select({ total: sql<number>`coalesce(sum(${donations.amount}), 0)` })
-      .from(donations)
-      .where(
-        and(
-          eq(donations.organizationId, orgId),
-          gte(donations.date, previousWindowStart),
-          sql`${donations.date} < ${windowStart}`
-        )
-      ),
     db
       .select({ count: sql<number>`count(*)` })
       .from(appointments)
@@ -194,10 +171,6 @@ export async function getReportsData(orgId: string, timeframe: Timeframe = "mont
       .groupBy(ministries.id, ministries.name)
       .orderBy(sql`count(${ministryMembers.id}) desc`),
     db
-      .select({ amount: donations.amount, date: donations.date })
-      .from(donations)
-      .where(eq(donations.organizationId, orgId)),
-    db
       .select({
         createdAt: churchContacts.createdAt,
         memberStatus: churchContacts.memberStatus,
@@ -209,10 +182,6 @@ export async function getReportsData(orgId: string, timeframe: Timeframe = "mont
   const months = getMonthsBack(6);
 
   const monthlyTrends = months.map((month) => {
-    const giving = donationRows
-      .filter((row) => row.date >= month.start && row.date < month.end)
-      .reduce((acc, row) => acc + Number(row.amount ?? 0), 0);
-
     const contactRowsInMonth = contactRows.filter(
       (row) => row.createdAt >= month.start && row.createdAt < month.end
     );
@@ -222,7 +191,7 @@ export async function getReportsData(orgId: string, timeframe: Timeframe = "mont
       row.memberStatus === "member" || row.memberStatus === "leader"
     ).length;
 
-    return { month: month.label, visitors, members, giving };
+    return { month: month.label, visitors, members };
   });
 
   const maxMinistryMembers = ministryRows.reduce(
@@ -240,8 +209,6 @@ export async function getReportsData(orgId: string, timeframe: Timeframe = "mont
   const volunteerActive = Number(activeVolunteersRow[0]?.active ?? 0);
   const broadcastTotal = Number(broadcastStatsRow[0]?.total ?? 0);
   const broadcastSent = Number(broadcastStatsRow[0]?.sent ?? 0);
-  const givingCurrent = Number(givingCurrentRow[0]?.total ?? 0);
-  const givingPrevious = Number(givingPreviousRow[0]?.total ?? 0);
   const appointmentsCurrent = Number(appointmentsCurrentRow[0]?.count ?? 0);
   const appointmentsPrevious = Number(appointmentsPreviousRow[0]?.count ?? 0);
   const memberGrowthCurrent = Number(memberGrowthCurrentRow[0]?.count ?? 0);
@@ -264,11 +231,11 @@ export async function getReportsData(orgId: string, timeframe: Timeframe = "mont
         icon: "calendar",
       },
       {
-        label: "Giving",
-        value: `$${givingCurrent.toLocaleString()}`,
-        change: `${percentChange(givingCurrent, givingPrevious) >= 0 ? "+" : ""}${percentChange(givingCurrent, givingPrevious).toFixed(0)}%`,
-        trend: percentChange(givingCurrent, givingPrevious) >= 0 ? "up" : "down",
-        icon: "dollar",
+        label: "Tasks Completed",
+        value: String(tasksDone),
+        change: `${tasksTotal ? Math.round((tasksDone / tasksTotal) * 100) : 0}%`,
+        trend: "up",
+        icon: "check",
       },
       {
         label: "Active Volunteers",

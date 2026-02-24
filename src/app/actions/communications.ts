@@ -137,6 +137,22 @@ export async function createBroadcast(data: {
   return broadcast;
 }
 
+export async function updateBroadcast(
+  id: string,
+  data: Partial<{
+    title: string;
+    content: string;
+    channel: string;
+  }>
+) {
+  const [broadcast] = await db
+    .update(broadcasts)
+    .set({ ...data, updatedAt: new Date() } as any)
+    .where(eq(broadcasts.id, id))
+    .returning();
+  return broadcast;
+}
+
 export async function updateBroadcastStatus(
   id: string,
   status: string,

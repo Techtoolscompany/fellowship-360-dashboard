@@ -38,41 +38,41 @@ const RecentBroadcastsCard = ({ broadcasts }: { broadcasts?: Broadcast[] }) => {
         style={{
           borderRadius: "24px",
           overflow: "hidden",
-          border: "1px solid var(--ds-border-secondary, #e2e8f0)",
+          border: "1px solid var(--border)",
           minHeight: "334px",
         }}
       >
         <div className="p-0">
           <div className="flex items-center justify-between p-6 pb-3">
             <div>
-              <p className="mb-0" style={{ fontSize: "20px", fontWeight: 600, color: "var(--ds-text-primary, #171717)" }}>
+              <p className="mb-0" style={{ fontSize: "20px", fontWeight: 600, color: "var(--foreground)" }}>
                 Recent Broadcasts
               </p>
-              <p className="mb-0" style={{ fontSize: "12px", color: "var(--ds-text-secondary, #737373)" }}>
+              <p className="mb-0" style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>
                 Mass communications sent
               </p>
             </div>
             <button
               style={{
                 width: "40px", height: "40px", borderRadius: "360px",
-                background: "var(--ds-bg-tertiary, #f5f5f5)", border: "none",
+                background: "var(--muted)", border: "none",
                 display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
               }}
             >
-              <FiMoreVertical size={20} style={{ color: "var(--ds-icon-default, #6b7280)" }} />
+              <FiMoreVertical size={20} style={{ color: "var(--muted-foreground)" }} />
             </button>
           </div>
 
           <div className="flex flex-col gap-3 px-6 pb-6">
             {items.length === 0 ? (
-              <p style={{ fontSize: "13px", color: "var(--ds-text-muted, #a3a3a3)", textAlign: "center", padding: "20px 0" }}>
+              <p style={{ fontSize: "13px", color: "var(--muted-foreground)", textAlign: "center", padding: "20px 0" }}>
                 No broadcasts yet
               </p>
             ) : items.map((broadcast) => (
               <div
                 key={broadcast.id}
                 className="flex items-center justify-between p-3"
-                style={{ background: "var(--ds-bg-secondary, #fafafa)", borderRadius: "12px" }}
+                style={{ background: "var(--muted)", borderRadius: "12px" }}
               >
                 <div className="flex items-center gap-3">
                   <div
@@ -86,10 +86,10 @@ const RecentBroadcastsCard = ({ broadcasts }: { broadcasts?: Broadcast[] }) => {
                     <TypeIcon type={broadcast.channel} />
                   </div>
                   <div>
-                    <p className="mb-0" style={{ fontSize: "14px", fontWeight: 500, color: "var(--ds-text-primary, #171717)" }}>
+                    <p className="mb-0" style={{ fontSize: "14px", fontWeight: 500, color: "var(--foreground)" }}>
                       {broadcast.title}
                     </p>
-                    <span style={{ fontSize: "11px", color: "var(--ds-text-muted, #a3a3a3)" }}>
+                    <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>
                       {broadcast.sentAt ? new Date(broadcast.sentAt).toLocaleDateString() : "Draft"}
                     </span>
                   </div>
@@ -101,7 +101,7 @@ const RecentBroadcastsCard = ({ broadcasts }: { broadcasts?: Broadcast[] }) => {
                         <FiCheckCircle size={12} />
                         <span>{broadcast.totalRecipients ?? 0}</span>
                       </div>
-                      <span style={{ fontSize: "10px", color: "var(--ds-text-muted, #a3a3a3)" }}>
+                      <span style={{ fontSize: "10px", color: "var(--muted-foreground)" }}>
                         delivered
                       </span>
                     </>

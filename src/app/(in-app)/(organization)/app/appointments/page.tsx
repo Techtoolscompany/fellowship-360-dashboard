@@ -12,6 +12,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import useOrganization from "@/lib/organizations/useOrganization";
+import { CreateAppointmentDialog } from "@/components/dialogs/CreateAppointmentDialog";
+import { EditAppointmentDialog } from "@/components/dialogs/EditAppointmentDialog";
 import { getAppointments, updateAppointment } from "@/app/actions/operations";
 
 export default function AppointmentsPage() {
@@ -19,6 +21,9 @@ export default function AppointmentsPage() {
   const orgId = organization?.id;
   const [appointmentList, setAppointmentList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editAppointment, setEditAppointment] = useState<any>(null);
 
   const fetchData = useCallback(async () => {
     if (!orgId) return;
@@ -57,9 +62,22 @@ export default function AppointmentsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm"><Filter className="w-4 h-4 mr-2" />Filter</Button>
-          <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
-            <Plus className="w-4 h-4 mr-2" />Schedule Appointment
-          </Button>
+          <CreateAppointmentDialog
+            open={showAddModal}
+            onOpenChange={setShowAddModal}
+            onSuccess={fetchData}
+          >
+            <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
+              <Plus className="w-4 h-4 mr-2" />Schedule Appointment
+            </Button>
+          </CreateAppointmentDialog>
+
+          <EditAppointmentDialog
+            open={!!editAppointment}
+            onOpenChange={(open) => !open && setEditAppointment(null)}
+            onSuccess={fetchData}
+            appointment={editAppointment}
+          />
         </div>
       </div>
 
@@ -122,9 +140,10 @@ export default function AppointmentsPage() {
                         <Button variant="ghost" size="icon"><MoreHorizontal className="w-4 h-4" /></Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem>View Details</DropdownMenuItem>
-                        <DropdownMenuItem>Reschedule</DropdownMenuItem>
-                        <DropdownMenuItem className="text-red-600" onClick={() => handleCancel(row.appointment.id)}>Cancel</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setEditAppointment(row.appointment)}>Edit / Reschedule</DropdownMenuItem>
+                        {row.appointment.status !== "cancelled" && (
+                          <DropdownMenuItem className="text-red-600" onClick={() => handleCancel(row.appointment.id)}>Cancel</DropdownMenuItem>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>

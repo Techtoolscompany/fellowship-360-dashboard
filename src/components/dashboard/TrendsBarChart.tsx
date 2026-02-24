@@ -127,7 +127,7 @@ const TrendsBarChart = () => {
                 style={{
                   fontSize: "20px",
                   fontWeight: 600,
-                  color: isDark ? "#fff" : "var(--ds-text-primary, #343330)",
+                  color: "var(--foreground)",
                   lineHeight: "28px",
                 }}
               >
@@ -138,7 +138,7 @@ const TrendsBarChart = () => {
                 style={{
                   fontSize: "12px",
                   fontWeight: 400,
-                  color: "var(--ds-text-secondary, #64748b)",
+                  color: "var(--muted-foreground)",
                 }}
               >
                 Attendance + Grace AI interactions
@@ -171,7 +171,7 @@ const TrendsBarChart = () => {
                 style={{
                   fontSize: "20px",
                   fontWeight: 600,
-                  color: isDark ? "#fff" : "var(--ds-text-primary, #343330)",
+                  color: "var(--foreground)",
                 }}
               >
                 {totalAttendance}
@@ -179,7 +179,7 @@ const TrendsBarChart = () => {
               <span
                 style={{
                   fontSize: "11px",
-                  color: "var(--ds-text-muted, #94a3b8)",
+                  color: "var(--muted-foreground)",
                   marginLeft: "4px",
                 }}
               >

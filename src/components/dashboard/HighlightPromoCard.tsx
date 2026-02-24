@@ -9,8 +9,8 @@ const HighlightPromoCard = () => {
         className="bg-card"
         style={{
           borderRadius: "24px",
-          border: "1px solid var(--ds-border-secondary, #e9e9e9)",
-          background: "var(--ds-bg-highlight, #f4ffd4)",
+          border: "1px solid var(--border)",
+          background: "color-mix(in srgb, var(--primary) 15%, var(--background))",
           overflow: "hidden",
           position: "relative",
           height: "334px",
@@ -28,7 +28,7 @@ const HighlightPromoCard = () => {
                   width: "8px",
                   height: "8px",
                   borderRadius: "50%",
-                  background: "var(--ds-text-primary, #000)",
+                  background: "var(--foreground)",
                 }}
               />
             ))}
@@ -40,7 +40,7 @@ const HighlightPromoCard = () => {
               fontSize: "28px",
               fontWeight: 600,
               lineHeight: "36px",
-              color: "var(--ds-text-primary, #343330)",
+              color: "var(--foreground)",
               maxWidth: "268px",
               marginBottom: 0,
             }}
@@ -55,8 +55,8 @@ const HighlightPromoCard = () => {
               alignItems: "center",
               gap: "8px",
               padding: "12px 24px",
-              background: "#343330",
-              color: "#fff",
+              background: "var(--foreground)",
+              color: "var(--background)",
               border: "none",
               borderRadius: "360px",
               fontSize: "14px",
