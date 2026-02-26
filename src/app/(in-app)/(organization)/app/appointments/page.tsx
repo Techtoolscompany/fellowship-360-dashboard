@@ -21,6 +21,7 @@ export default function AppointmentsPage() {
   const orgId = organization?.id;
   const [appointmentList, setAppointmentList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editAppointment, setEditAppointment] = useState<any>(null);
@@ -52,6 +53,14 @@ export default function AppointmentsPage() {
     { title: "Pending", value: String(appointmentList.filter(a => a.appointment.status === "pending").length), subtitle: "needs confirmation" },
     { title: "Completed", value: String(appointmentList.filter(a => a.appointment.status === "completed").length), subtitle: "appointments" },
   ];
+
+  const filteredAppointments = appointmentList.filter(row => {
+    if (!searchQuery) return true;
+    const lowerQuery = searchQuery.toLowerCase();
+    const titleMatch = row.appointment.title?.toLowerCase().includes(lowerQuery);
+    const nameMatch = row.contact ? `${row.contact.firstName} ${row.contact.lastName}`.toLowerCase().includes(lowerQuery) : false;
+    return titleMatch || nameMatch;
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -101,14 +110,20 @@ export default function AppointmentsPage() {
             <CardTitle>Upcoming Appointments</CardTitle>
             <div className="relative w-64">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input type="text" className="w-full pl-9 pr-4 py-2 bg-background border border-input rounded-md text-sm" placeholder="Search appointments..." />
+              <input 
+                type="text" 
+                className="w-full pl-9 pr-4 py-2 bg-background border border-input rounded-md text-sm" 
+                placeholder="Search appointments..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
             </div>
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y">
-              {appointmentList.length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground">No appointments scheduled.</div>
-              ) : appointmentList.map((row) => (
+              {filteredAppointments.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">No appointments match your search.</div>
+              ) : filteredAppointments.map((row) => (
                 <div key={row.appointment.id} className="p-4 hover:bg-muted/30 flex items-center justify-between gap-4">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center">

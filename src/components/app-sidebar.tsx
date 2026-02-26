@@ -131,6 +131,14 @@ const data = {
           title: "Billing",
           url: "/app/settings/billing",
         },
+        {
+          title: "Integrations",
+          url: "/app/settings/integrations",
+        },
+        {
+          title: "Grace AI",
+          url: "/app/settings/grace",
+        },
       ],
     },
   ],

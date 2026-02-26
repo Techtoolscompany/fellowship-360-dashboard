@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { CalendarIcon, Loader2 } from "lucide-react";
 
@@ -89,10 +90,12 @@ export function CreateTaskDialog({
         organizationId: organization.id,
       });
       form.reset();
+      toast.success("Created successfully");
       onOpenChange(false);
       onSuccess?.();
     } catch (error) {
       console.error("Failed to create task:", error);
+      toast.error("Failed to create task. Please try again.");
     } finally {
       setLoading(false);
     }

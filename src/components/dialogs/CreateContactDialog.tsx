@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -89,10 +90,12 @@ export function CreateContactDialog({
         organizationId: organization.id,
       });
       form.reset();
+      toast.success("Created successfully");
       onOpenChange(false);
       onSuccess?.();
     } catch (error) {
       console.error("Failed to create contact:", error);
+      toast.error("Failed to create contact. Please try again.");
     } finally {
       setLoading(false);
     }

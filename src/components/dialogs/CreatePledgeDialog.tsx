@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { toast } from "sonner";
 import { Loader2, CalendarIcon } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -104,10 +105,12 @@ export function CreatePledgeDialog({
         organizationId: organization.id,
       });
       form.reset();
+      toast.success("Created successfully");
       onOpenChange(false);
       onSuccess?.();
     } catch (error) {
       console.error("Failed to create pledge:", error);
+      toast.error("Failed to create pledge. Please try again.");
     } finally {
       setLoading(false);
     }

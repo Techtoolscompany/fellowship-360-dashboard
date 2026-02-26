@@ -12,6 +12,8 @@ import {
   Loader2,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import ContactCard from "@/components/shared/ContactCard";
 import { CreateContactDialog } from "@/components/dialogs/CreateContactDialog";
 import { Button } from "@/components/ui/button";
@@ -19,6 +21,7 @@ import useOrganization from "@/lib/organizations/useOrganization";
 import { getContacts, createContact, deleteContact } from "@/app/actions/contacts";
 
 export default function ContactsPage() {
+  const router = useRouter();
   const { organization } = useOrganization();
   const orgId = organization?.id;
 
@@ -42,7 +45,10 @@ export default function ContactsPage() {
   }, [orgId, searchQuery]);
 
   useEffect(() => {
-    fetchContacts();
+    const timer = setTimeout(() => {
+      fetchContacts();
+    }, 300);
+    return () => clearTimeout(timer);
   }, [fetchContacts]);
 
   const getStatusStyle = (status: string) => {
@@ -96,8 +102,7 @@ export default function ContactsPage() {
           </nav>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="gap-2"><Filter size={14} /> Filter</Button>
-          <Button variant="outline" size="sm" className="gap-2"><Download size={14} /> Export</Button>
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.info("Export functionality coming soon")}><Download size={14} /> Export</Button>
           <CreateContactDialog 
             open={showAddModal} 
             onOpenChange={setShowAddModal} 
@@ -183,7 +188,7 @@ export default function ContactsPage() {
                           <div className="w-9 h-9 rounded-lg flex items-center justify-center font-semibold text-xs text-[#171717]" style={{ background: "linear-gradient(135deg, #c8f542 0%, #a8d435 100%)" }}>
                             {contact.firstName?.[0]}{contact.lastName?.[0]}
                           </div>
-                          <Link href={`/people/contacts/${contact.id}`} className="font-semibold text-foreground hover:underline">
+                          <Link href={`/app/contacts/${contact.id}`} className="font-semibold text-foreground hover:underline">
                             {contact.firstName} {contact.lastName}
                           </Link>
                         </div>
@@ -200,7 +205,7 @@ export default function ContactsPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex gap-2">
-                          <Button variant="ghost" size="sm" className="h-8 px-2 text-muted-foreground hover:text-foreground">View</Button>
+                          <Button variant="ghost" size="sm" className="h-8 px-2 text-muted-foreground hover:text-foreground" onClick={() => router.push(`/app/contacts/${contact.id}`)}>View</Button>
                           <Button variant="ghost" size="sm" className="h-8 px-2 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/10" onClick={() => handleDeleteContact(contact.id)}>Delete</Button>
                         </div>
                       </td>

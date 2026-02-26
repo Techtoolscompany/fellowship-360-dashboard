@@ -4,7 +4,9 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useRouter } from "next/navigation";
 import { Search, Filter, MoreHorizontal, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,10 +17,12 @@ import useOrganization from "@/lib/organizations/useOrganization";
 import { getDonorSummary } from "@/app/actions/finances";
 
 export default function DonorsPage() {
+  const router = useRouter();
   const { organization } = useOrganization();
   const orgId = organization?.id;
   const [donorList, setDonorList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const fetchData = useCallback(async () => {
     if (!orgId) return;
@@ -46,6 +50,14 @@ export default function DonorsPage() {
     { title: "Total Gifts", value: String(donorList.reduce((s, d) => s + Number(d.donationCount || 0), 0)), change: "All-time" },
   ];
 
+  const filteredDonors = donorList.filter(donor => {
+    if (!searchQuery) return true;
+    const lowerQuery = searchQuery.toLowerCase();
+    const nameMatch = (donor.firstName && donor.lastName) ? `${donor.firstName} ${donor.lastName}`.toLowerCase().includes(lowerQuery) : "anonymous".includes(lowerQuery);
+    const emailMatch = donor.email?.toLowerCase().includes(lowerQuery);
+    return nameMatch || emailMatch;
+  });
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -54,7 +66,7 @@ export default function DonorsPage() {
           <h1 className="text-3xl font-bold text-foreground">Donors</h1>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm"><Filter className="w-4 h-4 mr-2" />Filter</Button>
+          <Button variant="outline" size="sm" onClick={() => toast.info('Advanced filtering coming soon')}><Filter className="w-4 h-4 mr-2" />Filter</Button>
         </div>
       </div>
 
@@ -73,9 +85,15 @@ export default function DonorsPage() {
       <div className="flex items-center gap-3 bg-card p-4 rounded-xl border border-border">
         <div className="relative flex-1 max-w-sm">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input type="text" className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring" placeholder="Search donors..." />
+          <input 
+            type="text" 
+            className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring" 
+            placeholder="Search donors..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
         </div>
-        <span className="text-sm text-muted-foreground">{donorList.length} donors</span>
+        <span className="text-sm text-muted-foreground">{filteredDonors.length} donors</span>
       </div>
 
       {loading ? (
@@ -95,7 +113,13 @@ export default function DonorsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {donorList.map((donor, i) => (
+                  {filteredDonors.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-muted-foreground">
+                        No donors match your search.
+                      </td>
+                    </tr>
+                  ) : filteredDonors.map((donor, i) => (
                     <tr key={donor.contactId || i} className="hover:bg-muted/30">
                       <td className="px-6 py-4">
                         <div>
@@ -112,8 +136,8 @@ export default function DonorsPage() {
                             <Button variant="ghost" size="icon"><MoreHorizontal className="w-4 h-4" /></Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>View Profile</DropdownMenuItem>
-                            <DropdownMenuItem>View History</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => donor.contactId && router.push(`/app/contacts/${donor.contactId}`)}>View Profile</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => donor.contactId && router.push(`/app/contacts/${donor.contactId}`)}>View History</DropdownMenuItem>
                             <DropdownMenuItem>Send Thank You</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>

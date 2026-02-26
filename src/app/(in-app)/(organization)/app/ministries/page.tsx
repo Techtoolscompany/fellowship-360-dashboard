@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Users, MoreHorizontal, TrendingUp, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,9 +45,9 @@ function MinistryCard({ ministry, index, onEdit, onDelete }: { ministry: any; in
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>View Details</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => toast.info('Ministry Details interface coming soon')}>View Details</DropdownMenuItem>
               <DropdownMenuItem onClick={() => onEdit(ministry.ministry)}>Edit Ministry</DropdownMenuItem>
-              <DropdownMenuItem>View Members</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => toast.info('Ministry Members interface coming soon')}>View Members</DropdownMenuItem>
               <DropdownMenuItem className="text-destructive" onClick={() => onDelete(ministry.ministry.id)}>Delete</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

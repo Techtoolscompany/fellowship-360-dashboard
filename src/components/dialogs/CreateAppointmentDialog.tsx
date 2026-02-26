@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { CalendarIcon, Loader2, Check, X } from "lucide-react";
 
@@ -109,10 +110,12 @@ export function CreateAppointmentDialog({
         organizationId: organization.id,
       });
       form.reset();
+      toast.success("Created successfully");
       onOpenChange(false);
       onSuccess?.();
     } catch (error) {
       console.error("Failed to create appointment:", error);
+      toast.error("Failed to create appointment. Please try again.");
     } finally {
       setLoading(false);
     }

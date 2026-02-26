@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { CalendarIcon, Loader2 } from "lucide-react";
 
@@ -131,10 +132,12 @@ export function EditAppointmentDialog({
         type: values.type,
         notes: values.notes || null,
       });
+      toast.success("Updated successfully");
       onOpenChange(false);
       onSuccess?.();
     } catch (error) {
       console.error("Failed to update appointment:", error);
+      toast.error("Failed to update appointment. Please try again.");
     } finally {
       setLoading(false);
     }

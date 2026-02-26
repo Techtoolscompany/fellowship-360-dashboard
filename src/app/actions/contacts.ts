@@ -8,45 +8,29 @@ export async function getContacts(
   orgId: string,
   filters?: { search?: string; status?: string }
 ) {
-  let query = db
-    .select()
-    .from(churchContacts)
-    .where(eq(churchContacts.organizationId, orgId))
-    .orderBy(desc(churchContacts.createdAt));
+  const conditions: any[] = [eq(churchContacts.organizationId, orgId)];
 
   if (filters?.search) {
     const searchTerm = `%${filters.search}%`;
-    query = db
-      .select()
-      .from(churchContacts)
-      .where(
-        and(
-          eq(churchContacts.organizationId, orgId),
-          or(
-            ilike(churchContacts.firstName, searchTerm),
-            ilike(churchContacts.lastName, searchTerm),
-            ilike(churchContacts.email, searchTerm),
-            ilike(churchContacts.phone, searchTerm)
-          )
-        )
+    conditions.push(
+      or(
+        ilike(churchContacts.firstName, searchTerm),
+        ilike(churchContacts.lastName, searchTerm),
+        ilike(churchContacts.email, searchTerm),
+        ilike(churchContacts.phone, searchTerm)
       )
-      .orderBy(desc(churchContacts.createdAt));
+    );
   }
 
   if (filters?.status) {
-    query = db
-      .select()
-      .from(churchContacts)
-      .where(
-        and(
-          eq(churchContacts.organizationId, orgId),
-          eq(churchContacts.memberStatus, filters.status as any)
-        )
-      )
-      .orderBy(desc(churchContacts.createdAt));
+    conditions.push(eq(churchContacts.memberStatus, filters.status as any));
   }
 
-  return await query;
+  return await db
+    .select()
+    .from(churchContacts)
+    .where(and(...conditions))
+    .orderBy(desc(churchContacts.createdAt));
 }
 
 export async function getContact(id: string) {

@@ -10,6 +10,7 @@ import NetWorthLineChart from "@/components/dashboard/NetWorthLineChart";
 import TransactionHistoryCard from "@/components/dashboard/TransactionHistoryCard";
 import { Button } from "@/components/ui/button";
 import { Calendar, ArrowRight, Filter, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { getGraceDashboardData } from "@/app/actions/dashboard";
 
@@ -63,14 +64,14 @@ export default function MinistryDashboardPage() {
             <span className="text-sm font-medium">{new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
           </div>
 
-          <div className="hidden sm:flex items-center gap-2 bg-card border border-border px-3 py-2 rounded-md shadow-sm cursor-pointer hover:bg-accent/50 transition-colors">
+          <div onClick={() => toast.info('Date filtering coming soon')} className="hidden sm:flex items-center gap-2 bg-card border border-border px-3 py-2 rounded-md shadow-sm cursor-pointer hover:bg-accent/50 transition-colors">
             <span className="text-sm font-medium">Weekly</span>
             <div className="bg-muted p-1 rounded">
               <ArrowRight className="w-4 h-4 text-foreground" />
             </div>
           </div>
 
-          <Button variant="outline" size="icon" className="h-10 w-10">
+          <Button variant="outline" size="icon" className="h-10 w-10" onClick={() => toast.info('Advanced filtering coming soon')}>
             <Filter className="w-4 h-4" />
           </Button>
         </div>

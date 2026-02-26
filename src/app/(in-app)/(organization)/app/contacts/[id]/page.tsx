@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { getContact, updateContact, deleteContact } from "@/app/actions/contacts";
 import { getDonations } from "@/app/actions/finances";
+import useOrganization from "@/lib/organizations/useOrganization";
 
 const STATUS_STYLES: Record<string, string> = {
   member: "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400",
@@ -44,6 +45,7 @@ export default function ContactProfilePage() {
   const params = useParams();
   const router = useRouter();
   const contactId = params.id as string;
+  const { organization } = useOrganization();
 
   const [contact, setContact] = useState<any>(null);
   const [donations, setDonations] = useState<any[]>([]);
@@ -53,12 +55,12 @@ export default function ContactProfilePage() {
   const [saving, setSaving] = useState(false);
 
   const fetchData = useCallback(async () => {
-    if (!contactId) return;
+    if (!contactId || !organization?.id) return;
     setLoading(true);
     try {
       const [c, d] = await Promise.all([
         getContact(contactId),
-        getDonations(undefined as any, contactId),
+        getDonations(organization.id),
       ]);
       setContact(c);
       setEditForm(c ?? {});

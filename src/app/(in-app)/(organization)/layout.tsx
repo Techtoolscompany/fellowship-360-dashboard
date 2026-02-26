@@ -36,6 +36,9 @@ import {
   ChevronRight,
   CreditCard,
   Bot,
+  HandHeart,
+  Coins,
+  Wallet,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -232,6 +235,22 @@ function SidebarContent({ className, isCollapsed }: { className?: string; isColl
           </div>
         )}
 
+        {/* Finances Section */}
+        <SectionHeader title="Finances" section="finances" />
+        {!collapsedSections.finances && (
+          <div className="space-y-0.5">
+            <NavItem href="/app/donations" icon={HandHeart} isCollapsed={isCollapsed}>
+              Donations
+            </NavItem>
+            <NavItem href="/app/donors" icon={Users} isCollapsed={isCollapsed}>
+              Donors
+            </NavItem>
+            <NavItem href="/app/pledges" icon={Wallet} isCollapsed={isCollapsed}>
+              Pledges
+            </NavItem>
+          </div>
+        )}
+
         {/* Administration Section */}
         <SectionHeader title="Administration" section="administration" />
         {!collapsedSections.administration && (
@@ -279,12 +298,11 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     // Remove the setIsMobileOpen call since we no longer need it
   }, [pathname]);
 
-  // BYPASSED: Auth and org checks disabled for development
-  // useEffect(() => {
-  //   if (!isUserLoading && !isOrgLoading && !organization) {
-  //     router.push("/app/create-organization");
-  //   }
-  // }, [isUserLoading, isOrgLoading, organization, pathname, router]);
+  useEffect(() => {
+    if (!isUserLoading && !isOrgLoading && !organization) {
+      router.push("/app/create-organization");
+    }
+  }, [isUserLoading, isOrgLoading, organization, pathname, router]);
 
   // BYPASSED: Skip loading state for development
   // if (isUserLoading || isOrgLoading) {

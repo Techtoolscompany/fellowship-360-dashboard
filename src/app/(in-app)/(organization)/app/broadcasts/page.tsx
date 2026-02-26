@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Search, Filter, Send, Mail, MessageSquare, Users, MoreHorizontal, Eye, MousePointer, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +22,7 @@ export default function BroadcastsPage() {
   const orgId = organization?.id;
   const [broadcastList, setBroadcastList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editBroadcast, setEditBroadcast] = useState<any>(null);
@@ -63,6 +65,13 @@ export default function BroadcastsPage() {
     { title: "Drafts", value: String(broadcastList.filter(b => b.status === "draft").length), icon: MousePointer },
   ];
 
+  const filteredBroadcasts = broadcastList.filter(bc => {
+    if (bc.status === 'archived') return false;
+    if (!searchQuery) return true;
+    const lowerQuery = searchQuery.toLowerCase();
+    return bc.title?.toLowerCase().includes(lowerQuery) || bc.channel?.toLowerCase().includes(lowerQuery);
+  });
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -71,7 +80,7 @@ export default function BroadcastsPage() {
           <h1 className="text-3xl font-bold text-foreground">Broadcasts</h1>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm"><Filter className="w-4 h-4 mr-2" />Filter</Button>
+          <Button variant="outline" size="sm" onClick={() => toast.info('Advanced filtering coming soon')}><Filter className="w-4 h-4 mr-2" />Filter</Button>
           <CreateBroadcastDialog
             open={showAddModal}
             onOpenChange={setShowAddModal}
@@ -117,7 +126,13 @@ export default function BroadcastsPage() {
             <CardTitle>Recent Broadcasts</CardTitle>
             <div className="relative w-64">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input type="text" className="w-full pl-9 pr-4 py-2 bg-background border border-input rounded-md text-sm" placeholder="Search broadcasts..." />
+              <input 
+                type="text" 
+                className="w-full pl-9 pr-4 py-2 bg-background border border-input rounded-md text-sm" 
+                placeholder="Search broadcasts..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -134,7 +149,13 @@ export default function BroadcastsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {broadcastList.filter(bc => bc.status !== 'archived').map((bc) => (
+                  {filteredBroadcasts.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
+                        No broadcasts match your search.
+                      </td>
+                    </tr>
+                  ) : filteredBroadcasts.map((bc) => (
                     <tr key={bc.id} className="hover:bg-muted/30">
                       <td className="px-6 py-4 font-semibold">{bc.title}</td>
                       <td className="px-6 py-4">
@@ -163,7 +184,7 @@ export default function BroadcastsPage() {
                               </>
                             )}
                             {bc.status === "sent" && (
-                              <DropdownMenuItem>View Report</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => toast.info('Broadcast reporting interface coming soon')}>View Report</DropdownMenuItem>
                             )}
                             <DropdownMenuItem className="text-red-600" onClick={() => handleDelete(bc.id)}>Delete</DropdownMenuItem>
                           </DropdownMenuContent>

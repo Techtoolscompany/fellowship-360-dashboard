@@ -12,6 +12,7 @@ import VisitorFollowupsCard from "@/components/grace/VisitorFollowupsCard";
 import RecentActivityCard from "@/components/grace/RecentActivityCard";
 import { Button } from "@/components/ui/button";
 import { Calendar, ArrowRight, Filter, Phone, Settings, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import Link from "next/link";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { getGraceDashboardData } from "@/app/actions/dashboard";
@@ -59,7 +60,7 @@ export default function GraceDashboardPage() {
           </div>
 
           {/* Period Toggle */}
-          <div className="hidden sm:flex items-center gap-2 bg-card border border-border px-3 py-2 rounded-md shadow-sm cursor-pointer hover:bg-accent/50 transition-colors">
+          <div onClick={() => toast.info('Date filtering coming soon')} className="hidden sm:flex items-center gap-2 bg-card border border-border px-3 py-2 rounded-md shadow-sm cursor-pointer hover:bg-accent/50 transition-colors">
             <span className="text-sm font-medium">Today</span>
             <div className="bg-muted p-1 rounded">
               <ArrowRight className="w-4 h-4 text-foreground" />
@@ -67,7 +68,7 @@ export default function GraceDashboardPage() {
           </div>
 
           {/* Filter Button */}
-          <Button variant="outline" size="icon" className="h-10 w-10">
+          <Button variant="outline" size="icon" className="h-10 w-10" onClick={() => toast.info('Advanced filtering coming soon')}>
             <Filter className="w-4 h-4" />
           </Button>
         </div>

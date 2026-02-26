@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -81,10 +82,12 @@ export function EditBroadcastDialog({
         content: values.content,
         channel: values.channel,
       });
+      toast.success("Updated successfully");
       onOpenChange(false);
       onSuccess?.();
     } catch (error) {
       console.error("Failed to update broadcast draft:", error);
+      toast.error("Failed to update broadcast draft. Please try again.");
     } finally {
       setLoading(false);
     }

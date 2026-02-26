@@ -8,6 +8,9 @@ import {
   getConversationMessages,
   addMessage,
 } from "@/app/actions/communications";
+import { db } from "@/db";
+import { eq } from "drizzle-orm";
+import { aiConfig, aiUsageLogs } from "@/db/schema";
 
 /**
  * Get or create an AI conversation for the current org.
@@ -86,9 +89,20 @@ export async function sendMessageToGrace(
   // 3. Build church context
   const contextData = await buildChurchContext(orgId);
 
-  // 4. Get AI response
+  // 4. Get org's AI config
+  const aiSettings = await db.query.aiConfig.findFirst({
+    where: eq(aiConfig.organizationId, orgId),
+  });
+
+  if (aiSettings && !aiSettings.graceEnabled) {
+    throw new Error("Grace AI has been disabled for this organization.");
+  }
+
+  const systemPrompt = aiSettings?.customSystemPrompt || undefined;
+
+  // 5. Get AI response
   const client = getGeminiClient();
-  const aiResponse = await client.chat(userMessage, historyWithoutCurrent, contextData);
+  const aiResponse = await client.chat(userMessage, historyWithoutCurrent, contextData, systemPrompt);
 
   // 5. Save AI response
   const savedAiMsg = await addMessage({
@@ -96,6 +110,13 @@ export async function sendMessageToGrace(
     content: aiResponse,
     direction: "outbound",
     senderType: "ai",
+  });
+
+  // 6. Record usage
+  // First, check if there's already a log for today (we'll simplify this by just recording one entry per message sent for now)
+  await db.insert(aiUsageLogs).values({
+    organizationId: orgId,
+    messagesCount: 1,
   });
 
   return {

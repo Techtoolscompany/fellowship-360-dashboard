@@ -11,6 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { toast } from "sonner";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { CreateTaskDialog } from "@/components/dialogs/CreateTaskDialog";
 import { getTasks, updateTask, deleteTask } from "@/app/actions/tasks";
@@ -20,6 +21,7 @@ export default function TasksPage() {
   const orgId = organization?.id;
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [showAddModal, setShowAddModal] = useState(false);
 
@@ -55,6 +57,15 @@ export default function TasksPage() {
     { title: "Completed", value: String(tasks.filter(t => t.status === "completed").length) },
   ];
 
+  const filteredTasks = tasks.filter(task => {
+    if (!searchQuery) return true;
+    const lowerQuery = searchQuery.toLowerCase();
+    return (
+      task.title?.toLowerCase().includes(lowerQuery) ||
+      task.description?.toLowerCase().includes(lowerQuery)
+    );
+  });
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -63,7 +74,7 @@ export default function TasksPage() {
           <h1 className="text-3xl font-bold text-foreground">Tasks</h1>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm"><Filter className="w-4 h-4 mr-2" />Filter</Button>
+          <Button variant="outline" size="sm" onClick={() => toast.info("Filter functionality coming soon")}><Filter className="w-4 h-4 mr-2" />Filter</Button>
           <CreateTaskDialog
             open={showAddModal}
             onOpenChange={setShowAddModal}
@@ -90,7 +101,13 @@ export default function TasksPage() {
       <div className="flex items-center gap-3 bg-card p-4 rounded-xl border border-border">
         <div className="relative flex-1 max-w-sm">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input type="text" className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm" placeholder="Search tasks..." />
+          <input 
+            type="text" 
+            className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm" 
+            placeholder="Search tasks..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
         </div>
       </div>
 
@@ -102,9 +119,13 @@ export default function TasksPage() {
         <Card>
           <CardContent className="p-0">
             <div className="divide-y">
-              {tasks.map((task) => (
-                <div key={task.id} className="p-4 hover:bg-muted/30 flex items-center gap-4">
-                  <button onClick={() => task.status !== "completed" && handleComplete(task.id)} className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+              {filteredTasks.length === 0 ? (
+                <div className="p-8 text-center text-muted-foreground">No tasks match your search.</div>
+              ) : (
+                filteredTasks.map((task) => (
+                  <div key={task.id} className="p-4 hover:bg-muted/30 flex items-center gap-4">
+                    <button onClick={() => task.status !== "completed" && handleComplete(task.id)} className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+
                     task.status === "completed" ? "bg-emerald-500 border-emerald-500 text-white" : "border-gray-300 hover:border-gray-400 dark:border-gray-600 dark:hover:border-gray-500"
                   }`}>
                     {task.status === "completed" && <CheckSquare className="w-3 h-3" />}
@@ -140,7 +161,8 @@ export default function TasksPage() {
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
-              ))}
+                ))
+              )}
             </div>
           </CardContent>
         </Card>

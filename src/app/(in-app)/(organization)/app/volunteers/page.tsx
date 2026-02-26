@@ -4,7 +4,9 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useRouter } from "next/navigation";
 import { Plus, Search, Filter, Users, Clock, Award, MoreHorizontal, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,10 +17,12 @@ import useOrganization from "@/lib/organizations/useOrganization";
 import { getVolunteers } from "@/app/actions/operations";
 
 export default function VolunteersPage() {
+  const router = useRouter();
   const { organization } = useOrganization();
   const orgId = organization?.id;
   const [volunteerList, setVolunteerList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const fetchData = useCallback(async () => {
     if (!orgId) return;
@@ -42,6 +46,15 @@ export default function VolunteersPage() {
     { title: "Roles Filled", value: String(new Set(volunteerList.map(v => v.volunteer.role).filter(Boolean)).size), icon: Award },
   ];
 
+  const filteredVolunteers = volunteerList.filter(vol => {
+    if (!searchQuery) return true;
+    const lowerQuery = searchQuery.toLowerCase();
+    const nameMatch = vol.contact ? `${vol.contact.firstName} ${vol.contact.lastName}`.toLowerCase().includes(lowerQuery) : false;
+    const emailMatch = vol.contact?.email?.toLowerCase().includes(lowerQuery);
+    const roleMatch = vol.volunteer.role?.toLowerCase().includes(lowerQuery);
+    return nameMatch || emailMatch || roleMatch;
+  });
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -50,7 +63,7 @@ export default function VolunteersPage() {
           <h1 className="text-3xl font-bold text-foreground">Volunteers</h1>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm"><Filter className="w-4 h-4 mr-2" />Filter</Button>
+          <Button variant="outline" size="sm" onClick={() => toast.info('Advanced filtering coming soon')}><Filter className="w-4 h-4 mr-2" />Filter</Button>
           <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
             <Plus className="w-4 h-4 mr-2" />Add Volunteer
           </Button>
@@ -78,9 +91,15 @@ export default function VolunteersPage() {
       <div className="flex items-center gap-3 bg-card p-4 rounded-xl border border-border">
         <div className="relative flex-1 max-w-sm">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input type="text" className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm" placeholder="Search volunteers..." />
+          <input 
+            type="text" 
+            className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm" 
+            placeholder="Search volunteers..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
         </div>
-        <span className="text-sm text-muted-foreground">{volunteerList.length} volunteers</span>
+        <span className="text-sm text-muted-foreground">{filteredVolunteers.length} volunteers</span>
       </div>
 
       {loading ? (
@@ -100,7 +119,13 @@ export default function VolunteersPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {volunteerList.map((vol) => (
+                  {filteredVolunteers.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-muted-foreground">
+                        No volunteers match your search.
+                      </td>
+                    </tr>
+                  ) : filteredVolunteers.map((vol) => (
                     <tr key={vol.volunteer.id} className="hover:bg-muted/30">
                       <td className="px-6 py-4">
                         <div>
@@ -121,7 +146,7 @@ export default function VolunteersPage() {
                             <Button variant="ghost" size="icon"><MoreHorizontal className="w-4 h-4" /></Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>View Profile</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => vol.volunteer?.contactId && router.push(`/app/contacts/${vol.volunteer.contactId}`)}>View Profile</DropdownMenuItem>
                             <DropdownMenuItem>Log Hours</DropdownMenuItem>
                             <DropdownMenuItem>Send Message</DropdownMenuItem>
                           </DropdownMenuContent>

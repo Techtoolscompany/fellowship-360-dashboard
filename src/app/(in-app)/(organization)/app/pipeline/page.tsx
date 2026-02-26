@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useRouter } from "next/navigation";
 import { Plus, MoreHorizontal, Loader2, GripVertical, User } from "lucide-react";
 import {
   DropdownMenu,
@@ -15,6 +16,7 @@ import useOrganization from "@/lib/organizations/useOrganization";
 import { getPipelineData, deletePipelineItem } from "@/app/actions/pipeline";
 
 export default function PipelinePage() {
+  const router = useRouter();
   const { organization } = useOrganization();
   const orgId = organization?.id;
   const [stages, setStages] = useState<any[]>([]);
@@ -122,7 +124,7 @@ export default function PipelinePage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem>View Contact</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => row.contact?.id && router.push(`/app/contacts/${row.contact.id}`)}>View Contact</DropdownMenuItem>
                               <DropdownMenuItem>Move to Stage</DropdownMenuItem>
                               <DropdownMenuItem className="text-red-600" onClick={() => handleDelete(row.item.id)}>Remove</DropdownMenuItem>
                             </DropdownMenuContent>

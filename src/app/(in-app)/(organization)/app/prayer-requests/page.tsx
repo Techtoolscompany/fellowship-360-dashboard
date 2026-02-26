@@ -11,6 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { toast } from "sonner";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { CreatePrayerRequestDialog } from "@/components/dialogs/CreatePrayerRequestDialog";
 import { EditPrayerRequestDialog } from "@/components/dialogs/EditPrayerRequestDialog";
@@ -21,6 +22,7 @@ export default function PrayerRequestsPage() {
   const orgId = organization?.id;
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editRequest, setEditRequest] = useState<any>(null);
@@ -52,6 +54,14 @@ export default function PrayerRequestsPage() {
     { title: "Urgent", value: String(requests.filter(r => r.urgency === "urgent" || r.urgency === "critical").length), icon: Clock, color: "blue" },
   ];
 
+  const filteredRequests = requests.filter(pr => {
+    if (!searchQuery) return true;
+    const lowerQuery = searchQuery.toLowerCase();
+    const contactName = pr.contactName || "Member";
+    const nameMatch = pr.isAnonymous === "true" ? "anonymous".includes(lowerQuery) : contactName.toLowerCase().includes(lowerQuery);
+    return nameMatch || pr.content?.toLowerCase().includes(lowerQuery);
+  });
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -60,7 +70,7 @@ export default function PrayerRequestsPage() {
           <h1 className="text-3xl font-bold text-foreground">Prayer Requests</h1>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm"><Filter className="w-4 h-4 mr-2" />Filter</Button>
+          <Button variant="outline" size="sm" onClick={() => toast.info("Filter functionality coming soon")}><Filter className="w-4 h-4 mr-2" />Filter</Button>
           <CreatePrayerRequestDialog
             open={showAddModal}
             onOpenChange={setShowAddModal}
@@ -101,17 +111,23 @@ export default function PrayerRequestsPage() {
       <div className="flex items-center gap-3 bg-card p-4 rounded-xl border border-border">
         <div className="relative flex-1 max-w-sm">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input type="text" className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm" placeholder="Search prayer requests..." />
+          <input 
+            type="text" 
+            className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm" 
+            placeholder="Search prayer requests..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
         </div>
       </div>
 
       {loading ? (
         <div className="text-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#bbff00] mx-auto" /></div>
-      ) : requests.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">No prayer requests yet.</div>
+      ) : filteredRequests.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">No prayer requests match your search.</div>
       ) : (
         <div className="grid gap-4">
-          {requests.map((pr) => (
+          {filteredRequests.map((pr) => (
             <Card key={pr.id} className="hover:shadow-md transition-shadow">
               <CardContent className="p-6">
                 <div className="flex items-start justify-between gap-4">

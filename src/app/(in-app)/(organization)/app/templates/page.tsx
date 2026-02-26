@@ -19,6 +19,8 @@ export default function TemplatesPage() {
   const orgId = organization?.id;
   const [templateList, setTemplateList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeCategory, setActiveCategory] = useState("All");
 
   const fetchData = useCallback(async () => {
     if (!orgId) return;
@@ -42,6 +44,13 @@ export default function TemplatesPage() {
 
   const categories = ["All", ...new Set(templateList.map(t => t.category).filter(Boolean))];
 
+  const filteredTemplates = templateList.filter(t => {
+    if (activeCategory !== "All" && t.category !== activeCategory) return false;
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return t.name?.toLowerCase().includes(q) || t.content?.toLowerCase().includes(q);
+  });
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -57,11 +66,23 @@ export default function TemplatesPage() {
       <div className="flex flex-col md:flex-row items-start md:items-center gap-3 bg-card p-4 rounded-xl border border-border">
         <div className="relative flex-1 max-w-sm">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input type="text" className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm" placeholder="Search templates..." />
+          <input 
+            type="text" 
+            className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm" 
+            placeholder="Search templates..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
         </div>
         <div className="flex gap-2 flex-wrap">
           {categories.map((cat) => (
-            <Button key={cat} variant={cat === "All" ? "default" : "outline"} size="sm" className={cat === "All" ? "bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]" : ""}>
+            <Button 
+              key={cat} 
+              variant={cat === activeCategory ? "default" : "outline"} 
+              size="sm" 
+              className={cat === activeCategory ? "bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]" : ""}
+              onClick={() => setActiveCategory(cat)}
+            >
               {cat}
             </Button>
           ))}
@@ -70,11 +91,11 @@ export default function TemplatesPage() {
 
       {loading ? (
         <div className="text-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#bbff00] mx-auto" /></div>
-      ) : templateList.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">No templates yet. Create your first template!</div>
+      ) : filteredTemplates.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">No templates match your search.</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {templateList.map((template) => (
+          {filteredTemplates.map((template) => (
             <Card key={template.id} className="hover:shadow-md transition-shadow group">
               <CardContent className="p-4">
                 <div className="flex items-start justify-between mb-3">
