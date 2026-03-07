@@ -5,12 +5,11 @@ import KpiStripCard from "@/components/dashboard/KpiStripCard";
 import GivingTrendChart from "@/components/dashboard/GivingTrendChart";
 import TrendsBarChart from "@/components/dashboard/TrendsBarChart";
 import HighlightPromoCard from "@/components/dashboard/HighlightPromoCard";
-import DebtStatusCard from "@/components/dashboard/DebtStatusCard";
+import GoalProgressCard from "@/components/dashboard/GoalProgressCard";
 import NetWorthLineChart from "@/components/dashboard/NetWorthLineChart";
-import TransactionHistoryCard from "@/components/dashboard/TransactionHistoryCard";
+import ActivityCard from "@/components/dashboard/ActivityCard";
 import { Button } from "@/components/ui/button";
 import { Calendar, ArrowRight, Filter, Loader2 } from "lucide-react";
-import { toast } from "sonner";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { getGraceDashboardData } from "@/app/actions/dashboard";
 
@@ -64,14 +63,14 @@ export default function MinistryDashboardPage() {
             <span className="text-sm font-medium">{new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
           </div>
 
-          <div onClick={() => toast.info('Date filtering coming soon')} className="hidden sm:flex items-center gap-2 bg-card border border-border px-3 py-2 rounded-md shadow-sm cursor-pointer hover:bg-accent/50 transition-colors">
+          <div className="hidden sm:flex items-center gap-2 bg-card border border-border px-3 py-2 rounded-md shadow-sm">
             <span className="text-sm font-medium">Weekly</span>
             <div className="bg-muted p-1 rounded">
               <ArrowRight className="w-4 h-4 text-foreground" />
             </div>
           </div>
 
-          <Button variant="outline" size="icon" className="h-10 w-10" onClick={() => toast.info('Advanced filtering coming soon')}>
+          <Button variant="outline" size="icon" className="h-10 w-10" disabled>
             <Filter className="w-4 h-4" />
           </Button>
         </div>
@@ -84,21 +83,24 @@ export default function MinistryDashboardPage() {
 
         {/* Row 1: 3 equal cards */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <GivingTrendChart />
-          <TrendsBarChart />
+          <GivingTrendChart data={data?.kpi} />
+          <TrendsBarChart data={data?.appointments} />
           <HighlightPromoCard />
         </div>
 
         {/* Row 2: Giving YTD + Line chart + Activity */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-3">
-            <DebtStatusCard />
+            <GoalProgressCard 
+              yearlyGiving={data?.kpi?.yearlyGiving ?? 0}
+              prayerData={data?.prayer}
+            />
           </div>
           <div className="lg:col-span-5">
-            <NetWorthLineChart />
+            <NetWorthLineChart data={data?.appointments?.weeklyAttendance} />
           </div>
           <div className="lg:col-span-4">
-            <TransactionHistoryCard />
+            <ActivityCard activities={data?.activities} />
           </div>
         </div>
       </div>
