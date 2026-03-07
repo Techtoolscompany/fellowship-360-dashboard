@@ -8,10 +8,13 @@ import {
   graceToolAudit,
   graceKnowledge,
   graceApprovals,
+  graceFollowupProposals,
   providerConfigs,
   gracePolicyConfigs,
 } from "@/db/schema";
-import { and, desc, eq } from "drizzle-orm";
+import { organizationMemberships } from "@/db/schema/organization-membership";
+import { and, desc, eq, ne } from "drizzle-orm";
+import { auth } from "@/auth";
 import { runGraceMessage } from "@/lib/grace/runtime";
 import {
   isByoAllowedForChannel,
@@ -19,7 +22,35 @@ import {
   redactProviderConfigForClient,
 } from "@/lib/grace/providers/security";
 
+async function requireOrgMembership(organizationId: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+
+  const [member] = await db
+    .select({ role: organizationMemberships.role })
+    .from(organizationMemberships)
+    .where(
+      and(
+        eq(organizationMemberships.userId, session.user.id),
+        eq(organizationMemberships.organizationId, organizationId)
+      )
+    )
+    .limit(1);
+
+  if (!member) throw new Error("Forbidden");
+  return { userId: session.user.id, role: member.role };
+}
+
+async function requireOrgAdmin(organizationId: string) {
+  const membership = await requireOrgMembership(organizationId);
+  if (membership.role !== "owner" && membership.role !== "admin") {
+    throw new Error("Forbidden");
+  }
+  return membership;
+}
+
 export async function getGraceSessions(organizationId: string) {
+  await requireOrgMembership(organizationId);
   return db
     .select()
     .from(graceSessions)
@@ -28,6 +59,7 @@ export async function getGraceSessions(organizationId: string) {
 }
 
 export async function getGraceCalls(organizationId: string) {
+  await requireOrgMembership(organizationId);
   return db
     .select()
     .from(graceCalls)
@@ -36,6 +68,7 @@ export async function getGraceCalls(organizationId: string) {
 }
 
 export async function getGraceMessages(organizationId: string) {
+  await requireOrgMembership(organizationId);
   return db
     .select()
     .from(graceMessages)
@@ -44,6 +77,7 @@ export async function getGraceMessages(organizationId: string) {
 }
 
 export async function getGraceToolAudit(organizationId: string) {
+  await requireOrgMembership(organizationId);
   return db
     .select()
     .from(graceToolAudit)
@@ -52,6 +86,7 @@ export async function getGraceToolAudit(organizationId: string) {
 }
 
 export async function getGraceKnowledge(organizationId: string) {
+  await requireOrgMembership(organizationId);
   return db
     .select()
     .from(graceKnowledge)
@@ -66,6 +101,7 @@ export async function createGraceKnowledge(input: {
   tags?: string[];
   useForGrace?: boolean;
 }) {
+  await requireOrgMembership(input.organizationId);
   const [created] = await db
     .insert(graceKnowledge)
     .values({
@@ -81,11 +117,21 @@ export async function createGraceKnowledge(input: {
 }
 
 export async function getGraceApprovals(organizationId: string) {
+  await requireOrgMembership(organizationId);
   return db
     .select()
     .from(graceApprovals)
     .where(eq(graceApprovals.organizationId, organizationId))
     .orderBy(desc(graceApprovals.createdAt));
+}
+
+export async function getGraceFollowupProposals(organizationId: string) {
+  await requireOrgMembership(organizationId);
+  return db
+    .select()
+    .from(graceFollowupProposals)
+    .where(eq(graceFollowupProposals.organizationId, organizationId))
+    .orderBy(desc(graceFollowupProposals.createdAt));
 }
 
 export async function updateGraceApproval(input: {
@@ -95,11 +141,13 @@ export async function updateGraceApproval(input: {
   decidedByUserId?: string;
   decisionNote?: string;
 }) {
+  const { userId } = await requireOrgMembership(input.organizationId);
   const [updated] = await db
     .update(graceApprovals)
     .set({
       status: input.status,
-      decidedByUserId: input.decidedByUserId ?? null,
+      // Always record the actual authenticated user, not a caller-supplied value
+      decidedByUserId: userId,
       decisionNote: input.decisionNote ?? null,
       decidedAt: new Date(),
     })
@@ -115,6 +163,7 @@ export async function updateGraceApproval(input: {
 }
 
 export async function getGraceProviderConfigs(organizationId: string) {
+  await requireOrgMembership(organizationId);
   const rows = await db
     .select()
     .from(providerConfigs)
@@ -146,6 +195,7 @@ export async function upsertGraceProviderConfig(input: {
   isActive?: boolean;
   configJson?: Record<string, unknown>;
 }) {
+  await requireOrgAdmin(input.organizationId);
   if (input.mode === "byo" && !isByoAllowedForChannel(input.channel)) {
     throw new Error(
       `BYO is not allowed for ${input.channel}. This channel is agency-managed in your current plan.`
@@ -158,7 +208,8 @@ export async function upsertGraceProviderConfig(input: {
     .where(
       and(
         eq(providerConfigs.organizationId, input.organizationId),
-        eq(providerConfigs.channel, input.channel)
+        eq(providerConfigs.channel, input.channel),
+        eq(providerConfigs.provider, input.provider)
       )
     )
     .limit(1);
@@ -177,18 +228,39 @@ export async function upsertGraceProviderConfig(input: {
     );
   }
 
+  const nextIsActive =
+    input.mode === "disabled" ? false : (input.isActive ?? existing?.isActive ?? true);
+
   if (existing) {
     const [updated] = await db
       .update(providerConfigs)
       .set({
         provider: input.provider,
         mode: input.mode,
-        isActive: input.isActive ?? existing.isActive,
+        isActive: nextIsActive,
         configJson: normalized.configJson,
         updatedAt: new Date(),
       })
       .where(eq(providerConfigs.id, existing.id))
       .returning();
+
+    if (updated.isActive) {
+      await db
+        .update(providerConfigs)
+        .set({
+          isActive: false,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(providerConfigs.organizationId, input.organizationId),
+            eq(providerConfigs.channel, input.channel),
+            eq(providerConfigs.isActive, true),
+            ne(providerConfigs.id, updated.id)
+          )
+        );
+    }
+
     const redacted = redactProviderConfigForClient({
       channel: updated.channel,
       provider: updated.provider,
@@ -210,10 +282,28 @@ export async function upsertGraceProviderConfig(input: {
       channel: input.channel,
       provider: input.provider,
       mode: input.mode,
-      isActive: input.isActive ?? true,
+      isActive: nextIsActive,
       configJson: normalized.configJson,
     })
     .returning();
+
+  if (created.isActive) {
+    await db
+      .update(providerConfigs)
+      .set({
+        isActive: false,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(providerConfigs.organizationId, input.organizationId),
+          eq(providerConfigs.channel, input.channel),
+          eq(providerConfigs.isActive, true),
+          ne(providerConfigs.id, created.id)
+        )
+      );
+  }
+
   const redacted = redactProviderConfigForClient({
     channel: created.channel,
     provider: created.provider,
@@ -229,6 +319,7 @@ export async function upsertGraceProviderConfig(input: {
 }
 
 export async function getGracePolicyConfig(organizationId: string) {
+  await requireOrgMembership(organizationId);
   const [policy] = await db
     .select()
     .from(gracePolicyConfigs)
@@ -265,6 +356,7 @@ export async function updateGracePolicyConfig(input: {
   highRiskTools?: string[];
   allowedPublicTools?: string[];
 }) {
+  await requireOrgAdmin(input.organizationId);
   const current = await getGracePolicyConfig(input.organizationId);
 
   const [updated] = await db
@@ -286,15 +378,16 @@ export async function updateGracePolicyConfig(input: {
 
 export async function sendCopilotMessage(input: {
   organizationId: string;
-  userId?: string;
   sessionId?: string;
   message: string;
 }) {
+  const { userId } = await requireOrgMembership(input.organizationId);
   return runGraceMessage({
     organizationId: input.organizationId,
     channel: "in_app",
+    actorType: "staff",
     message: input.message,
     sessionId: input.sessionId,
-    userId: input.userId,
+    userId,
   });
 }

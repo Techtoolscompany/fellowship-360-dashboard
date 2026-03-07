@@ -1,4 +1,12 @@
-import { pgEnum, pgTable, text, timestamp, boolean, jsonb, index } from "drizzle-orm/pg-core";
+import {
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  boolean,
+  jsonb,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 import { organizations } from "./organization";
 
 export const providerModeEnum = pgEnum("provider_mode", ["agency_managed", "byo", "disabled"]);
@@ -23,6 +31,8 @@ export const providerConfigs = pgTable(
       .$defaultFn(() => new Date()),
   },
   (table) => ({
-    orgChannelIdx: index("provider_config_org_channel_idx").on(table.organizationId, table.channel),
+    orgChannelProviderUidx: uniqueIndex(
+      "provider_config_org_channel_provider_uidx"
+    ).on(table.organizationId, table.channel, table.provider),
   })
 );

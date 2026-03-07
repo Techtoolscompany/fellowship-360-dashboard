@@ -5,6 +5,8 @@ import { graceMessages } from "@/db/schema";
 import { getOrCreateGraceSession, runGraceMessage } from "@/lib/grace/runtime";
 import { graceFlags } from "@/lib/grace/flags";
 import { rateLimitKeyed, verifyWebhookSignature } from "@/lib/grace/channels/webhooks";
+import { processServiceAssignmentSmsReply } from "@/app/actions/operations";
+import { resolveProviderWebhookSecret } from "@/lib/grace/providers/resolver";
 
 export async function POST(req: NextRequest) {
   if (!graceFlags.enabled || !graceFlags.publicChannelsEnabled) {
@@ -12,35 +14,51 @@ export async function POST(req: NextRequest) {
   }
 
   const rawBody = await req.text();
-  const signature = req.headers.get("x-grace-signature");
-  const validSignature = verifyWebhookSignature(rawBody, signature, process.env.TEXTBEE_WEBHOOK_SECRET);
-  if (!validSignature) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-  }
-
-  const key = `${req.headers.get("x-forwarded-for") || "unknown"}:sms`;
-  if (!rateLimitKeyed(key, 240, 60_000)) {
-    return NextResponse.json({ error: "Rate limited" }, { status: 429 });
-  }
-
-  const payload = JSON.parse(rawBody) as {
+  let payload: {
     organizationId?: string;
     sessionId?: string;
     messageId?: string;
     from?: string;
     message?: string;
   };
+  try {
+    payload = JSON.parse(rawBody) as typeof payload;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+  }
 
-  if (!payload.organizationId || !payload.message) {
+  if (!payload.organizationId) {
+    return NextResponse.json({ error: "organizationId is required" }, { status: 400 });
+  }
+
+  const signature = req.headers.get("x-grace-signature");
+  const webhookSecret = await resolveProviderWebhookSecret({
+    organizationId: payload.organizationId,
+    channel: "sms",
+    provider: "textbee",
+    fallbackEnvSecret: process.env.TEXTBEE_WEBHOOK_SECRET,
+  });
+  const validSignature = verifyWebhookSignature(rawBody, signature, webhookSecret ?? undefined);
+  if (!validSignature) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  const key = `${req.headers.get("x-forwarded-for") || "unknown"}:sms`;
+  if (!(await rateLimitKeyed(key, 240, 60_000))) {
+    return NextResponse.json({ error: "Rate limited" }, { status: 429 });
+  }
+
+  if (!payload.message) {
     return NextResponse.json(
-      { error: "organizationId and message are required" },
+      { error: "message is required" },
       { status: 400 }
     );
   }
 
   const session = await getOrCreateGraceSession({
     organizationId: payload.organizationId,
-    channel: "sms",
+    channel: "sms_public",
+    actorType: "public",
     sessionId: payload.sessionId,
   });
 
@@ -65,14 +83,33 @@ export async function POST(req: NextRequest) {
     organizationId: payload.organizationId,
     sessionId: session.id,
     direction: "inbound",
-    channel: "sms",
+    channel: "sms_public",
     messageText: payload.message,
     providerMessageId: payload.messageId ?? null,
   });
 
+  if (payload.from) {
+    const assignmentReply = await processServiceAssignmentSmsReply({
+      organizationId: payload.organizationId,
+      fromPhone: payload.from,
+      message: payload.message,
+    });
+
+    if (assignmentReply.handled) {
+      return NextResponse.json({
+        ok: true,
+        assignmentReply: true,
+        sessionId: session.id,
+        assignmentId: assignmentReply.assignmentId,
+        assignmentStatus: assignmentReply.assignmentStatus,
+      });
+    }
+  }
+
   const result = await runGraceMessage({
     organizationId: payload.organizationId,
-    channel: "sms",
+    channel: "sms_public",
+    actorType: "public",
     message: payload.message,
     sessionId: session.id,
   });
@@ -82,5 +119,6 @@ export async function POST(req: NextRequest) {
     sessionId: session.id,
     response: result.response,
     proposedActions: result.proposedActions,
+    actionOutcomes: result.actionOutcomes,
   });
 }

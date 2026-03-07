@@ -7,7 +7,14 @@ type ProviderRule = {
   secret: string[];
 };
 
-const byoAllowedChannels = new Set(["email", "slack", "telegram"]);
+const byoAllowedChannels = new Set([
+  "ai",
+  "sms",
+  "voice",
+  "email",
+  "slack",
+  "telegram",
+]);
 
 const ENCRYPTED_PREFIX = "enc:v1";
 
@@ -16,8 +23,16 @@ const providerRules: Record<string, ProviderRule> = {
     required: ["apiKey", "baseUrl"],
     secret: ["apiKey", "webhookSecret"],
   },
-  "voice:retell": {
+  "ai:gemini": {
     required: ["apiKey"],
+    secret: ["apiKey"],
+  },
+  "voice:elevenlabs": {
+    required: ["apiKey"],
+    secret: ["apiKey"],
+  },
+  "voice:retell": {
+    required: [],
     secret: ["apiKey", "webhookSecret"],
   },
   "email:sendgrid": {
@@ -40,6 +55,21 @@ function getEncryptionKey() {
 
 export function isEncryptedValue(value: unknown) {
   return typeof value === "string" && value.startsWith(`${ENCRYPTED_PREFIX}:`);
+}
+
+export function decryptValue(encrypted: string): string {
+  const parts = encrypted.split(":");
+  // format: enc:v1:{iv_base64url}:{data_base64url}:{tag_base64url}
+  if (parts.length !== 5 || parts[0] !== "enc" || parts[1] !== "v1") {
+    throw new Error("Invalid encrypted value format");
+  }
+  const iv = Buffer.from(parts[2], "base64url");
+  const data = Buffer.from(parts[3], "base64url");
+  const tag = Buffer.from(parts[4], "base64url");
+  const decipher = crypto.createDecipheriv("aes-256-gcm", getEncryptionKey(), iv);
+  decipher.setAuthTag(tag);
+  const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
+  return decrypted.toString("utf8");
 }
 
 export function encryptValue(plainText: string) {

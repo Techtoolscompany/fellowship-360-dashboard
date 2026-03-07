@@ -6,6 +6,10 @@ import { seedDemoData } from "@/app/actions/seed";
 import { Database, Loader2, CheckCircle, AlertCircle } from "lucide-react";
 import useOrganization from "@/lib/organizations/useOrganization";
 
+const isSeedUiEnabled =
+  process.env.NODE_ENV !== "production" ||
+  process.env.NEXT_PUBLIC_ENABLE_SEED_TOOLS === "true";
+
 export default function SeedPage() {
   const { organization, isLoading: isOrgLoading } = useOrganization();
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -17,6 +21,11 @@ export default function SeedPage() {
   const handleSeed = async () => {
     if (!orgId) {
       setMessage("No organization detected. Please make sure you're logged in.");
+      setStatus("error");
+      return;
+    }
+    if (!isSeedUiEnabled) {
+      setMessage("Seed tooling is disabled in production.");
       setStatus("error");
       return;
     }
@@ -72,7 +81,7 @@ export default function SeedPage() {
 
           <Button
             onClick={handleSeed}
-            disabled={status === "loading" || !orgId || isOrgLoading}
+            disabled={status === "loading" || !orgId || isOrgLoading || !isSeedUiEnabled}
             className="w-full gap-2 bg-[#bbff00] text-[#1a1d21] hover:bg-[#a3df00]"
           >
             {status === "loading" ? (

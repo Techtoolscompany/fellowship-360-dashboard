@@ -18,8 +18,18 @@ import {
   messageTemplates,
 } from "@/db/schema";
 import { sql } from "drizzle-orm";
+import { requireOrgMembership } from "./utils";
 
 export async function seedDemoData(orgId: string) {
+  const seedEnabled =
+    process.env.NODE_ENV !== "production" || process.env.ENABLE_SEED_TOOLS === "true";
+  if (!seedEnabled) {
+    throw new Error(
+      "Demo seed is disabled in production. Set ENABLE_SEED_TOOLS=true to enable it intentionally."
+    );
+  }
+
+  await requireOrgMembership(orgId, "admin");
   // ── 1. Contacts ──
   const contactData = [
     { firstName: "Jennifer", lastName: "Martinez", email: "jennifer.m@email.com", phone: "555-101-2001", memberStatus: "visitor" as const, source: "walk_in" as const },

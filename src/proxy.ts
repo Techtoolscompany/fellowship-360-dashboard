@@ -2,9 +2,17 @@ import { NextResponse } from "next/server";
 import { auth } from "./auth";
 import type { NextRequest } from "next/server";
 import { isMarkdownPreferred, rewritePath } from "fumadocs-core/negotiation";
+import { applyRateLimit, getRateLimitHeaders } from "@/lib/rate-limiter";
+
 const { rewrite: rewriteLLM } = rewritePath("/docs/*path", "/llms.mdx/*path");
 
 export async function proxy(req: NextRequest) {
+  // ── Rate limiting for API routes ──
+  if (req.nextUrl.pathname.startsWith("/api")) {
+    const rateLimitResponse = await applyRateLimit(req);
+    if (rateLimitResponse) return rateLimitResponse;
+  }
+
   if (isMarkdownPreferred(req)) {
     const result = rewriteLLM(req.nextUrl.pathname);
     if (result) {
@@ -39,13 +47,19 @@ export async function proxy(req: NextRequest) {
     }
     return NextResponse.next();
   }
+  
   const isAPI = req.nextUrl.pathname.startsWith("/api/app");
 
   if (isAPI) {
     if (!isAuth) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    return NextResponse.next();
+    const response = NextResponse.next();
+    const headers = getRateLimitHeaders(req);
+    for (const [key, value] of Object.entries(headers)) {
+      response.headers.set(key, value);
+    }
+    return response;
   }
 
   if (req.nextUrl.pathname.startsWith("/super-admin")) {
@@ -68,13 +82,22 @@ export async function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
+  if (req.nextUrl.pathname.startsWith("/api")) {
+    const response = NextResponse.next();
+    const headers = getRateLimitHeaders(req);
+    for (const [key, value] of Object.entries(headers)) {
+      response.headers.set(key, value);
+    }
+    return response;
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
   matcher: [
     "/docs/:path*",
-    "/api/app/:path*",
+    "/api/:path*",
     "/app/:path*",
     "/sign-in",
     "/sign-up",

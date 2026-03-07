@@ -2,6 +2,7 @@ import { db } from "@/db";
 import {
   appointments,
   churchContacts,
+  organizationMemberships,
   prayerRequests,
   tasks,
   graceKnowledge,
@@ -9,11 +10,54 @@ import {
   graceMessages,
   pipelineItems,
   pipelineStages,
+  users,
 } from "@/db/schema";
-import { and, eq, gte, ilike, lte, or, SQL } from "drizzle-orm";
+import { and, eq, gte, ilike, inArray, lte, or, SQL } from "drizzle-orm";
 import sendMail from "@/lib/email/sendMail";
 import { sendTextBeeSMS } from "../channels/sms/textbee";
+import { resolveEmailProvider, resolveSmsProvider } from "../providers/resolver";
 import type { GraceTool } from "./types";
+
+function isAppointmentConflictError(error: unknown) {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    return (error as { code?: string }).code === "23P01";
+  }
+  return false;
+}
+
+async function sendEmailViaProvider(
+  organizationId: string,
+  to: string,
+  subject: string,
+  html: string
+) {
+  const emailConfig = await resolveEmailProvider(organizationId);
+  if (emailConfig.mode === "disabled") {
+    throw new Error("Email channel is disabled for this organization.");
+  }
+  if (emailConfig.mode === "sendgrid") {
+    const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${emailConfig.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: to }] }],
+        from: { email: emailConfig.fromEmail },
+        subject,
+        content: [{ type: "text/html", value: html }],
+      }),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`SendGrid error (${response.status}): ${text}`);
+    }
+    return;
+  }
+  // agency_managed — use platform mailer
+  await sendMail(to, subject, html);
+}
 
 const contactsUpsert: GraceTool = {
   name: "contacts.upsert",
@@ -83,6 +127,12 @@ const churchInfoSearch: GraceTool = {
     const query = String(input.query || "").trim();
     if (!query) return { success: false, error: "Missing query" };
 
+    // Public actors may only retrieve public-visibility knowledge
+    const visibilityFilter =
+      ctx.actorType === "public"
+        ? eq(graceKnowledge.visibility, "public")
+        : or(eq(graceKnowledge.visibility, "public"), eq(graceKnowledge.visibility, "internal"));
+
     const entries = await db
       .select()
       .from(graceKnowledge)
@@ -90,6 +140,7 @@ const churchInfoSearch: GraceTool = {
         and(
           eq(graceKnowledge.organizationId, ctx.organizationId),
           eq(graceKnowledge.useForGrace, true),
+          visibilityFilter,
           or(ilike(graceKnowledge.title, `%${query}%`), ilike(graceKnowledge.content, `%${query}%`))
         )
       )
@@ -193,19 +244,27 @@ const appointmentBook: GraceTool = {
       return { success: false, error: "Appointment slot conflict" };
     }
 
-    const [created] = await db
-      .insert(appointments)
-      .values({
-        organizationId: ctx.organizationId,
-        contactId: (input.contactId as string) ?? null,
-        title: String(input.title || "Pastoral Appointment"),
-        dateTime,
-        duration,
-        type: input.type ? String(input.type) : null,
-        notes: input.notes ? String(input.notes) : null,
-        status: "scheduled",
-      })
-      .returning();
+    let created;
+    try {
+      [created] = await db
+        .insert(appointments)
+        .values({
+          organizationId: ctx.organizationId,
+          contactId: (input.contactId as string) ?? null,
+          title: String(input.title || "Pastoral Appointment"),
+          dateTime,
+          duration,
+          type: input.type ? String(input.type) : null,
+          notes: input.notes ? String(input.notes) : null,
+          status: "scheduled",
+        })
+        .returning();
+    } catch (error) {
+      if (isAppointmentConflictError(error)) {
+        return { success: false, error: "Appointment slot conflict" };
+      }
+      throw error;
+    }
 
     return { success: true, output: { appointmentId: created.id } };
   },
@@ -223,10 +282,16 @@ const messageSendSMS: GraceTool = {
       return { success: false, error: "Missing SMS destination or message" };
     }
 
+    const smsConfig = await resolveSmsProvider(ctx.organizationId);
+    if (!smsConfig) {
+      return { success: false, error: "SMS provider not configured for this organization" };
+    }
+
     const sent = await sendTextBeeSMS({
       to,
       message,
       idempotencyKey: String(input.idempotencyKey || `${ctx.sessionId}:${to}:${Date.now()}`),
+      config: smsConfig,
     });
 
     await db.insert(graceMessages).values({
@@ -251,7 +316,7 @@ const messageSendEmail: GraceTool = {
   name: "messages.sendEmail",
   allowedChannels: ["in_app"],
   requiresApproval: true,
-  async execute(input) {
+  async execute(input, ctx) {
     const to = String(input.to || "").trim();
     const subject = String(input.subject || "Church Update");
     const html = String(input.html || input.message || "").trim();
@@ -260,7 +325,7 @@ const messageSendEmail: GraceTool = {
       return { success: false, error: "Missing email fields" };
     }
 
-    await sendMail(to, subject, html);
+    await sendEmailViaProvider(ctx.organizationId, to, subject, html);
     return { success: true, output: { delivered: true } };
   },
 };
@@ -268,9 +333,48 @@ const messageSendEmail: GraceTool = {
 const staffAlert: GraceTool = {
   name: "staff.alert",
   allowedChannels: ["voice", "sms", "web", "in_app"],
-  async execute(input) {
-    console.warn("GRACE staff alert", input);
-    return { success: true, output: { alerted: true } };
+  async execute(input, ctx) {
+    const reason = String(input.reason || "Grace AI flagged an item requiring attention");
+    const details = input.details ? String(input.details) : "";
+
+    // Look up org admin/owner emails to notify
+    const adminMemberships = await db
+      .select({ userId: organizationMemberships.userId })
+      .from(organizationMemberships)
+      .where(
+        and(
+          eq(organizationMemberships.organizationId, ctx.organizationId),
+          inArray(organizationMemberships.role, ["admin", "owner"])
+        )
+      );
+
+    if (adminMemberships.length === 0) {
+      return { success: true, output: { alerted: false, reason: "No admin recipients found" } };
+    }
+
+    const adminUsers = await db
+      .select({ email: users.email })
+      .from(users)
+      .where(
+        inArray(
+          users.id,
+          adminMemberships.map((m) => m.userId)
+        )
+      );
+
+    const subject = `[Grace Alert] ${reason}`;
+    const html = `<p><strong>Grace AI Alert</strong></p>
+<p><strong>Reason:</strong> ${reason}</p>
+${details ? `<p><strong>Details:</strong> ${details}</p>` : ""}
+<p><strong>Session:</strong> ${ctx.sessionId}</p>`;
+
+    await Promise.allSettled(
+      adminUsers.map(({ email }) =>
+        sendEmailViaProvider(ctx.organizationId, email, subject, html)
+      )
+    );
+
+    return { success: true, output: { alerted: true, recipientCount: adminUsers.length } };
   },
 };
 
@@ -311,6 +415,132 @@ const tasksCreate: GraceTool = {
       .returning();
 
     return { success: true, output: { taskId: created.id } };
+  },
+};
+
+const serviceRunsCreateFromTemplate: GraceTool = {
+  name: "serviceRuns.createFromTemplate",
+  allowedChannels: ["voice", "voice_internal", "in_app"],
+  requiresApproval: true,
+  async execute(input, ctx) {
+    const templateId = input.templateId ? String(input.templateId) : "";
+    const serviceAtRaw = input.serviceAt ? String(input.serviceAt) : "";
+    const serviceAt = new Date(serviceAtRaw);
+    const durationMinutes = Number(input.durationMinutes ?? 90);
+    const name = input.name ? String(input.name) : undefined;
+    const notes = input.notes ? String(input.notes) : undefined;
+
+    if (!templateId) {
+      return { success: false, error: "templateId is required" };
+    }
+    if (Number.isNaN(serviceAt.getTime())) {
+      return { success: false, error: "serviceAt must be a valid datetime" };
+    }
+
+    const { createServiceRun, generateServiceRunAssignmentsFromTemplate } =
+      await import("@/app/actions/operations");
+
+    const serviceRun = await createServiceRun({
+      organizationId: ctx.organizationId,
+      templateId,
+      name,
+      serviceAt,
+      durationMinutes,
+      notes,
+    });
+
+    const assignments = await generateServiceRunAssignmentsFromTemplate({
+      serviceRunId: serviceRun.id,
+      overwriteExisting: false,
+    });
+
+    return {
+      success: true,
+      output: {
+        serviceRunId: serviceRun.id,
+        assignmentCount: assignments.length,
+      },
+    };
+  },
+};
+
+const serviceRunsAutoStaff: GraceTool = {
+  name: "serviceRuns.autoStaff",
+  allowedChannels: ["voice", "voice_internal", "in_app"],
+  requiresApproval: true,
+  async execute(input, _ctx) {
+    const serviceRunId = input.serviceRunId ? String(input.serviceRunId) : "";
+    if (!serviceRunId) {
+      return { success: false, error: "serviceRunId is required" };
+    }
+
+    const waitHoursRaw =
+      input.waitHours === undefined || input.waitHours === null
+        ? undefined
+        : Number(input.waitHours);
+    const waitHours =
+      waitHoursRaw === undefined || Number.isNaN(waitHoursRaw)
+        ? undefined
+        : Math.max(1, Math.floor(waitHoursRaw));
+
+    const objectiveText = input.objectiveText
+      ? String(input.objectiveText)
+      : undefined;
+
+    const { startServiceRunAutostaffGoal } = await import("@/app/actions/operations");
+    const result = await startServiceRunAutostaffGoal({
+      serviceRunId,
+      sourceChannel: "voice_internal",
+      objectiveText,
+      waitHours,
+    });
+
+    return {
+      success: true,
+      output: {
+        goalId: result.goal.id,
+        status: result.goal.status,
+        created: result.created,
+        dispatched: result.dispatched,
+        waitHours: result.waitHours,
+      },
+    };
+  },
+};
+
+const serviceAssignmentsSendOfferSMS: GraceTool = {
+  name: "serviceAssignments.sendOfferSMS",
+  allowedChannels: ["voice", "voice_internal", "in_app"],
+  requiresApproval: true,
+  async execute(input, _ctx) {
+    const serviceRunId = input.serviceRunId ? String(input.serviceRunId) : "";
+    if (!serviceRunId) {
+      return { success: false, error: "serviceRunId is required" };
+    }
+
+    const assignmentIds = Array.isArray(input.assignmentIds)
+      ? input.assignmentIds.map((id) => String(id))
+      : undefined;
+    const messageTemplate = input.messageTemplate
+      ? String(input.messageTemplate)
+      : undefined;
+
+    const { sendServiceAssignmentOffers } = await import("@/app/actions/operations");
+    const offerResult = await sendServiceAssignmentOffers({
+      serviceRunId,
+      assignmentIds,
+      messageTemplate,
+    });
+
+    return {
+      success: true,
+      output: {
+        attempted: offerResult.attempted,
+        sent: offerResult.sent,
+        skipped: offerResult.skipped,
+        failed: offerResult.failed,
+      },
+    };
   },
 };
 
@@ -358,6 +588,9 @@ export const graceTools: GraceTool[] = [
   staffAlert,
   handoffTransfer,
   tasksCreate,
+  serviceRunsCreateFromTemplate,
+  serviceRunsAutoStaff,
+  serviceAssignmentsSendOfferSMS,
   pipelinesAddToStage,
 ];
 
