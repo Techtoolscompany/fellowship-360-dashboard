@@ -2,9 +2,11 @@
 
 import { db } from "@/db";
 import { pipelineStages, pipelineItems, churchContacts } from "@/db/schema";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, and } from "drizzle-orm";
+import { requireOrgMembership } from "./utils";
 
 export async function getPipelineData(orgId: string) {
+  await requireOrgMembership(orgId);
   const stages = await db
     .select()
     .from(pipelineStages)
@@ -29,10 +31,25 @@ export async function updateItemStage(
   stageId: string,
   order: number
 ) {
+  const [existingItem] = await db
+    .select({ organizationId: pipelineItems.organizationId })
+    .from(pipelineItems)
+    .where(eq(pipelineItems.id, itemId))
+    .limit(1);
+  if (!existingItem) throw new Error("Pipeline item not found");
+  await requireOrgMembership(existingItem.organizationId);
+
+  const [stage] = await db
+    .select({ id: pipelineStages.id })
+    .from(pipelineStages)
+    .where(and(eq(pipelineStages.id, stageId), eq(pipelineStages.organizationId, existingItem.organizationId)))
+    .limit(1);
+  if (!stage) throw new Error("Stage not found in this organization");
+
   const [item] = await db
     .update(pipelineItems)
     .set({ stageId, order, updatedAt: new Date() })
-    .where(eq(pipelineItems.id, itemId))
+    .where(and(eq(pipelineItems.id, itemId), eq(pipelineItems.organizationId, existingItem.organizationId)))
     .returning();
   return item;
 }
@@ -45,6 +62,26 @@ export async function createPipelineItem(data: {
   notes?: string;
   organizationId: string;
 }) {
+  await requireOrgMembership(data.organizationId);
+
+  const [stage, contact] = await Promise.all([
+    db
+      .select({ id: pipelineStages.id })
+      .from(pipelineStages)
+      .where(and(eq(pipelineStages.id, data.stageId), eq(pipelineStages.organizationId, data.organizationId)))
+      .limit(1)
+      .then((rows) => rows[0]),
+    db
+      .select({ id: churchContacts.id })
+      .from(churchContacts)
+      .where(and(eq(churchContacts.id, data.contactId), eq(churchContacts.organizationId, data.organizationId)))
+      .limit(1)
+      .then((rows) => rows[0]),
+  ]);
+
+  if (!stage) throw new Error("Invalid pipeline stage");
+  if (!contact) throw new Error("Invalid contact");
+
   const [item] = await db
     .insert(pipelineItems)
     .values({
@@ -60,6 +97,7 @@ export async function createPipelineItem(data: {
 }
 
 export async function seedDefaultStages(orgId: string) {
+  await requireOrgMembership(orgId);
   const defaultStages = [
     { name: "First-Time Visitors", color: "#6366f1", order: 0 },
     { name: "Attempted Contact", color: "#f59e0b", order: 1 },
@@ -82,5 +120,14 @@ export async function seedDefaultStages(orgId: string) {
 }
 
 export async function deletePipelineItem(id: string) {
-  await db.delete(pipelineItems).where(eq(pipelineItems.id, id));
+  const [existingItem] = await db
+    .select({ organizationId: pipelineItems.organizationId })
+    .from(pipelineItems)
+    .where(eq(pipelineItems.id, id))
+    .limit(1);
+  if (!existingItem) return;
+  await requireOrgMembership(existingItem.organizationId);
+  await db
+    .delete(pipelineItems)
+    .where(and(eq(pipelineItems.id, id), eq(pipelineItems.organizationId, existingItem.organizationId)));
 }

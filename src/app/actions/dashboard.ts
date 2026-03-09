@@ -10,13 +10,17 @@ import {
   tasks,
   pipelineItems,
   pipelineStages,
+  donations,
 } from "@/db/schema";
-import { eq, sql, desc, count, sum } from "drizzle-orm";
+import { eq, sql, desc, count, sum, or, and, gte, lte } from "drizzle-orm";
+import { subDays, startOfWeek, endOfWeek, format } from "date-fns";
+import { requireOrgMembership } from "./utils";
 
 /**
  * Aggregated dashboard data for the Grace AI + Ministry dashboards
  */
 export async function getGraceDashboardData(orgId: string) {
+  await requireOrgMembership(orgId);
   // Run all queries in parallel
   const [
     contactCount,
@@ -102,11 +106,141 @@ export async function getGraceDashboardData(orgId: string) {
     .orderBy(pipelineStages.order)
     .limit(4);
 
+  // Weekly attendance from appointments (last 7 days)
+  const now = new Date();
+  const weekStart = startOfWeek(now);
+  const weekEnd = endOfWeek(now);
+  
+  const weeklyAttendance = await db.select({
+    date: appointments.dateTime,
+    count: count(),
+  }).from(appointments)
+    .where(
+      and(
+        eq(appointments.organizationId, orgId),
+        gte(appointments.dateTime, weekStart),
+        lte(appointments.dateTime, weekEnd)
+      )
+    )
+    .groupBy(appointments.dateTime)
+    .orderBy(appointments.dateTime);
+
+  // Format attendance by day of week
+  const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const attendanceByDay = daysOfWeek.map((day, index) => {
+    const dayData = weeklyAttendance.find(a => {
+      const d = new Date(a.date);
+      return d.getDay() === index;
+    });
+    return {
+      day,
+      // Never fabricate analytics data; show zero when no records exist.
+      count: Number(dayData?.count ?? 0),
+    };
+  });
+
+  // Recent donations for activity feed
+  const recentDonations = await db.select({
+    id: donations.id,
+    amount: donations.amount,
+    date: donations.date,
+    fund: donations.fund,
+  }).from(donations)
+    .where(eq(donations.organizationId, orgId))
+    .orderBy(desc(donations.date))
+    .limit(3);
+
+  // Total giving for the year
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const yearlyGiving = await db.select({
+    total: sum(donations.amount),
+  }).from(donations)
+    .where(
+      and(
+        eq(donations.organizationId, orgId),
+        gte(donations.date, yearStart)
+      )
+    );
+
+  // Build activity feed from various sources
+  const activities: Array<{
+    id: string;
+    type: 'contact' | 'donation' | 'task' | 'appointment' | 'prayer';
+    title: string;
+    detail: string;
+    date: Date;
+    icon: string;
+    color: string;
+  }> = [];
+
+  // Add recent contacts
+  const recentContacts = await db.select({
+    id: churchContacts.id,
+    firstName: churchContacts.firstName,
+    lastName: churchContacts.lastName,
+    createdAt: churchContacts.createdAt,
+  }).from(churchContacts)
+    .where(eq(churchContacts.organizationId, orgId))
+    .orderBy(desc(churchContacts.createdAt))
+    .limit(2);
+
+  recentContacts.forEach(c => {
+    activities.push({
+      id: c.id,
+      type: 'contact',
+      title: 'New contact added',
+      detail: `${c.firstName} ${c.lastName}`,
+      date: new Date(c.createdAt),
+      icon: 'users',
+      color: '#6366f1',
+    });
+  });
+
+  // Add recent donations
+  recentDonations.forEach(d => {
+    activities.push({
+      id: d.id,
+      type: 'donation',
+      title: 'Donation received',
+      detail: `$${Number(d.amount).toFixed(2)} to ${d.fund || 'General Fund'}`,
+      date: new Date(d.date),
+      icon: 'dollar-sign',
+      color: '#059669',
+    });
+  });
+
+  // Add recent tasks completed
+  const recentTasks = await db.select({
+    id: tasks.id,
+    title: tasks.title,
+    status: tasks.status,
+    updatedAt: tasks.updatedAt,
+  }).from(tasks)
+    .where(eq(tasks.organizationId, orgId))
+    .orderBy(desc(tasks.updatedAt))
+    .limit(2);
+
+  recentTasks.forEach(t => {
+    activities.push({
+      id: t.id,
+      type: 'task',
+      title: t.status === 'done' ? 'Task completed' : 'Task updated',
+      detail: t.title,
+      date: new Date(t.updatedAt),
+      icon: 'check-circle',
+      color: '#059669',
+    });
+  });
+
+  // Sort activities by date (most recent first)
+  activities.sort((a, b) => b.date.getTime() - a.date.getTime());
+
   return {
     kpi: {
       totalContacts: contactCount[0]?.count ?? 0,
       broadcastsSent: broadcastData[0]?.sent ?? 0,
       totalRecipients: Number(broadcastData[0]?.totalRecipients ?? 0),
+      yearlyGiving: Number(yearlyGiving[0]?.total ?? 0),
     },
     prayer: {
       total: prayerData[0]?.total ?? 0,
@@ -120,6 +254,7 @@ export async function getGraceDashboardData(orgId: string) {
       pending: appointmentData[0]?.scheduled ?? 0,
       confirmed: appointmentData[0]?.confirmed ?? 0,
       completed: appointmentData[0]?.completed ?? 0,
+      weeklyAttendance: attendanceByDay,
     },
     conversations: {
       total: conversationData[0]?.total ?? 0,
@@ -138,5 +273,6 @@ export async function getGraceDashboardData(orgId: string) {
       stages: stagesWithCounts,
     },
     recentBroadcasts,
+    activities: activities.slice(0, 6),
   };
 }

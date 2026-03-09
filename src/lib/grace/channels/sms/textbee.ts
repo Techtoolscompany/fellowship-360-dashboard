@@ -2,9 +2,10 @@ export async function sendTextBeeSMS(params: {
   to: string;
   message: string;
   idempotencyKey: string;
+  config?: { apiKey: string; baseUrl: string };
 }) {
-  const apiKey = process.env.TEXTBEE_API_KEY;
-  const baseUrl = process.env.TEXTBEE_BASE_URL;
+  const apiKey = params.config?.apiKey ?? process.env.TEXTBEE_API_KEY;
+  const baseUrl = params.config?.baseUrl ?? process.env.TEXTBEE_BASE_URL;
 
   if (!apiKey || !baseUrl) {
     return {

@@ -36,7 +36,7 @@ import { updateBroadcast } from "@/app/actions/communications";
 const formSchema = z.object({
   title: z.string().min(1, "Title is required"),
   content: z.string().min(1, "Message content is required"),
-  channel: z.enum(["email", "sms", "push"]),
+  channel: z.literal("sms"),
 });
 
 interface EditBroadcastDialogProps {
@@ -59,7 +59,7 @@ export function EditBroadcastDialog({
     defaultValues: {
       title: broadcast?.title || "",
       content: broadcast?.content || "",
-      channel: (broadcast?.channel as any) || "email",
+      channel: "sms",
     },
   });
 
@@ -68,7 +68,7 @@ export function EditBroadcastDialog({
       form.reset({
         title: broadcast.title || "",
         content: broadcast.content || "",
-        channel: (broadcast.channel as any) || "email",
+        channel: "sms",
       });
     }
   }, [broadcast, form]);
@@ -136,9 +136,7 @@ export function EditBroadcastDialog({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="email">Email</SelectItem>
                       <SelectItem value="sms">SMS</SelectItem>
-                      <SelectItem value="push">Push Notification</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />

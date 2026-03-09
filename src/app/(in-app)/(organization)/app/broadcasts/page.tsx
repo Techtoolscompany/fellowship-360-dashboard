@@ -1,10 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Filter, Send, Mail, MessageSquare, Users, MoreHorizontal, Eye, MousePointer, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -13,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import useOrganization from "@/lib/organizations/useOrganization";
-import { getBroadcasts, updateBroadcastStatus } from "@/app/actions/communications";
+import { deleteBroadcast, getBroadcasts, triggerBroadcast } from "@/app/actions/communications";
 import { CreateBroadcastDialog } from "@/components/dialogs/CreateBroadcastDialog";
 import { EditBroadcastDialog } from "@/components/dialogs/EditBroadcastDialog";
 
@@ -42,162 +40,196 @@ export default function BroadcastsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const handleSend = async (id: string, currentTotal?: number) => {
-    // Mocking recipient count for now before send integration
-    await updateBroadcastStatus(id, "sent", { totalRecipients: currentTotal || Math.floor(Math.random() * 200) + 50 });
-    await fetchData();
+  const handleSend = async (id: string) => {
+    try {
+      await triggerBroadcast(id);
+      toast.success("Broadcast dispatched. The SMS job is now running in the background.");
+      await fetchData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to start broadcast dispatch logic");
+    }
   };
 
   const handleDelete = async (id: string) => {
-    // Use an archived status for deletion in UI, or a true delete if needed
-    // Assuming archived for soft-delete. If true delete is needed, add deleteBroadcast to actions.
-    await updateBroadcastStatus(id, "archived");
-    await fetchData();
+    try {
+      await deleteBroadcast(id);
+      toast.success("Broadcast deleted.");
+      await fetchData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete broadcast");
+    }
   };
 
   const sentCount = broadcastList.filter(b => b.status === "sent").length;
   const totalRecipients = broadcastList.reduce((sum, b) => sum + (b.totalRecipients || 0), 0);
 
-  const kpiStats = [
-    { title: "Sent This Month", value: String(sentCount), icon: Send },
-    { title: "Total Recipients", value: totalRecipients.toLocaleString(), icon: Users },
-    { title: "Total Broadcasts", value: String(broadcastList.filter(b => b.status !== "archived").length), icon: Eye },
-    { title: "Drafts", value: String(broadcastList.filter(b => b.status === "draft").length), icon: MousePointer },
-  ];
-
   const filteredBroadcasts = broadcastList.filter(bc => {
-    if (bc.status === 'archived') return false;
     if (!searchQuery) return true;
     const lowerQuery = searchQuery.toLowerCase();
     return bc.title?.toLowerCase().includes(lowerQuery) || bc.channel?.toLowerCase().includes(lowerQuery);
   });
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <p className="text-muted-foreground mb-1 text-base">Communicate with Your Congregation</p>
-          <h1 className="text-3xl font-bold text-foreground">Broadcasts</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => toast.info('Advanced filtering coming soon')}><Filter className="w-4 h-4 mr-2" />Filter</Button>
-          <CreateBroadcastDialog
-            open={showAddModal}
-            onOpenChange={setShowAddModal}
-            onSuccess={fetchData}
-          >
-            <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
-              <Plus className="w-4 h-4 mr-2" />Create Broadcast
-            </Button>
-          </CreateBroadcastDialog>
+      <div className="flex-1 flex flex-col h-full overflow-hidden bg-background-light dark:bg-slate-900 font-display text-slate-900 dark:text-slate-100 -m-4 sm:-m-8">
+        {/* Header */}
+        <header className="h-16 flex shrink-0 items-center justify-between px-8 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center gap-4">
+            <h2 className="text-xl font-bold">Broadcasts</h2>
+            <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 mx-2"></div>
+            <div className="relative">
+              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
+              <input 
+                className="pl-10 pr-4 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm focus:ring-2 focus:ring-lime-500/20 focus:border-lime-500 outline-none transition-all w-64" 
+                placeholder="Search broadcasts..." 
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <CreateBroadcastDialog
+              open={showAddModal}
+              onOpenChange={setShowAddModal}
+              onSuccess={fetchData}
+            >
+              <button className="flex items-center gap-2 bg-lime-500 hover:bg-lime-600 text-slate-900 dark:text-slate-950 px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                <span className="material-symbols-outlined text-lg">add</span>
+                Create Broadcast
+              </button>
+            </CreateBroadcastDialog>
+          </div>
+        </header>
 
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto p-8 space-y-8">
+          {/* Analytics Section */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-lime-500/10 rounded-bl-full transition-transform group-hover:scale-110"></div>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-10 h-10 rounded-lg bg-lime-500/20 flex items-center justify-center text-lime-600 dark:text-lime-500">
+                  <span className="material-symbols-outlined">send</span>
+                </div>
+                <p className="text-sm font-medium text-slate-500 uppercase tracking-wider">Sent Broadcasts</p>
+              </div>
+              <h3 className="text-3xl font-bold z-10 relative">{loading ? "..." : sentCount}</h3>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-bl-full transition-transform group-hover:scale-110"></div>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-500">
+                  <span className="material-symbols-outlined">group</span>
+                </div>
+                <p className="text-sm font-medium text-slate-500 uppercase tracking-wider">Total Recipients</p>
+              </div>
+              <h3 className="text-3xl font-bold z-10 relative">{loading ? "..." : totalRecipients.toLocaleString()}</h3>
+            </div>
+          </div>
+
+          {/* Recent Broadcasts Table */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden mb-12">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+              <h4 className="font-bold text-lg">All Broadcasts</h4>
+            </div>
+            
+            <div className="overflow-x-auto">
+              {loading ? (
+                <div className="text-center py-20"><Loader2 className="h-8 w-8 animate-spin text-lime-500 mx-auto" /></div>
+              ) : filteredBroadcasts.length === 0 ? (
+                <div className="text-center py-24 text-slate-500">
+                  <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <span className="material-symbols-outlined text-slate-400 dark:text-slate-500 text-3xl">campaign</span>
+                  </div>
+                  <p className="font-bold text-xl text-slate-900 dark:text-white">No broadcasts found</p>
+                  <p className="text-base mt-2 max-w-md mx-auto">Create your first campaign to get started.</p>
+                </div>
+              ) : (
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Broadcast Name</th>
+                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Date</th>
+                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Status</th>
+                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Recipients</th>
+                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {filteredBroadcasts.map((bc) => {
+                      const isSent = bc.status === "sent";
+
+                      return (
+                        <tr key={bc.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className={`font-semibold ${isSent ? "" : "text-slate-400 italic"}`}>{bc.title}</div>
+                            <div className="text-xs text-slate-400 uppercase">{bc.channel}</div>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-400">
+                            {bc.sentAt ? new Date(bc.sentAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'}) : "—"}
+                          </td>
+                          <td className="px-6 py-4">
+                            {isSent ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-lime-500/20 text-lime-700 dark:text-lime-400">
+                                <span className="w-1.5 h-1.5 rounded-full bg-lime-500"></span>
+                                Sent
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-500">
+                                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                                Draft
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-sm font-medium">
+                            {bc.totalRecipients ? bc.totalRecipients.toLocaleString() : "0"}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400">
+                                  <span className="material-symbols-outlined">more_vert</span>
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-48 font-display rounded-xl shadow-lg border-slate-200 dark:border-slate-800">
+                                <DropdownMenuItem onClick={() => setEditBroadcast(bc)} className="font-semibold cursor-pointer">
+                                  Edit Broadcast
+                                </DropdownMenuItem>
+                                {bc.status === "draft" && bc.channel === "sms" && (
+                                  <DropdownMenuItem onClick={() => handleSend(bc.id)} className="font-semibold text-blue-600 dark:text-blue-500 cursor-pointer">
+                                    Send Now
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem onClick={() => handleDelete(bc.id)} className="font-semibold text-rose-600 dark:text-rose-500 cursor-pointer focus:bg-rose-50 focus:text-rose-700 dark:focus:bg-rose-900/20">
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {!loading && filteredBroadcasts.length > 0 && (
+              <div className="px-6 py-3 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800">
+                <p className="text-xs text-slate-500 font-medium">Showing {filteredBroadcasts.length} of {broadcastList.length} broadcasts</p>
+              </div>
+            )}
+          </div>
+          
           <EditBroadcastDialog
             open={!!editBroadcast}
             onOpenChange={(open) => !open && setEditBroadcast(null)}
             onSuccess={fetchData}
             broadcast={editBroadcast}
           />
+
         </div>
       </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {kpiStats.map((stat, index) => (
-          <Card key={index}>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-muted-foreground text-sm mb-1">{stat.title}</p>
-                  <h3 className="text-2xl font-bold">{loading ? "..." : stat.value}</h3>
-                </div>
-                <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                  <stat.icon className="w-5 h-5 text-blue-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {loading ? (
-        <div className="text-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#bbff00] mx-auto" /></div>
-      ) : (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Recent Broadcasts</CardTitle>
-            <div className="relative w-64">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input 
-                type="text" 
-                className="w-full pl-9 pr-4 py-2 bg-background border border-input rounded-md text-sm" 
-                placeholder="Search broadcasts..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 border-b">
-                  <tr>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Campaign</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Channel</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Recipients</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Sent</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Status</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {filteredBroadcasts.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
-                        No broadcasts match your search.
-                      </td>
-                    </tr>
-                  ) : filteredBroadcasts.map((bc) => (
-                    <tr key={bc.id} className="hover:bg-muted/30">
-                      <td className="px-6 py-4 font-semibold">{bc.title}</td>
-                      <td className="px-6 py-4">
-                        <Badge variant="secondary" className={bc.channel === "email" ? "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" : "bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400"}>
-                          {bc.channel === "email" ? <Mail className="w-3 h-3 mr-1" /> : <MessageSquare className="w-3 h-3 mr-1" />}
-                          {bc.channel}
-                        </Badge>
-                      </td>
-                      <td className="px-6 py-4">{bc.totalRecipients ? bc.totalRecipients.toLocaleString() : "—"}</td>
-                      <td className="px-6 py-4 text-muted-foreground">{bc.sentAt ? new Date(bc.sentAt).toLocaleDateString() : "—"}</td>
-                      <td className="px-6 py-4">
-                        <Badge variant="secondary" className={bc.status === "sent" ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}>
-                          {bc.status}
-                        </Badge>
-                      </td>
-                      <td className="px-6 py-4">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon"><MoreHorizontal className="w-4 h-4" /></Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            {bc.status === "draft" && (
-                              <>
-                                <DropdownMenuItem onClick={() => setEditBroadcast(bc)}>Edit Draft</DropdownMenuItem>
-                                <DropdownMenuItem className="text-emerald-600" onClick={() => handleSend(bc.id, bc.totalRecipients)}>Send Broadcast</DropdownMenuItem>
-                              </>
-                            )}
-                            {bc.status === "sent" && (
-                              <DropdownMenuItem onClick={() => toast.info('Broadcast reporting interface coming soon')}>View Report</DropdownMenuItem>
-                            )}
-                            <DropdownMenuItem className="text-red-600" onClick={() => handleDelete(bc.id)}>Delete</DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
+    );
 }

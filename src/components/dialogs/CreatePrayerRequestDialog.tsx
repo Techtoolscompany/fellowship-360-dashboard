@@ -42,7 +42,7 @@ const formSchema = z.object({
   contactId: z.string().optional(),
   contactName: z.string().optional(),
   content: z.string().min(1, "Request details are required"),
-  urgency: z.string().default("normal"),
+  urgency: z.enum(["normal", "urgent", "critical"]).default("normal"),
   isAnonymous: z.boolean().default(false),
 });
 
@@ -76,7 +76,7 @@ export function CreatePrayerRequestDialog({
 
   useEffect(() => {
     if (open && organization?.id) {
-      getContacts(organization.id).then(setContacts);
+      getContacts(organization.id).then(r => setContacts(r.contacts));
     }
   }, [open, organization?.id]);
 
@@ -206,7 +206,6 @@ export function CreatePrayerRequestDialog({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
                       <SelectItem value="normal">Normal</SelectItem>
                       <SelectItem value="urgent">Urgent</SelectItem>
                       <SelectItem value="critical">Critical</SelectItem>

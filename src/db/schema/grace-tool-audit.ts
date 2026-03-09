@@ -1,6 +1,7 @@
 import { pgEnum, pgTable, text, timestamp, integer, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { organizations } from "./organization";
 import { graceSessions } from "./grace-sessions";
+import { graceActorTypeEnum, graceChannelEnum } from "./grace-sessions";
 
 export const graceToolAuditStatusEnum = pgEnum("grace_tool_audit_status", ["success", "error"]);
 
@@ -15,6 +16,8 @@ export const graceToolAudit = pgTable(
       .notNull()
       .references(() => graceSessions.id, { onDelete: "cascade" }),
     toolName: text("tool_name").notNull(),
+    actorType: graceActorTypeEnum("actor_type").notNull().default("staff"),
+    channel: graceChannelEnum("channel").notNull().default("in_app"),
     inputJson: jsonb("input_json").$type<Record<string, unknown>>(),
     outputJson: jsonb("output_json").$type<Record<string, unknown>>(),
     status: graceToolAuditStatusEnum("status").notNull(),

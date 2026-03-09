@@ -29,6 +29,7 @@ export const conversationStatusEnum = pgEnum("conversation_status", [
 export const messageDirectionEnum = pgEnum("message_direction", [
   "inbound",
   "outbound",
+  "draft",
 ]);
 
 export const messageSenderTypeEnum = pgEnum("message_sender_type", [

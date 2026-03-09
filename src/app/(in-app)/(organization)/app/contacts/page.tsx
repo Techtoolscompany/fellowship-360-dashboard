@@ -1,24 +1,45 @@
 "use client";
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
-  Plus,
-  Download,
-  Filter,
-  LayoutGrid,
-  List,
-  Search,
-  X,
-  Check,
-  Loader2,
+  Plus, Download, Upload, LayoutGrid, List,
+  Search, X, Loader2, Mail, Phone, ChevronRight, Users, ChevronLeft,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import ContactCard from "@/components/shared/ContactCard";
 import { CreateContactDialog } from "@/components/dialogs/CreateContactDialog";
-import { Button } from "@/components/ui/button";
+import { ImportContactsDialog } from "@/components/dialogs/ImportContactsDialog";
 import useOrganization from "@/lib/organizations/useOrganization";
-import { getContacts, createContact, deleteContact } from "@/app/actions/contacts";
+import { getContacts, deleteContact } from "@/app/actions/contacts";
+
+const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
+  member:           { label: "Member",          className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400" },
+  visitor:          { label: "Visitor",          className: "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400" },
+  leader:           { label: "Leader",           className: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400" },
+  regular_attendee: { label: "Regular",          className: "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400" },
+  prospect:         { label: "Prospect",         className: "bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400" },
+  inactive:         { label: "Inactive",         className: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" },
+};
+
+const AVATAR_COLORS = [
+  "from-violet-400 to-purple-600",
+  "from-sky-400 to-blue-600",
+  "from-lime-400 to-green-500",
+  "from-rose-400 to-pink-600",
+  "from-amber-400 to-orange-500",
+  "from-cyan-400 to-teal-600",
+];
+
+function getAvatarColor(name: string) {
+  const i = name.charCodeAt(0) % AVATAR_COLORS.length;
+  return AVATAR_COLORS[i];
+}
+
+function formatPhone(phone: string) {
+  if (!phone) return "";
+  const d = phone.replace(/\D/g, "");
+  return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : phone;
+}
 
 export default function ContactsPage() {
   const router = useRouter();
@@ -26,197 +47,335 @@ export default function ContactsPage() {
   const orgId = organization?.id;
 
   const [contacts, setContacts] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageCount, setPageCount] = useState(1);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [showAddModal, setShowAddModal] = useState(false);
-  const [viewMode, setViewMode] = useState("list");
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
 
-  const fetchContacts = useCallback(async () => {
+  const fetchContacts = useCallback(async (p = page) => {
     if (!orgId) return;
     setLoading(true);
     try {
-      const data = await getContacts(orgId, searchQuery ? { search: searchQuery } : undefined);
-      setContacts(data);
+      const filters: { search?: string; status?: string } = {};
+      if (searchQuery) filters.search = searchQuery;
+      if (statusFilter !== "all") filters.status = statusFilter;
+      const data = await getContacts(orgId, filters, p);
+      setContacts(data.contacts);
+      setTotal(data.total);
+      setPage(data.page);
+      setPageCount(data.pageCount);
     } catch (err) {
       console.error("Failed to fetch contacts:", err);
+      toast.error("Failed to load contacts");
     } finally {
       setLoading(false);
     }
-  }, [orgId, searchQuery]);
+  }, [orgId, searchQuery, statusFilter, page]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchContacts();
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [fetchContacts]);
+    setPage(1);
+  }, [searchQuery, statusFilter]);
 
-  const getStatusStyle = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case "member":
-        return "bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400";
-      case "visitor":
-        return "bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400";
-      case "volunteer":
-        return "bg-lime-100 text-lime-800 dark:bg-lime-900/20 dark:text-lime-400";
-      case "leader":
-        return "bg-yellow-100 text-yellow-600 dark:bg-yellow-900/20 dark:text-yellow-400";
-      default:
-        return "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400";
-    }
+  useEffect(() => {
+    const t = setTimeout(() => fetchContacts(page), 300);
+    return () => clearTimeout(t);
+  }, [fetchContacts, page]);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this contact?")) return;
+    await deleteContact(id);
+    fetchContacts();
   };
 
-  const formatPhone = (phone: string) => {
-    if (!phone) return "";
-    const digits = phone.replace(/\D/g, "");
-    if (digits.length === 10) {
-      return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-    }
-    return phone;
+  const handleExport = () => {
+    if (!contacts.length) { toast.error("No contacts to export"); return; }
+    const rows = [
+      ["First Name","Last Name","Email","Phone","Status","Added"].join(","),
+      ...contacts.map(c => [`"${c.firstName||''}"`,`"${c.lastName||''}"`,`"${c.email||''}"`,`"${c.phone||''}"`,`"${c.memberStatus||''}"`,`"${new Date(c.createdAt).toLocaleDateString()}"`].join(","))
+    ].join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([rows], { type: "text/csv" }));
+    a.download = `contacts-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    toast.success("Exported successfully");
   };
 
-  const handleDeleteContact = async (id: string) => {
-    if (confirm("Are you sure you want to delete this contact?")) {
-      try {
-        await deleteContact(id);
-        await fetchContacts();
-      } catch (err) {
-        console.error("Failed to delete contact:", err);
-      }
-    }
-  };
+  const filtered = contacts;
+  const memberCount = contacts.filter(c => c.memberStatus === "member").length;
+  const visitorCount = contacts.filter(c => c.memberStatus === "visitor").length;
+  const prospectCount = contacts.filter(c => c.memberStatus === "prospect").length;
+
+  const STATUS_FILTERS = [
+    { id: "all",      label: "All",       count: statusFilter === "all" ? total : null },
+    { id: "member",   label: "Members",   count: statusFilter === "member" ? total : null },
+    { id: "visitor",  label: "Visitors",  count: statusFilter === "visitor" ? total : null },
+    { id: "prospect", label: "Prospects", count: statusFilter === "prospect" ? total : null },
+  ];
 
   return (
-    <>
-      <div className="flex items-center justify-between mb-6">
+    <div className="flex flex-col gap-6">
+      {/* Page header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">Contacts</h2>
-          <nav aria-label="breadcrumb" className="text-sm text-muted-foreground mt-1">
-            <ol className="flex items-center gap-1">
-              <li><Link href="/app/home" className="hover:text-primary">Home</Link></li>
-              <li>/</li>
-              <li>People</li>
-              <li>/</li>
-              <li className="text-foreground font-medium" aria-current="page">Contacts</li>
-            </ol>
-          </nav>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">People</h1>
+          <p className="text-sm text-slate-500 mt-0.5">{loading ? "Loading…" : `${total.toLocaleString()} contacts`}</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.info("Export functionality coming soon")}><Download size={14} /> Export</Button>
-          <CreateContactDialog 
-            open={showAddModal} 
-            onOpenChange={setShowAddModal} 
-            onSuccess={fetchContacts}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
-            <Button size="sm" className="gap-2 bg-[#bbff00] text-[#1a1d21] hover:bg-[#a3df00]">
-              <Plus size={14} /> Add Contact
-            </Button>
+            <Download className="w-4 h-4" />
+            <span className="hidden sm:inline">Export</span>
+          </button>
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+            <span className="hidden sm:inline">Import CSV</span>
+          </button>
+          <CreateContactDialog open={showAddModal} onOpenChange={setShowAddModal} onSuccess={fetchContacts}>
+            <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-lime-500 text-slate-950 font-bold text-sm hover:bg-lime-400 transition-colors shadow-sm">
+              <Plus className="w-4 h-4" />
+              Add Contact
+            </button>
           </CreateContactDialog>
         </div>
       </div>
 
-      <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-between gap-3 bg-card p-4 rounded-xl border border-border">
-          <div className="relative flex-1 max-w-sm">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder="Search contacts..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+      {/* Stat chips */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Total", value: total,              color: "text-slate-900 dark:text-white",          bg: "bg-white dark:bg-slate-900" },
+          { label: "Members",   value: memberCount,    color: "text-emerald-700 dark:text-emerald-400",  bg: "bg-emerald-50 dark:bg-emerald-500/10" },
+          { label: "Visitors",  value: visitorCount,   color: "text-sky-700 dark:text-sky-400",          bg: "bg-sky-50 dark:bg-sky-500/10" },
+          { label: "Prospects", value: prospectCount,  color: "text-orange-700 dark:text-orange-400",     bg: "bg-orange-50 dark:bg-orange-500/10" },
+        ].map(({ label, value, color, bg }) => (
+          <div key={label} className={`${bg} border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm`}>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">{label}</p>
+            <p className={`text-2xl font-extrabold ${color}`}>{loading ? "—" : value}</p>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-muted-foreground hidden sm:inline-block">
-              {loading ? "Loading..." : `${contacts.length} contacts`}
-            </span>
-            <div className="flex bg-muted/50 rounded-lg p-1 border border-border">
-              <button className={`p-1.5 rounded-md transition-all ${viewMode === "grid" ? "bg-[#bbff00] text-[#1a1d21] shadow-sm" : "text-muted-foreground hover:text-foreground"}`} onClick={() => setViewMode("grid")}>
-                <LayoutGrid size={16} />
-              </button>
-              <button className={`p-1.5 rounded-md transition-all ${viewMode === "list" ? "bg-[#bbff00] text-[#1a1d21] shadow-sm" : "text-muted-foreground hover:text-foreground"}`} onClick={() => setViewMode("list")}>
-                <List size={16} />
-              </button>
-            </div>
-          </div>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+        {/* Search */}
+        <div className="relative w-full sm:max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            className="w-full pl-9 pr-9 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-lime-500/40 focus:border-lime-500 outline-none placeholder:text-slate-400 dark:text-white transition-all"
+            placeholder="Search contacts…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
-        {loading ? (
-          <div className="text-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-[#bbff00] mx-auto" />
-            <p className="text-sm text-muted-foreground mt-2">Loading contacts...</p>
-          </div>
-        ) : contacts.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground">
-            {searchQuery ? "No contacts match your search." : "No contacts yet. Add your first contact!"}
-          </div>
-        ) : viewMode === "grid" ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {contacts.map((contact) => (
-              <ContactCard
-                key={contact.id}
-                id={contact.id}
-                name={`${contact.firstName} ${contact.lastName}`}
-                email={contact.email}
-                phone={formatPhone(contact.phone)}
-                status={contact.memberStatus}
-                groups={[]}
-                lastActivity={new Date(contact.createdAt).toLocaleDateString()}
-              />
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          {/* Status filter pills */}
+          <div className="flex gap-1.5 overflow-x-auto scrollbar-hide flex-1 sm:flex-none">
+            {STATUS_FILTERS.map(({ id, label, count }) => (
+              <button
+                key={id}
+                onClick={() => setStatusFilter(id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                  statusFilter === id
+                    ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                }`}
+              >
+                {label}
+                <span className={`text-[10px] ${statusFilter === id ? "opacity-70" : "opacity-50"}`}>{count}</span>
+              </button>
             ))}
           </div>
-        ) : (
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left">
-                <thead className="bg-muted/50 border-b border-border text-muted-foreground uppercase text-xs">
-                  <tr>
-                    <th className="px-6 py-4 font-medium">Name</th>
-                    <th className="px-6 py-4 font-medium">Email</th>
-                    <th className="px-6 py-4 font-medium">Phone</th>
-                    <th className="px-6 py-4 font-medium">Status</th>
-                    <th className="px-6 py-4 font-medium">Added</th>
-                    <th className="px-6 py-4 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {contacts.map((contact) => (
-                    <tr key={contact.id} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-6 py-4">
+
+          {/* View toggle */}
+          <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl shrink-0">
+            <button
+              onClick={() => setViewMode("list")}
+              className={`p-1.5 rounded-lg transition-all ${viewMode === "list" ? "bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white" : "text-slate-400 hover:text-slate-600"}`}
+            >
+              <List className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`p-1.5 rounded-lg transition-all ${viewMode === "grid" ? "bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white" : "text-slate-400 hover:text-slate-600"}`}
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      {loading ? (
+        <div className="flex items-center justify-center py-24">
+          <Loader2 className="w-7 h-7 animate-spin text-lime-500" />
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl">
+          <Users className="w-10 h-10 text-slate-300 dark:text-slate-700 mx-auto mb-3" />
+          <p className="font-semibold text-slate-900 dark:text-white">No contacts found</p>
+          <p className="text-sm text-slate-500 mt-1">
+            {searchQuery ? "Try a different search term." : "Add your first contact to get started."}
+          </p>
+        </div>
+      ) : viewMode === "grid" ? (
+        /* ── GRID VIEW ── */
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {filtered.map((c) => {
+            const name = `${c.firstName} ${c.lastName}`;
+            const status = STATUS_CONFIG[c.memberStatus] ?? { label: c.memberStatus, className: "bg-slate-100 text-slate-600" };
+            const grad = getAvatarColor(name);
+            return (
+              <Link
+                key={c.id}
+                href={`/app/contacts/${c.id}`}
+                className="group bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 hover:border-lime-500/40 hover:shadow-lg hover:-translate-y-0.5 transition-all flex flex-col gap-4"
+              >
+                <div className="flex items-start justify-between">
+                  <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${grad} flex items-center justify-center text-white font-bold text-base shadow-sm`}>
+                    {c.firstName?.[0]}{c.lastName?.[0]}
+                  </div>
+                  <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wide ${status.className}`}>
+                    {status.label}
+                  </span>
+                </div>
+                <div>
+                  <p className="font-bold text-slate-900 dark:text-white group-hover:text-lime-600 dark:group-hover:text-lime-400 transition-colors">{name}</p>
+                  {c.email && <p className="text-xs text-slate-500 mt-0.5 truncate">{c.email}</p>}
+                </div>
+                <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800 pt-3 mt-auto">
+                  {c.phone ? (
+                    <span className="text-xs text-slate-500 font-mono">{formatPhone(c.phone)}</span>
+                  ) : (
+                    <span className="text-xs text-slate-400 italic">No phone</span>
+                  )}
+                  <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-lime-500 transition-colors" />
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      ) : (
+        /* ── LIST VIEW ── */
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  {["Contact", "Email", "Phone", "Status", "Added", ""].map((h, i) => (
+                    <th key={i} className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {filtered.map((c) => {
+                  const name = `${c.firstName} ${c.lastName}`;
+                  const status = STATUS_CONFIG[c.memberStatus] ?? { label: c.memberStatus, className: "bg-slate-100 text-slate-500" };
+                  const grad = getAvatarColor(name);
+                  return (
+                    <tr
+                      key={c.id}
+                      className="group hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors cursor-pointer"
+                      onClick={() => router.push(`/app/contacts/${c.id}`)}
+                    >
+                      <td className="px-5 py-4">
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-lg flex items-center justify-center font-semibold text-xs text-[#171717]" style={{ background: "linear-gradient(135deg, #c8f542 0%, #a8d435 100%)" }}>
-                            {contact.firstName?.[0]}{contact.lastName?.[0]}
+                          <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${grad} flex items-center justify-center text-white font-bold text-xs shrink-0`}>
+                            {c.firstName?.[0]}{c.lastName?.[0]}
                           </div>
-                          <Link href={`/app/contacts/${contact.id}`} className="font-semibold text-foreground hover:underline">
-                            {contact.firstName} {contact.lastName}
-                          </Link>
+                          <span className="font-semibold text-slate-900 dark:text-white group-hover:text-lime-600 dark:group-hover:text-lime-400 transition-colors">
+                            {name}
+                          </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-muted-foreground">{contact.email}</td>
-                      <td className="px-6 py-4 text-muted-foreground">{formatPhone(contact.phone)}</td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium uppercase tracking-wide ${getStatusStyle(contact.memberStatus)}`}>
-                          {contact.memberStatus}
+                      <td className="px-5 py-4">
+                        {c.email ? (
+                          <span className="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-400">
+                            <Mail className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                            <span className="truncate max-w-[180px]">{c.email}</span>
+                          </span>
+                        ) : <span className="text-slate-300 dark:text-slate-600 text-sm">—</span>}
+                      </td>
+                      <td className="px-5 py-4">
+                        {c.phone ? (
+                          <span className="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-400 font-mono">
+                            <Phone className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                            {formatPhone(c.phone)}
+                          </span>
+                        ) : <span className="text-slate-300 dark:text-slate-600 text-sm">—</span>}
+                      </td>
+                      <td className="px-5 py-4">
+                        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wide ${status.className}`}>
+                          {status.label}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-muted-foreground">
-                        {new Date(contact.createdAt).toLocaleDateString()}
+                      <td className="px-5 py-4 text-sm text-slate-500 whitespace-nowrap">
+                        {new Date(c.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="flex gap-2">
-                          <Button variant="ghost" size="sm" className="h-8 px-2 text-muted-foreground hover:text-foreground" onClick={() => router.push(`/app/contacts/${contact.id}`)}>View</Button>
-                          <Button variant="ghost" size="sm" className="h-8 px-2 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/10" onClick={() => handleDeleteContact(contact.id)}>Delete</Button>
-                        </div>
+                      <td className="px-5 py-4 text-right">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }}
+                          className="text-xs font-semibold text-slate-400 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 px-2 py-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                        >
+                          Delete
+                        </button>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        )}
-      </div>
-    </>
+          {/* Footer / Pagination */}
+          <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-800/30 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-500">
+              {loading ? "Loading…" : `Showing ${((page - 1) * 50) + 1}–${Math.min(page * 50, total)} of ${total.toLocaleString()} contacts`}
+            </span>
+            {pageCount > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1 || loading}
+                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400 px-2">
+                  {page} / {pageCount}
+                </span>
+                <button
+                  onClick={() => setPage(p => Math.min(pageCount, p + 1))}
+                  disabled={page === pageCount || loading}
+                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <ImportContactsDialog
+        open={showImportModal}
+        onOpenChange={setShowImportModal}
+        organizationId={orgId ?? ""}
+        onSuccess={fetchContacts}
+      />
+    </div>
   );
 }

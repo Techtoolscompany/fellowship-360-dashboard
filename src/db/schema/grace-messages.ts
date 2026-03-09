@@ -1,4 +1,4 @@
-import { pgEnum, pgTable, text, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgEnum, pgTable, text, timestamp, index, uniqueIndex, jsonb } from "drizzle-orm/pg-core";
 import { organizations } from "./organization";
 import { churchContacts } from "./church-contacts";
 import { graceSessions } from "./grace-sessions";
@@ -22,6 +22,7 @@ export const graceMessages = pgTable(
     channel: text("channel").notNull(),
     messageText: text("message_text").notNull(),
     providerMessageId: text("provider_message_id"),
+    metadataJson: jsonb("metadata_json").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),

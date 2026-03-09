@@ -51,6 +51,7 @@ export const POST = withOrganizationAuthRequired(async (req, context) => {
         organizationId: org.id,
         sessionId: session.id,
         channel: session.channel,
+        actorType: session.actorType,
         userId: user.id,
         contactId: session.contactId,
       },
@@ -68,6 +69,7 @@ export const POST = withOrganizationAuthRequired(async (req, context) => {
 
     return NextResponse.json({
       results: execution.results,
+      actionOutcomes: execution.actionOutcomes,
       failed: execution.results.filter((item) => !item.success),
       approvalsUpdated: approvals.length,
     });

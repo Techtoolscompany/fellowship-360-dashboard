@@ -4,48 +4,28 @@ import React, { useState, useEffect } from "react";
 import useUser from "@/lib/users/useUser";
 import useOrganization from "@/lib/organizations/useOrganization";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard,
   Zap,
-  Home,
   Users,
-  Layers,
-  Target,
   CheckCircle,
   MessageCircle,
-  Send,
-  Phone,
-  FileText,
-  Heart,
-  Calendar,
   Clock,
-  UserCheck,
   BarChart2,
-  Globe,
   Shield,
-  Link as LinkIcon,
-  Briefcase,
-  Sliders,
   MapPin,
-  Settings,
   Menu,
   ChevronLeft,
   ChevronDown,
   ChevronRight,
   CreditCard,
   Bot,
-  HandHeart,
-  Coins,
-  Wallet,
+  Plug,
+  Sparkles,
+  CalendarClock,
+  ListChecks,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -60,25 +40,33 @@ import { UserDropdown } from "@/components/in-app/user-dropdown";
 import { PageLoader } from "@/components/in-app/page-loader";
 import { OrganizationSwitcher } from "@/components/in-app/organization-switcher";
 import { ThemeSwitcher } from "@/components/theme-switcher";
-import { GraceFab } from "@/components/grace/GraceFab";
 
 function NavItem({
   href,
   icon: Icon,
   children,
   className,
-  isNew,
+  badgeLabel,
   isCollapsed,
 }: {
   href: string;
   icon: React.ElementType;
   children: React.ReactNode;
   className?: string;
-  isNew?: boolean;
+  badgeLabel?: string;
   isCollapsed?: boolean;
 }) {
   const pathname = usePathname();
-  const isActive = pathname === href;
+  const searchParams = useSearchParams();
+  const [hrefPath, hrefQuery] = href.split("?");
+  const hrefParams = new URLSearchParams(hrefQuery || "");
+  const hrefTab = hrefParams.get("tab");
+  const currentTab = searchParams.get("tab");
+
+  let isActive = pathname === hrefPath;
+  if (isActive && hrefTab) {
+    isActive = currentTab === hrefTab || (hrefTab === "command" && !currentTab);
+  }
 
   // Clean Style: No background overlay on active.
   // Active = Dark Text + Lime Green Icon.
@@ -103,12 +91,12 @@ function NavItem({
       {!isCollapsed && (
         <>
           <span className="truncate">{children}</span>
-          {isNew && (
+          {badgeLabel && (
             <Badge
               variant="secondary"
               className="ml-auto text-[10px] h-4 bg-primary/20 text-primary-foreground font-medium border-none"
             >
-              New
+              {badgeLabel}
             </Badge>
           )}
         </>
@@ -122,7 +110,7 @@ function NavItem({
         <TooltipTrigger asChild>{content}</TooltipTrigger>
         <TooltipContent side="right" className="font-medium">
           {children}
-          {isNew && " (New)"}
+          {badgeLabel ? ` (${badgeLabel})` : ""}
         </TooltipContent>
       </Tooltip>
     );
@@ -133,7 +121,10 @@ function NavItem({
 
 function SidebarContent({ className, isCollapsed }: { className?: string; isCollapsed?: boolean }) {
   const { user } = useUser();
-  const [collapsedSections, setCollapsedSections] = React.useState<Record<string, boolean>>({});
+  const [collapsedSections, setCollapsedSections] = React.useState<Record<string, boolean>>({
+    explore: true,
+    onboarding: true,
+  });
 
   const toggleSection = (section: string) => {
     setCollapsedSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -165,88 +156,53 @@ function SidebarContent({ className, isCollapsed }: { className?: string; isColl
 
       {/* Main Navigation */}
       <nav className={cn("space-y-1 flex-1 overflow-y-auto", isCollapsed ? "px-2" : "px-2")}>
-        {/* Main Section */}
-        <SectionHeader title="Main" section="main" />
-        {!collapsedSections.main && (
+        {/* Grace Section */}
+        <SectionHeader title="Grace" section="grace" />
+        {!collapsedSections.grace && (
           <div className="space-y-0.5">
-            <NavItem href="/app" icon={Zap} isCollapsed={isCollapsed} isNew>
-              Grace AI
+            <NavItem href="/app?tab=command" icon={Zap} isCollapsed={isCollapsed} badgeLabel="Live">
+              Grace
             </NavItem>
-            <NavItem href="/app/grace-center" icon={Bot} isCollapsed={isCollapsed}>
-              Grace Center
+          </div>
+        )}
+
+        {/* Ministry Workflows Section */}
+        <SectionHeader title="Ministry Workflows" section="core" />
+        {!collapsedSections.core && (
+          <div className="space-y-0.5">
+            <NavItem href="/app?tab=inbox" icon={MessageCircle} isCollapsed={isCollapsed}>
+              Communications
             </NavItem>
-            <NavItem href="/app/home" icon={Home} isCollapsed={isCollapsed}>
-              Ministry Overview
-            </NavItem>
-            <NavItem href="/app/contacts" icon={Users} isCollapsed={isCollapsed}>
-              Contacts
-            </NavItem>
-            <NavItem href="/app/ministries" icon={Layers} isCollapsed={isCollapsed}>
-              Ministries
-            </NavItem>
-            <NavItem href="/app/pipeline" icon={Target} isCollapsed={isCollapsed}>
-              Pipeline
+            <NavItem href="/app/people" icon={Users} isCollapsed={isCollapsed}>
+              People
             </NavItem>
             <NavItem href="/app/tasks" icon={CheckCircle} isCollapsed={isCollapsed}>
-              Tasks
+              Action Items
             </NavItem>
-          </div>
-        )}
-
-        {/* Communication Section */}
-        <SectionHeader title="Communication" section="communication" />
-        {!collapsedSections.communication && (
-          <div className="space-y-0.5">
-            <NavItem href="/app/conversations" icon={MessageCircle} isCollapsed={isCollapsed}>
-              Conversations
-            </NavItem>
-            <NavItem href="/app/broadcasts" icon={Send} isCollapsed={isCollapsed}>
-              Broadcasts
-            </NavItem>
-            <NavItem href="/app/calls" icon={Phone} isCollapsed={isCollapsed}>
-              Calls
-            </NavItem>
-            <NavItem href="/app/templates" icon={FileText} isCollapsed={isCollapsed}>
-              Templates
-            </NavItem>
-            <NavItem href="/app/prayer-requests" icon={Heart} isCollapsed={isCollapsed}>
-              Prayer Requests
-            </NavItem>
-          </div>
-        )}
-
-        {/* Operations Section */}
-        <SectionHeader title="Operations" section="operations" />
-        {!collapsedSections.operations && (
-          <div className="space-y-0.5">
-            <NavItem href="/app/calendar" icon={Calendar} isCollapsed={isCollapsed}>
+            <NavItem href="/app?tab=calendar" icon={Clock} isCollapsed={isCollapsed}>
               Calendar
             </NavItem>
-            <NavItem href="/app/appointments" icon={Clock} isCollapsed={isCollapsed}>
-              Appointments
+            <NavItem href="/app?tab=operations" icon={Bot} isCollapsed={isCollapsed}>
+              Service Planning
             </NavItem>
-            <NavItem href="/app/volunteers" icon={UserCheck} isCollapsed={isCollapsed}>
-              Volunteers
+            <NavItem href="/app/settings/role-matrix" icon={ListChecks} isCollapsed={isCollapsed}>
+              Church Roles
             </NavItem>
-
-            <NavItem href="/app/reports" icon={BarChart2} isCollapsed={isCollapsed}>
-              Reports
+            <NavItem href="/app/settings/scheduling-matrix" icon={CalendarClock} isCollapsed={isCollapsed}>
+              Scheduling
+            </NavItem>
+            <NavItem href="/app?tab=visitors" icon={MapPin} isCollapsed={isCollapsed}>
+              Guest Follow-Up
             </NavItem>
           </div>
         )}
 
-        {/* Finances Section */}
-        <SectionHeader title="Finances" section="finances" />
-        {!collapsedSections.finances && (
+        {/* Onboarding Section */}
+        <SectionHeader title="Onboarding" section="onboarding" />
+        {!collapsedSections.onboarding && (
           <div className="space-y-0.5">
-            <NavItem href="/app/donations" icon={HandHeart} isCollapsed={isCollapsed}>
-              Donations
-            </NavItem>
-            <NavItem href="/app/donors" icon={Users} isCollapsed={isCollapsed}>
-              Donors
-            </NavItem>
-            <NavItem href="/app/pledges" icon={Wallet} isCollapsed={isCollapsed}>
-              Pledges
+            <NavItem href="/app/get-started" icon={MapPin} isCollapsed={isCollapsed} badgeLabel="Setup">
+              Get Started
             </NavItem>
           </div>
         )}
@@ -255,20 +211,33 @@ function SidebarContent({ className, isCollapsed }: { className?: string; isColl
         <SectionHeader title="Administration" section="administration" />
         {!collapsedSections.administration && (
           <div className="space-y-0.5">
-            <NavItem href="/app/settings" icon={Globe} isCollapsed={isCollapsed}>
-              Church Profile
+            <NavItem href="/app/settings" icon={Shield} isCollapsed={isCollapsed}>
+              Organization Settings
             </NavItem>
             <NavItem href="/app/settings/team" icon={Shield} isCollapsed={isCollapsed}>
               Users & Roles
             </NavItem>
-            <NavItem href="/app/settings/integrations" icon={LinkIcon} isCollapsed={isCollapsed}>
-              Integrations
-            </NavItem>
             <NavItem href="/app/settings/billing" icon={CreditCard} isCollapsed={isCollapsed}>
               Billing
             </NavItem>
-            <NavItem href="/app/settings/grace" icon={Sliders} isCollapsed={isCollapsed}>
-              Grace AI Settings
+            <NavItem href="/app/settings/integrations" icon={Plug} isCollapsed={isCollapsed}>
+              Integrations
+            </NavItem>
+            <NavItem href="/app/settings/grace" icon={Sparkles} isCollapsed={isCollapsed}>
+              Grace Runtime
+            </NavItem>
+          </div>
+        )}
+
+        {/* Explore Section (Beta) */}
+        <SectionHeader title="Explore" section="explore" />
+        {!collapsedSections.explore && (
+          <div className="space-y-0.5">
+            <NavItem href="/app/broadcasts" icon={Zap} isCollapsed={isCollapsed} badgeLabel="Beta">
+              Broadcasts
+            </NavItem>
+            <NavItem href="/app/reports" icon={BarChart2} isCollapsed={isCollapsed} badgeLabel="Beta">
+              Reports
             </NavItem>
           </div>
         )}
@@ -304,10 +273,9 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [isUserLoading, isOrgLoading, organization, pathname, router]);
 
-  // BYPASSED: Skip loading state for development
-  // if (isUserLoading || isOrgLoading) {
-  //   return <PageLoader />;
-  // }
+  if (isUserLoading || isOrgLoading) {
+    return <PageLoader />;
+  }
 
   return (
     <TooltipProvider>
@@ -373,9 +341,6 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
           <InAppFooter />
         </div>
-
-        {/* Grace AI Floating Chat Button */}
-        <GraceFab />
       </div>
     </TooltipProvider>
   );

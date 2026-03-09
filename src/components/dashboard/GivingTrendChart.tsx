@@ -8,7 +8,18 @@ const ReactApexChart = dynamic(() => import("react-apexcharts"), {
   ssr: false,
 });
 
-const GivingTrendChart = () => {
+interface KpiData {
+  totalContacts: number;
+  broadcastsSent: number;
+  totalRecipients: number;
+  yearlyGiving: number;
+}
+
+interface GivingTrendChartProps {
+  data?: KpiData;
+}
+
+const GivingTrendChart = ({ data }: GivingTrendChartProps) => {
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {

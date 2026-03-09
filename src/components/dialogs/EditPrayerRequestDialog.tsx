@@ -40,8 +40,8 @@ const formSchema = z.object({
   contactId: z.string().optional(),
   contactName: z.string().optional(),
   content: z.string().min(1, "Request details are required"),
-  urgency: z.string().default("normal"),
-  status: z.string().default("active"),
+  urgency: z.enum(["normal", "urgent", "critical"]).default("normal"),
+  status: z.enum(["new", "praying", "answered", "archived"]).default("new"),
   isAnonymous: z.boolean().default(false),
 });
 
@@ -67,7 +67,7 @@ export function EditPrayerRequestDialog({
     defaultValues: {
       content: prayerRequest?.content || "",
       urgency: prayerRequest?.urgency || "normal",
-      status: prayerRequest?.status || "active",
+      status: prayerRequest?.status || "new",
       contactId: prayerRequest?.contactId || "",
       contactName: prayerRequest?.contactName || "",
       isAnonymous: prayerRequest?.isAnonymous === "true",
@@ -82,7 +82,7 @@ export function EditPrayerRequestDialog({
       form.reset({
         content: prayerRequest.content || "",
         urgency: prayerRequest.urgency || "normal",
-        status: prayerRequest.status || "active",
+        status: prayerRequest.status || "new",
         contactId: prayerRequest.contactId || "",
         contactName: prayerRequest.contactName || "",
         isAnonymous: prayerRequest.isAnonymous === "true",
@@ -92,7 +92,7 @@ export function EditPrayerRequestDialog({
 
   useEffect(() => {
     if (open && organization?.id) {
-      getContacts(organization.id).then(setContacts);
+      getContacts(organization.id).then(r => setContacts(r.contacts));
     }
   }, [open, organization?.id]);
 
@@ -223,7 +223,8 @@ export function EditPrayerRequestDialog({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="new">New</SelectItem>
+                        <SelectItem value="praying">Praying</SelectItem>
                         <SelectItem value="answered">Answered</SelectItem>
                         <SelectItem value="archived">Archived</SelectItem>
                       </SelectContent>
@@ -250,7 +251,6 @@ export function EditPrayerRequestDialog({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="low">Low</SelectItem>
                         <SelectItem value="normal">Normal</SelectItem>
                         <SelectItem value="urgent">Urgent</SelectItem>
                         <SelectItem value="critical">Critical</SelectItem>

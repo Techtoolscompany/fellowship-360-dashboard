@@ -20,10 +20,13 @@ const cronAuthRequired = (handler: CronHandler) => {
     const CRON_USERNAME = process.env.CRON_USERNAME;
     const CRON_PASSWORD = process.env.CRON_PASSWORD;
 
-    // Skip authentication if credentials are not set in environment
+    // Fail-secure: reject all cron requests if credentials are not configured
     if (!CRON_USERNAME || !CRON_PASSWORD) {
-      console.warn("CRON_USERNAME or CRON_PASSWORD not set - skipping authentication");
-      return await handler(req, context);
+      console.error("[cron] CRON_USERNAME or CRON_PASSWORD not set — rejecting request");
+      return NextResponse.json(
+        { success: false, error: "Cron authentication not configured" },
+        { status: 503 }
+      );
     }
 
     // Authentication check

@@ -2,21 +2,28 @@ import { getContacts, getContactCount } from "@/app/actions/contacts";
 import { getTasks } from "@/app/actions/tasks";
 import { getAppointments } from "@/app/actions/operations";
 import { getPrayerRequests } from "@/app/actions/prayer";
+import { db } from "@/db";
+import { graceFollowupProposals, graceGoals, graceMemory } from "@/db/schema";
+import { and, desc, eq, gte, inArray } from "drizzle-orm";
 
 /**
  * ContextManager fetches relevant church data and formats it
  * as a text block that gets injected into Gemini's system prompt.
  * This gives Grace awareness of the church's current state.
  */
-export async function buildChurchContext(orgId: string): Promise<string> {
+export async function buildChurchContext(
+  orgId: string,
+  options?: { contactId?: string | null }
+): Promise<string> {
   const sections: string[] = [];
 
   try {
     // ── Contacts ──
-    const [contacts, contactCount] = await Promise.all([
-      getContacts(orgId).catch(() => []),
+    const [contactsResult, contactCount] = await Promise.all([
+      getContacts(orgId).catch(() => ({ contacts: [], total: 0, page: 1, pageSize: 50, pageCount: 0 })),
       getContactCount(orgId).catch(() => 0),
     ]);
+    const contacts = contactsResult.contacts;
 
     const memberCount = contacts.filter((c: any) => c.memberStatus === "member").length;
     const visitorCount = contacts.filter((c: any) => c.memberStatus === "visitor").length;
@@ -86,6 +93,115 @@ ${upcomingAppts.length > 0 ? `\nUpcoming this week:\n${upcomingAppts.slice(0, 5)
 - Answered: ${answeredRequests.length}
 ${urgentRequests.length > 0 ? `\nUrgent requests:\n${urgentRequests.slice(0, 5).map((p: any) =>
   `- ${p.isAnonymous === "true" ? "Anonymous" : (p.contactName || "Member")}: "${p.content?.slice(0, 80)}..."`
+).join("\n")}` : ""}`);
+
+    // ── Grace Assistant Context ──
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const [latestBriefing, pendingProposals, pendingGoals, orgPatterns, contactMemories] =
+      await Promise.all([
+        db
+          .select({
+            summary: graceMemory.summary,
+            details: graceMemory.details,
+            createdAt: graceMemory.createdAt,
+          })
+          .from(graceMemory)
+          .where(
+            and(
+              eq(graceMemory.organizationId, orgId),
+              eq(graceMemory.memoryType, "daily_briefing")
+            )
+          )
+          .orderBy(desc(graceMemory.createdAt))
+          .limit(1)
+          .then((rows) => rows[0] ?? null),
+        db
+          .select({
+            channel: graceFollowupProposals.proposedChannel,
+            reason: graceFollowupProposals.reason,
+            messageText: graceFollowupProposals.messageText,
+            createdAt: graceFollowupProposals.createdAt,
+          })
+          .from(graceFollowupProposals)
+          .where(
+            and(
+              eq(graceFollowupProposals.organizationId, orgId),
+              eq(graceFollowupProposals.status, "pending"),
+              gte(graceFollowupProposals.createdAt, threeDaysAgo)
+            )
+          )
+          .orderBy(desc(graceFollowupProposals.createdAt))
+          .limit(12),
+        db
+          .select({
+            goalType: graceGoals.goalType,
+            status: graceGoals.status,
+            objectiveText: graceGoals.objectiveText,
+            createdAt: graceGoals.createdAt,
+          })
+          .from(graceGoals)
+          .where(
+            and(
+              eq(graceGoals.organizationId, orgId),
+              inArray(graceGoals.status, ["queued", "in_progress", "waiting"])
+            )
+          )
+          .orderBy(desc(graceGoals.createdAt))
+          .limit(10),
+        db
+          .select({
+            summary: graceMemory.summary,
+            createdAt: graceMemory.createdAt,
+          })
+          .from(graceMemory)
+          .where(
+            and(
+              eq(graceMemory.organizationId, orgId),
+              eq(graceMemory.memoryType, "org_pattern")
+            )
+          )
+          .orderBy(desc(graceMemory.createdAt))
+          .limit(5),
+        options?.contactId
+          ? db
+              .select({
+                summary: graceMemory.summary,
+                details: graceMemory.details,
+                createdAt: graceMemory.createdAt,
+              })
+              .from(graceMemory)
+              .where(
+                and(
+                  eq(graceMemory.organizationId, orgId),
+                  eq(graceMemory.memoryType, "contact_memory"),
+                  eq(graceMemory.contactId, options.contactId)
+                )
+              )
+              .orderBy(desc(graceMemory.createdAt))
+              .limit(8)
+          : Promise.resolve([]),
+      ]);
+
+    const briefingText = latestBriefing
+      ? (latestBriefing.details || latestBriefing.summary).slice(0, 600)
+      : "No briefing generated yet.";
+
+    sections.push(`### Grace Briefing & Queue
+- Latest briefing: ${latestBriefing ? new Date(latestBriefing.createdAt).toLocaleDateString() : "none"}
+- Pending follow-up proposals (3 days): ${pendingProposals.length}
+- Pending goals: ${pendingGoals.length}
+${briefingText ? `\nBriefing summary:\n- ${briefingText}` : ""}
+${pendingProposals.length > 0 ? `\nPending proposals:\n${pendingProposals.slice(0, 6).map((proposal) =>
+  `- ${proposal.channel || "unknown"} | ${proposal.reason || "no reason"} | ${proposal.messageText.slice(0, 100)}`
+).join("\n")}` : ""}
+${pendingGoals.length > 0 ? `\nPending goals:\n${pendingGoals.slice(0, 5).map((goal) =>
+  `- [${goal.status}] ${goal.goalType}: ${goal.objectiveText.slice(0, 110)}`
+).join("\n")}` : ""}
+${orgPatterns.length > 0 ? `\nOrg patterns:\n${orgPatterns.slice(0, 4).map((pattern) =>
+  `- ${pattern.summary.slice(0, 120)}`
+).join("\n")}` : ""}
+${contactMemories.length > 0 ? `\nContact memory:\n${contactMemories.slice(0, 5).map((memory) =>
+  `- ${memory.summary}${memory.details ? ` (${memory.details.slice(0, 90)})` : ""}`
 ).join("\n")}` : ""}`);
 
   } catch (error) {

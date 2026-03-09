@@ -3,11 +3,13 @@
 import { db } from "@/db";
 import { events } from "@/db/schema";
 import { eq, desc, and, gte, lte } from "drizzle-orm";
+import { requireOrgMembership } from "./utils";
 
 export async function getEvents(
   orgId: string,
   dateRange?: { start: Date; end: Date }
 ) {
+  await requireOrgMembership(orgId);
   if (dateRange) {
     return await db
       .select()
@@ -38,6 +40,7 @@ export async function createEvent(data: {
   recurrenceRule?: string;
   organizationId: string;
 }) {
+  await requireOrgMembership(data.organizationId);
   const [event] = await db
     .insert(events)
     .values({
@@ -66,14 +69,31 @@ export async function updateEvent(
     recurrenceRule: string | null;
   }>
 ) {
+  const [existing] = await db
+    .select({ organizationId: events.organizationId })
+    .from(events)
+    .where(eq(events.id, id))
+    .limit(1);
+  if (!existing) throw new Error("Event not found");
+  await requireOrgMembership(existing.organizationId);
+
   const [event] = await db
     .update(events)
     .set(data)
-    .where(eq(events.id, id))
+    .where(and(eq(events.id, id), eq(events.organizationId, existing.organizationId)))
     .returning();
   return event;
 }
 
 export async function deleteEvent(id: string) {
-  await db.delete(events).where(eq(events.id, id));
+  const [existing] = await db
+    .select({ organizationId: events.organizationId })
+    .from(events)
+    .where(eq(events.id, id))
+    .limit(1);
+  if (!existing) return;
+  await requireOrgMembership(existing.organizationId);
+  await db
+    .delete(events)
+    .where(and(eq(events.id, id), eq(events.organizationId, existing.organizationId)));
 }

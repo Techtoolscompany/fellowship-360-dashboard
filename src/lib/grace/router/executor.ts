@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { graceToolAudit } from "@/db/schema/grace-tool-audit";
-import type { GraceSessionContext, ProposedAction, ToolResult } from "../types";
+import type { GraceActionOutcome, GraceSessionContext, ProposedAction, ToolResult } from "../types";
 import { evaluatePolicy } from "../policy/engine";
 import { queueApproval } from "../policy/approvals";
 import { findGraceTool } from "../tools/registry";
@@ -8,6 +8,8 @@ import { findGraceTool } from "../tools/registry";
 async function writeAudit(params: {
   organizationId: string;
   sessionId: string;
+  actorType: GraceSessionContext["actorType"];
+  channel: GraceSessionContext["channel"];
   toolName: string;
   input: Record<string, unknown>;
   output: Record<string, unknown>;
@@ -18,6 +20,8 @@ async function writeAudit(params: {
   await db.insert(graceToolAudit).values({
     organizationId: params.organizationId,
     sessionId: params.sessionId,
+    actorType: params.actorType,
+    channel: params.channel,
     toolName: params.toolName,
     inputJson: params.input,
     outputJson: params.output,
@@ -27,18 +31,39 @@ async function writeAudit(params: {
   });
 }
 
+function didToolRetry(output: Record<string, unknown> | undefined): boolean {
+  if (!output) return false;
+  const retried = output.retried ?? output.wasRetried ?? output.didRetry;
+  if (typeof retried === "boolean") return retried;
+
+  const attempt = output.attempt ?? output.retryCount;
+  return typeof attempt === "number" && attempt > 1;
+}
+
 export async function executePlannedActions(params: {
   actions: ProposedAction[];
   context: GraceSessionContext;
   skipApprovals?: boolean;
-}): Promise<{ results: ToolResult[]; queuedApprovals: string[] }> {
+}): Promise<{ results: ToolResult[]; queuedApprovals: string[]; actionOutcomes: GraceActionOutcome[] }> {
   const results: ToolResult[] = [];
   const queuedApprovals: string[] = [];
+  const actionOutcomes: GraceActionOutcome[] = [];
 
   for (const action of params.actions) {
+    const occurredAt = new Date().toISOString();
     const policy = evaluatePolicy(params.context, action.tool);
     if (!policy.allowed) {
-      results.push({ success: false, error: policy.reason });
+      const errorMessage = policy.reason ?? "Action blocked by policy";
+      results.push({ success: false, error: errorMessage });
+      actionOutcomes.push({
+        actionId: action.id,
+        tool: action.tool,
+        reason: action.reason,
+        requiresApproval: action.requiresApproval,
+        status: "failed",
+        error: errorMessage,
+        occurredAt,
+      });
       continue;
     }
 
@@ -50,13 +75,34 @@ export async function executePlannedActions(params: {
         action,
       });
       queuedApprovals.push(approval.id);
-      results.push({ success: true, output: { approvalQueued: true, approvalId: approval.id } });
+      const queuedOutput = { approvalQueued: true, approvalId: approval.id };
+      results.push({ success: true, output: queuedOutput });
+      actionOutcomes.push({
+        actionId: action.id,
+        tool: action.tool,
+        reason: action.reason,
+        requiresApproval: action.requiresApproval,
+        status: "queued",
+        approvalId: approval.id,
+        output: queuedOutput,
+        occurredAt,
+      });
       continue;
     }
 
     const tool = findGraceTool(action.tool);
     if (!tool) {
-      results.push({ success: false, error: `Tool not found: ${action.tool}` });
+      const errorMessage = `Tool not found: ${action.tool}`;
+      results.push({ success: false, error: errorMessage });
+      actionOutcomes.push({
+        actionId: action.id,
+        tool: action.tool,
+        reason: action.reason,
+        requiresApproval: action.requiresApproval,
+        status: "failed",
+        error: errorMessage,
+        occurredAt,
+      });
       continue;
     }
 
@@ -76,6 +122,8 @@ export async function executePlannedActions(params: {
     await writeAudit({
       organizationId: params.context.organizationId,
       sessionId: params.context.sessionId,
+      actorType: params.context.actorType,
+      channel: params.context.channel,
       toolName: action.tool,
       input: action.input,
       output: result.output ?? { error: result.error ?? "unknown" },
@@ -85,7 +133,17 @@ export async function executePlannedActions(params: {
     });
 
     results.push(result);
+    actionOutcomes.push({
+      actionId: action.id,
+      tool: action.tool,
+      reason: action.reason,
+      requiresApproval: action.requiresApproval,
+      status: !result.success ? "failed" : didToolRetry(result.output) ? "retried" : "executed",
+      output: result.output,
+      error: result.error,
+      occurredAt,
+    });
   }
 
-  return { results, queuedApprovals };
+  return { results, queuedApprovals, actionOutcomes };
 }

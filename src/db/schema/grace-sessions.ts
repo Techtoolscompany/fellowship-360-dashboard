@@ -1,8 +1,18 @@
-import { pgEnum, pgTable, text, timestamp, jsonb, index } from "drizzle-orm/pg-core";
+import { pgEnum, pgTable, text, timestamp, jsonb, index, boolean } from "drizzle-orm/pg-core";
 import { organizations } from "./organization";
 import { churchContacts } from "./church-contacts";
 
-export const graceChannelEnum = pgEnum("grace_channel", ["voice", "sms", "web", "in_app"]);
+export const graceChannelEnum = pgEnum("grace_channel", [
+  "voice",
+  "voice_internal",
+  "voice_public",
+  "sms",
+  "sms_public",
+  "web",
+  "web_public",
+  "in_app",
+]);
+export const graceActorTypeEnum = pgEnum("grace_actor_type", ["staff", "public", "system"]);
 export const graceSessionStatusEnum = pgEnum("grace_session_status", ["open", "closed", "escalated"]);
 
 export const graceSessions = pgTable(
@@ -13,9 +23,16 @@ export const graceSessions = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     channel: graceChannelEnum("channel").notNull(),
+    actorType: graceActorTypeEnum("actor_type").notNull().default("staff"),
+    originSurface: text("origin_surface"),
     contactId: text("contact_id").references(() => churchContacts.id, {
       onDelete: "set null",
     }),
+    matchedContactId: text("matched_contact_id").references(() => churchContacts.id, {
+      onDelete: "set null",
+    }),
+    matchConfidence: text("match_confidence"),
+    requiresReview: boolean("requires_review").notNull().default(false),
     startedAt: timestamp("started_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),

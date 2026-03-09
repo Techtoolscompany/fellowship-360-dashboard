@@ -66,7 +66,7 @@ export default function DonorsPage() {
           <h1 className="text-3xl font-bold text-foreground">Donors</h1>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => toast.info('Advanced filtering coming soon')}><Filter className="w-4 h-4 mr-2" />Filter</Button>
+          <Button variant="outline" size="sm" disabled title="Advanced filtering coming soon"><Filter className="w-4 h-4 mr-2" />Filter</Button>
         </div>
       </div>
 

@@ -5,8 +5,8 @@ import { hash, compare } from "bcryptjs";
 import { eq } from "drizzle-orm";
 
 async function resetPassword() {
-  const email = "admin@example.com";
-  const password = "Test1234!";
+  const email = process.env.RESET_EMAIL || "admin@fellowship360.com";
+  const password = process.env.RESET_PASSWORD || "Test1234!";
 
   console.log(`Resetting password for ${email}...`);
 
@@ -32,7 +32,7 @@ async function resetPassword() {
     const isMatch = await compare(password, updatedUser?.password || "");
     console.log(`   Immediate verification: ${isMatch ? "SUCCESS" : "FAILED"}`);
 
-    console.log("\nYou can now sign in at http://localhost:3002/sign-in");
+    console.log("\nYou can now sign in at http://localhost:3005/sign-in");
   } catch (error) {
     console.error("Error updating password:", error);
   }

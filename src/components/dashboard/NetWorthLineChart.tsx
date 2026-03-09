@@ -7,7 +7,16 @@ const ReactApexChart = dynamic(() => import("react-apexcharts"), {
   ssr: false,
 });
 
-const NetWorthLineChart = () => {
+interface AttendanceData {
+  day: string;
+  count: number;
+}
+
+interface NetWorthLineChartProps {
+  data?: AttendanceData[];
+}
+
+const NetWorthLineChart = ({ data }: NetWorthLineChartProps) => {
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
@@ -51,7 +60,7 @@ const NetWorthLineChart = () => {
       yaxis: { lines: { show: false } },
     },
     xaxis: {
-      categories: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+      categories: data?.map(d => d.day) ?? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
       axisBorder: { show: false },
       axisTicks: { show: false },
       labels: {

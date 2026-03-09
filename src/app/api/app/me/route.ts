@@ -5,6 +5,8 @@ import { db } from "@/db";
 import { users } from "@/db/schema/user";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { coupons } from "@/db/schema/coupons";
+import { paypalContext } from "@/db/schema/paypal";
 
 const updateUserSchema = z.object({
   name: z.string().min(2),
@@ -38,8 +40,32 @@ export const PATCH = withAuthRequired(async (req, context) => {
   return NextResponse.json(updatedUser[0]);
 });
 
-// TODO: Implement actual account deletion logic
-export const DELETE = withAuthRequired(async () => {
-  // For now, just return a success response
+export const DELETE = withAuthRequired(async (req, context) => {
+  const { session } = context;
+  const user = await session.user;
+
+  const deleted = await db.transaction(async (tx) => {
+    await tx
+      .update(paypalContext)
+      .set({ userId: null })
+      .where(eq(paypalContext.userId, user.id));
+
+    await tx
+      .update(coupons)
+      .set({ usedByUserId: null })
+      .where(eq(coupons.usedByUserId, user.id));
+
+    const rows = await tx
+      .delete(users)
+      .where(eq(users.id, user.id))
+      .returning({ id: users.id });
+
+    return rows[0] ?? null;
+  });
+
+  if (!deleted) {
+    return NextResponse.json({ success: false, message: "User not found." }, { status: 404 });
+  }
+
   return NextResponse.json({ success: true });
 });

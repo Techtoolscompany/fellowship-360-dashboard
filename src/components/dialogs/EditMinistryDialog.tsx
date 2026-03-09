@@ -67,7 +67,7 @@ export function EditMinistryDialog({
 
   useEffect(() => {
     if (open && organization?.id) {
-      getContacts(organization.id).then(setContacts);
+      getContacts(organization.id).then(r => setContacts(r.contacts));
     }
   }, [open, organization?.id]);
 

@@ -6,16 +6,54 @@ import {
   FiCalendar,
   FiMessageSquare,
   FiUsers,
+  FiDollarSign,
 } from "react-icons/fi";
 
-const TransactionHistoryCard = () => {
-  // MVP placeholder — will be wired to real activity data
-  const items = [
-    { id: "1", title: "New member joined", detail: "David Kim", date: new Date(Date.now() - 86400000), icon: FiUsers, color: "#6366f1" },
-    { id: "2", title: "Task completed", detail: "Weekly newsletter sent", date: new Date(Date.now() - 2 * 86400000), icon: FiCheckCircle, color: "#059669" },
-    { id: "3", title: "Appointment confirmed", detail: "Membership Interview", date: new Date(Date.now() - 3 * 86400000), icon: FiCalendar, color: "#d97706" },
-    { id: "4", title: "Conversation resolved", detail: "Volunteer training", date: new Date(Date.now() - 4 * 86400000), icon: FiMessageSquare, color: "#4f46e5" },
+interface Activity {
+  id: string;
+  type: 'contact' | 'donation' | 'task' | 'appointment' | 'prayer';
+  title: string;
+  detail: string;
+  date: Date;
+  icon: string;
+  color: string;
+}
+
+interface TransactionHistoryCardProps {
+  activities?: Activity[];
+}
+
+const ActivityCard = ({ activities = [] }: TransactionHistoryCardProps) => {
+  // Default items if no activities provided - church language
+  const defaultItems = [
+    { id: "1", title: "New visitor registered", detail: "David Kim", date: new Date(Date.now() - 86400000), icon: FiUsers, color: "#6366f1" },
+    { id: "2", title: "Task completed", detail: "Weekly sermon notes", date: new Date(Date.now() - 2 * 86400000), icon: FiCheckCircle, color: "#059669" },
+    { id: "3", title: "Pastoral visit scheduled", detail: "Member care visit", date: new Date(Date.now() - 3 * 86400000), icon: FiCalendar, color: "#d97706" },
+    { id: "4", title: "Prayer request received", detail: "Sunday morning prayer", date: new Date(Date.now() - 4 * 86400000), icon: FiMessageSquare, color: "#4f46e5" },
   ];
+
+  // Map activities to display format
+  const getIcon = (iconName: string) => {
+    switch (iconName) {
+      case 'users': return FiUsers;
+      case 'check-circle': return FiCheckCircle;
+      case 'dollar-sign': return FiDollarSign;
+      case 'calendar': return FiCalendar;
+      case 'message-square': return FiMessageSquare;
+      default: return FiUsers;
+    }
+  };
+
+  const items = activities.length > 0 
+    ? activities.map(a => ({
+        id: a.id,
+        title: a.title,
+        detail: a.detail,
+        date: new Date(a.date),
+        icon: getIcon(a.icon),
+        color: a.color,
+      }))
+    : defaultItems;
 
   return (
     <div className="w-full h-full">
@@ -81,4 +119,4 @@ const TransactionHistoryCard = () => {
   );
 };
 
-export default TransactionHistoryCard;
+export default ActivityCard;

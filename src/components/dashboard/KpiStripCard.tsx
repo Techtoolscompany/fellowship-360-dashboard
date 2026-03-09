@@ -28,18 +28,18 @@ interface TaskData {
 const KpiStripCard = ({ data, contacts, tasks }: { data?: KpiData; contacts?: number; tasks?: TaskData }) => {
   const kpis = [
     {
-      label: "Active Members",
+      label: "Total Members",
       value: data ? String(data.totalContacts) : "—",
-      subtitle: "Total contacts",
+      subtitle: "In database",
       icon: Users,
       trend: "",
       trendDirection: "neutral",
       iconBg: "#bbff00",
     },
     {
-      label: "People Reached",
+      label: "Lives Impacted",
       value: data ? data.totalRecipients.toLocaleString() : "—",
-      subtitle: "Via broadcasts",
+      subtitle: "Through messages",
       icon: Megaphone,
       trend: "",
       trendDirection: "neutral",
@@ -55,9 +55,9 @@ const KpiStripCard = ({ data, contacts, tasks }: { data?: KpiData; contacts?: nu
       iconBg: "#bbff00",
     },
     {
-      label: "Broadcasts",
+      label: "Messages Sent",
       value: data ? String(data.broadcastsSent) : "—",
-      subtitle: `${data?.totalRecipients ?? 0} people reached`,
+      subtitle: `${data?.totalRecipients ?? 0} recipients`,
       icon: UserPlus,
       trend: "",
       trendDirection: "neutral",

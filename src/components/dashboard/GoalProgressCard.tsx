@@ -1,13 +1,33 @@
 "use client";
 import React from "react";
-import { FiTrendingUp, FiCalendar } from "react-icons/fi";
+import { FiTrendingUp, FiCalendar, FiHeart } from "react-icons/fi";
 
-const DebtStatusCard = () => {
-  // MVP placeholder — will be wired to real ministry goal data
-  const goalLabel = "Member Engagement";
-  const current = 67;
+interface PrayerData {
+  total: number;
+  pending: number;
+  inProgress: number;
+  answered: number;
+  urgent: number;
+}
+
+interface DebtStatusCardProps {
+  yearlyGiving?: number;
+  prayerData?: PrayerData;
+}
+
+const GoalProgressCard = ({ yearlyGiving = 0, prayerData }: DebtStatusCardProps) => {
+  // Use real data if available, otherwise show placeholders
+  const prayerCount = prayerData?.total ?? 0;
+  const urgentPrayers = prayerData?.urgent ?? 0;
+  const current = prayerCount > 0 ? Math.min((prayerCount / 100) * 100, 100) : 67;
   const target = 100;
-  const percentComplete = Math.min(((current / target) * 100), 100).toFixed(1);
+  const percentComplete = current.toFixed(1);
+
+  // Church-specific: show yearly giving if available
+  const hasGiving = yearlyGiving > 0;
+  const displayValue = hasGiving 
+    ? `$${yearlyGiving.toLocaleString()}` 
+    : `${percentComplete}%`;
 
   return (
     <div
@@ -23,7 +43,7 @@ const DebtStatusCard = () => {
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="mb-1" style={{ fontSize: "20px", fontWeight: 700, color: "#fff" }}>
-              Ministry Goals
+              Church Goals
             </p>
             <div className="flex items-center gap-2">
               <FiCalendar size={14} color="#9ca3af" />
@@ -39,7 +59,7 @@ const DebtStatusCard = () => {
             {current}%
           </p>
           <span style={{ fontSize: "14px", color: "#9ca3af" }}>
-            {goalLabel} target: {target}%
+            Prayer requests target: {target}%
           </span>
         </div>
 
@@ -97,4 +117,4 @@ const DebtStatusCard = () => {
   );
 };
 
-export default DebtStatusCard;
+export default GoalProgressCard;

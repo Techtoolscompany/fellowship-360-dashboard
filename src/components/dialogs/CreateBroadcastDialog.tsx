@@ -38,7 +38,7 @@ import useOrganization from "@/lib/organizations/useOrganization";
 const formSchema = z.object({
   title: z.string().min(1, "Title is required"),
   content: z.string().min(1, "Message content is required"),
-  channel: z.enum(["email", "sms", "push"]),
+  channel: z.literal("sms"),
 });
 
 interface CreateBroadcastDialogProps {
@@ -62,7 +62,7 @@ export function CreateBroadcastDialog({
     defaultValues: {
       title: "",
       content: "",
-      channel: "email",
+      channel: "sms",
     },
   });
 
@@ -95,7 +95,7 @@ export function CreateBroadcastDialog({
         <DialogHeader>
           <DialogTitle>Compose Broadcast</DialogTitle>
           <DialogDescription>
-            Draft a new message to send to your community.
+            Draft a new SMS broadcast to send to your community.
           </DialogDescription>
         </DialogHeader>
 
@@ -131,9 +131,7 @@ export function CreateBroadcastDialog({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="email">Email</SelectItem>
                       <SelectItem value="sms">SMS</SelectItem>
-                      <SelectItem value="push">Push Notification</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />

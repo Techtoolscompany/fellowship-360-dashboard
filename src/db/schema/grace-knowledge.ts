@@ -1,5 +1,10 @@
-import { pgTable, text, timestamp, boolean, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, jsonb, index, pgEnum } from "drizzle-orm/pg-core";
 import { organizations } from "./organization";
+
+export const graceKnowledgeVisibilityEnum = pgEnum("grace_knowledge_visibility", [
+  "public",
+  "internal",
+]);
 
 export const graceKnowledge = pgTable(
   "grace_knowledge",
@@ -12,6 +17,7 @@ export const graceKnowledge = pgTable(
     content: text("content").notNull(),
     tags: jsonb("tags").$type<string[]>().default([]),
     useForGrace: boolean("use_for_grace").notNull().default(true),
+    visibility: graceKnowledgeVisibilityEnum("visibility").notNull().default("internal"),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),

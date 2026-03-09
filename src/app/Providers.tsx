@@ -2,12 +2,12 @@
 
 import { SessionProvider } from "next-auth/react";
 import React from "react";
-import { Toaster } from "sonner";
 import { Suspense } from "react";
 import { Next13ProgressBar } from "next13-progressbar";
 import { SWRConfig } from "swr";
 import { fetcher } from "@/lib/swr/fetcher";
 import { ThemeProvider } from "next-themes";
+import { Toaster } from "@/components/ui/sonner";
 
 function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -27,12 +27,7 @@ function Providers({ children }: { children: React.ReactNode }) {
             />
 
             {children}
-            <Toaster position="top-center" className="dark:hidden" richColors />
-            <Toaster
-              position="top-center"
-              className="hidden dark:block"
-              richColors
-            />
+            <Toaster position="top-center" richColors />
           </SWRConfig>
         </SessionProvider>
       </Suspense>

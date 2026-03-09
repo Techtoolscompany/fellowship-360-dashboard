@@ -9,7 +9,8 @@ type ErrorCodeType =
   | "DODO_CANCEL_BEFORE_SUBSCRIBING"
   | "DODO_MISSING_BILLING_INFO"
   | "PAYPAL_CANCELLED"
-  | "INVALID_PARAMS";
+  | "INVALID_PARAMS"
+  | "PROVIDER_UNAVAILABLE";
 
 type ErrorMessages = {
   [key in ErrorCodeType]?: string;
@@ -27,6 +28,8 @@ const errorMessages: ErrorMessages = {
   PAYPAL_CANCELLED:
     "PayPal subscription was cancelled.",
   INVALID_PARAMS: "Invalid parameters.",
+  PROVIDER_UNAVAILABLE:
+    "This payment provider is currently unavailable. Please use Stripe, DodoPayments, or PayPal.",
 };
 
 export default async function SubscribeErrorPage({

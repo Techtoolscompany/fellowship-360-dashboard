@@ -339,6 +339,11 @@ export default function OrganizationDetailsPage() {
           <Badge variant="outline">{org?.slug}</Badge>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" asChild>
+            <Link href={`/super-admin/organizations/${id}/integrations`}>
+              Integrations
+            </Link>
+          </Button>
           {enableCredits && (
             <Button
               variant="outline"

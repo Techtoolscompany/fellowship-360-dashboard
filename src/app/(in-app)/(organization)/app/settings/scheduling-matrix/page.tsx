@@ -1,0 +1,920 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
+import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
+import useOrganization from "@/lib/organizations/useOrganization";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { FormLabel } from "@/components/ui/form";
+import { Loader2, GripVertical, X, RefreshCw } from "lucide-react";
+import {
+  assignServiceAssignmentSeat,
+  clearServiceAssignmentSeat,
+  generateServiceRunAssignmentsFromTemplate,
+  getServiceRunAssignments,
+  getServiceRuns,
+  getServiceSchedulingMatrix,
+  getServiceTemplates,
+  upsertServiceSchedulingProfile,
+} from "@/app/actions/operations";
+
+type SchedulingMatrixData = Awaited<ReturnType<typeof getServiceSchedulingMatrix>>;
+type SchedulingPersonRow = SchedulingMatrixData["people"][number];
+type ServiceTemplateData = Awaited<ReturnType<typeof getServiceTemplates>>;
+type ServiceRunRow = Awaited<ReturnType<typeof getServiceRuns>>[number];
+type ServiceRunAssignmentRow = Awaited<ReturnType<typeof getServiceRunAssignments>>[number];
+
+type AvailabilitySlotDraft = {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+};
+
+const DAY_OPTIONS: Array<{ label: string; value: number }> = [
+  { label: "Sunday", value: 0 },
+  { label: "Monday", value: 1 },
+  { label: "Tuesday", value: 2 },
+  { label: "Wednesday", value: 3 },
+  { label: "Thursday", value: 4 },
+  { label: "Friday", value: 5 },
+  { label: "Saturday", value: 6 },
+];
+
+function parseRoleList(value: string): string[] {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function roleListIncludes(roles: string[], roleName: string): boolean {
+  const target = roleName.trim().toLowerCase();
+  return roles.some((role) => role.trim().toLowerCase() === target);
+}
+
+function getEnabledRoleNames(templates: ServiceTemplateData): string[] {
+  const names = new Set<string>();
+  for (const templateRow of templates) {
+    for (const slot of templateRow.roleSlots) {
+      if (!slot.isEnabled) continue;
+      const normalized = slot.roleName.trim();
+      if (normalized) names.add(normalized);
+    }
+  }
+  return Array.from(names).sort((a, b) => a.localeCompare(b));
+}
+
+function getRunLabel(row: ServiceRunRow) {
+  const serviceAt = new Date(row.run.serviceAt);
+  const date = Number.isNaN(serviceAt.getTime())
+    ? String(row.run.serviceAt)
+    : serviceAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return `${row.run.name} — ${date}`;
+}
+
+function personDraggableId(person: SchedulingPersonRow): string {
+  if (person.staffUserId) return `staff:${person.staffUserId}`;
+  if (person.volunteerId) return `volunteer:${person.volunteerId}`;
+  return `member:${person.id}`;
+}
+
+function getAssigneeLabel(row: ServiceRunAssignmentRow): string {
+  if (row.contact) return `${row.contact.firstName} ${row.contact.lastName}`.trim();
+  if (row.staff) return row.staff.name || row.staff.email || "Staff";
+  return "";
+}
+
+function getAssigneeInitials(row: ServiceRunAssignmentRow): string {
+  const label = getAssigneeLabel(row);
+  const parts = label.split(" ").filter(Boolean);
+  return (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "");
+}
+
+export default function SchedulingMatrixPage() {
+  const { organization } = useOrganization();
+  const orgId = organization?.id;
+
+  const [activeTab, setActiveTab] = useState<"schedule" | "availability">("schedule");
+
+  // ── Matrix / profile data ──────────────────────────────────────────────────
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [profileSearch, setProfileSearch] = useState("");
+  const [matrixData, setMatrixData] = useState<SchedulingMatrixData | null>(null);
+  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const [enabledRoleNames, setEnabledRoleNames] = useState<string[]>([]);
+  const [scheduleDraft, setScheduleDraft] = useState<{
+    isSchedulable: boolean;
+    preferredRolesText: string;
+    notes: string;
+    availabilitySlots: AvailabilitySlotDraft[];
+  } | null>(null);
+
+  // ── Service runs & assignments ────────────────────────────────────────────
+  const [serviceRunsLoading, setServiceRunsLoading] = useState(true);
+  const [serviceRuns, setServiceRuns] = useState<ServiceRunRow[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+  const [assignments, setAssignments] = useState<ServiceRunAssignmentRow[]>([]);
+  const [assigningSeatId, setAssigningSeatId] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+
+  // Track which runs we've already auto-generated for
+  const autoGeneratedRuns = useRef(new Set<string>());
+
+  // ── Board pool search ─────────────────────────────────────────────────────
+  const [poolSearch, setPoolSearch] = useState("");
+
+  // ── Load scheduling matrix ────────────────────────────────────────────────
+  const loadMatrix = useCallback(async () => {
+    if (!orgId) return;
+    setLoading(true);
+    try {
+      const matrix = await getServiceSchedulingMatrix(orgId);
+      setMatrixData(matrix);
+      setSelectedPersonId((cur) =>
+        cur && matrix.people.some((p) => p.id === cur) ? cur : (matrix.people[0]?.id ?? null)
+      );
+      try {
+        const templates = await getServiceTemplates(orgId);
+        setEnabledRoleNames(getEnabledRoleNames(templates));
+      } catch {
+        setEnabledRoleNames([]);
+      }
+    } catch {
+      toast.error("Failed to load scheduling data");
+    } finally {
+      setLoading(false);
+    }
+  }, [orgId]);
+
+  const loadServiceRuns = useCallback(async () => {
+    if (!orgId) return;
+    setServiceRunsLoading(true);
+    try {
+      const rows = await getServiceRuns(orgId);
+      setServiceRuns(rows);
+      setSelectedRunId((cur) => {
+        if (cur && rows.some((r) => r.run.id === cur)) return cur;
+        const upcoming = rows
+          .filter((r) => new Date(r.run.serviceAt).getTime() >= Date.now())
+          .sort((a, b) => new Date(a.run.serviceAt).getTime() - new Date(b.run.serviceAt).getTime())[0];
+        return upcoming?.run.id ?? rows[0]?.run.id ?? null;
+      });
+    } catch {
+      toast.error("Failed to load services");
+    } finally {
+      setServiceRunsLoading(false);
+    }
+  }, [orgId]);
+
+  const loadAssignments = useCallback(async (runId: string, autoGen = false) => {
+    setAssignmentsLoading(true);
+    try {
+      const rows = await getServiceRunAssignments(runId);
+      setAssignments(rows);
+      // Auto-generate seats if this run has none and we haven't tried before
+      if (rows.length === 0 && autoGen && !autoGeneratedRuns.current.has(runId)) {
+        autoGeneratedRuns.current.add(runId);
+        setGenerating(true);
+        try {
+          await generateServiceRunAssignmentsFromTemplate({ serviceRunId: runId, overwriteExisting: false });
+          const generated = await getServiceRunAssignments(runId);
+          setAssignments(generated);
+        } catch {
+          // No template linked — show empty board, no error
+        } finally {
+          setGenerating(false);
+        }
+      }
+    } catch {
+      toast.error("Failed to load assignments");
+      setAssignments([]);
+    } finally {
+      setAssignmentsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadMatrix(); }, [loadMatrix]);
+  useEffect(() => { loadServiceRuns(); }, [loadServiceRuns]);
+  useEffect(() => {
+    if (!selectedRunId) { setAssignments([]); return; }
+    loadAssignments(selectedRunId, true);
+  }, [loadAssignments, selectedRunId]);
+
+  // ── Profile editor sync ───────────────────────────────────────────────────
+  const selectedPerson = useMemo<SchedulingPersonRow | null>(
+    () => matrixData?.people.find((p) => p.id === selectedPersonId) ?? null,
+    [matrixData, selectedPersonId]
+  );
+
+  useEffect(() => {
+    if (!selectedPerson) { setScheduleDraft(null); return; }
+    setScheduleDraft({
+      isSchedulable: selectedPerson.isSchedulable,
+      preferredRolesText: selectedPerson.preferredRoles.join(", "),
+      notes: selectedPerson.notes || "",
+      availabilitySlots: selectedPerson.availabilitySlots.map((s) => ({
+        dayOfWeek: s.dayOfWeek,
+        startTime: s.startTime,
+        endTime: s.endTime,
+      })),
+    });
+  }, [selectedPerson]);
+
+  // ── Board: people pool ────────────────────────────────────────────────────
+  const assignablePool = useMemo(
+    () => (matrixData?.people ?? []).filter((p) => p.volunteerId || p.staffUserId),
+    [matrixData]
+  );
+
+  const filteredPool = useMemo(() => {
+    if (!poolSearch.trim()) return assignablePool;
+    const q = poolSearch.toLowerCase();
+    return assignablePool.filter((p) =>
+      [p.displayName, p.email, p.volunteerRole, p.staffRole]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q))
+    );
+  }, [assignablePool, poolSearch]);
+
+  // ── Board: group assignments by roleName ───────────────────────────────────
+  const assignmentsByRole = useMemo(() => {
+    const groups: { roleName: string; rows: ServiceRunAssignmentRow[] }[] = [];
+    const seen = new Map<string, ServiceRunAssignmentRow[]>();
+    for (const row of assignments) {
+      const key = row.assignment.roleName || "Unknown Role";
+      if (!seen.has(key)) { seen.set(key, []); groups.push({ roleName: key, rows: seen.get(key)! }); }
+      seen.get(key)!.push(row);
+    }
+    return groups;
+  }, [assignments]);
+
+  // ── Filtered people for availability tab ──────────────────────────────────
+  const filteredProfilePeople = useMemo(() => {
+    const rows = matrixData?.people ?? [];
+    if (!profileSearch.trim()) return rows;
+    const q = profileSearch.toLowerCase();
+    return rows.filter((p) =>
+      [p.displayName, p.email, p.volunteerRole, p.staffRole]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q))
+    );
+  }, [matrixData?.people, profileSearch]);
+
+  const selectedPreferredRoles = useMemo(
+    () => parseRoleList(scheduleDraft?.preferredRolesText ?? ""),
+    [scheduleDraft?.preferredRolesText]
+  );
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
+  const handleAssignPerson = async (
+    assignment: ServiceRunAssignmentRow["assignment"],
+    value: string
+  ) => {
+    setAssigningSeatId(assignment.id);
+    try {
+      if (value.startsWith("volunteer:")) {
+        await assignServiceAssignmentSeat({
+          assignmentId: assignment.id,
+          volunteerId: value.replace("volunteer:", ""),
+          staffUserId: null,
+        });
+      } else if (value.startsWith("staff:")) {
+        await assignServiceAssignmentSeat({
+          assignmentId: assignment.id,
+          volunteerId: null,
+          staffUserId: value.replace("staff:", ""),
+        });
+      }
+      if (selectedRunId) await loadAssignments(selectedRunId);
+      toast.success("Assigned");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to assign");
+    } finally {
+      setAssigningSeatId(null);
+    }
+  };
+
+  const handleClearSeat = async (assignmentId: string) => {
+    setAssigningSeatId(assignmentId);
+    try {
+      await clearServiceAssignmentSeat(assignmentId);
+      if (selectedRunId) await loadAssignments(selectedRunId);
+    } catch {
+      toast.error("Failed to clear seat");
+    } finally {
+      setAssigningSeatId(null);
+    }
+  };
+
+  const handleDragEnd = async (result: DropResult) => {
+    if (!result.destination) return;
+    const assignmentId = result.destination.droppableId;
+    if (assignmentId === "people-pool") return;
+    const personValue = result.draggableId;
+    const targetRow = assignments.find((r) => r.assignment.id === assignmentId);
+    if (!targetRow) return;
+    await handleAssignPerson(targetRow.assignment, personValue);
+  };
+
+  const handleResetSeats = async () => {
+    if (!selectedRunId) return;
+    if (!window.confirm("Reset and regenerate seats for this service?")) return;
+    setGenerating(true);
+    try {
+      const rows = await generateServiceRunAssignmentsFromTemplate({
+        serviceRunId: selectedRunId,
+        overwriteExisting: true,
+      });
+      toast.success(`${rows.length} seat${rows.length === 1 ? "" : "s"} reset`);
+      await loadAssignments(selectedRunId);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to reset seats");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!orgId || !selectedPerson || !scheduleDraft) return;
+    setSaving(true);
+    try {
+      await upsertServiceSchedulingProfile({
+        organizationId: orgId,
+        targetType: selectedPerson.sourceType,
+        contactId: selectedPerson.contactId ?? undefined,
+        staffUserId: selectedPerson.staffUserId ?? undefined,
+        isSchedulable: scheduleDraft.isSchedulable,
+        preferredRoles: parseRoleList(scheduleDraft.preferredRolesText),
+        availabilitySlots: scheduleDraft.availabilitySlots,
+        notes: scheduleDraft.notes.trim() || null,
+      });
+      toast.success("Saved");
+      await loadMatrix();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  return (
+    <div className="flex flex-col gap-6 pb-8">
+      {/* Header */}
+      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-100 p-8 dark:border-slate-800 dark:from-slate-900 dark:to-slate-950">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Settings
+            </p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 dark:text-white">
+              Service Scheduling
+            </h1>
+            <p className="mt-2 max-w-xl text-sm text-slate-600 dark:text-slate-400">
+              Select a service and assign people to each role.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/app/settings/role-matrix">Manage Roles</Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/app/people">People</Link>
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      {/* Service selector */}
+      <div className="flex flex-wrap items-center gap-3">
+        <select
+          value={selectedRunId ?? ""}
+          onChange={(e) => setSelectedRunId(e.target.value || null)}
+          disabled={serviceRunsLoading}
+          className="min-w-0 flex-1 max-w-sm rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium dark:border-slate-700 dark:bg-slate-900"
+        >
+          <option value="">
+            {serviceRunsLoading
+              ? "Loading services..."
+              : serviceRuns.length === 0
+              ? "No services — create one first"
+              : "Select a service"}
+          </option>
+          {serviceRuns.map((r) => (
+            <option key={r.run.id} value={r.run.id}>
+              {getRunLabel(r)}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={loadServiceRuns}
+          disabled={serviceRunsLoading}
+          className="rounded-xl border border-slate-200 p-2.5 text-slate-500 hover:bg-slate-100 disabled:opacity-30 dark:border-slate-700 dark:hover:bg-slate-800"
+          title="Refresh services"
+        >
+          <RefreshCw className={`h-4 w-4 ${serviceRunsLoading ? "animate-spin" : ""}`} />
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1 dark:border-slate-800 dark:bg-slate-900 w-fit">
+        {(["schedule", "availability"] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`rounded-lg px-5 py-2 text-sm font-semibold transition-colors ${
+              activeTab === tab
+                ? "bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white"
+                : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+            }`}
+          >
+            {tab === "schedule" ? "Schedule" : "Availability"}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tab: Schedule ─────────────────────────────────────────────────── */}
+      {activeTab === "schedule" && (
+        <div>
+          {!selectedRunId ? (
+            <div className="rounded-2xl border border-dashed border-slate-300 p-16 text-center dark:border-slate-700">
+              <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">
+                Select a service above to start scheduling
+              </p>
+              {serviceRuns.length === 0 && (
+                <Button variant="outline" className="mt-4" asChild>
+                  <Link href="/app?tab=operations">Create a Service</Link>
+                </Button>
+              )}
+            </div>
+          ) : (generating || assignmentsLoading) && assignments.length === 0 ? (
+            <div className="flex items-center justify-center py-24">
+              <Loader2 className="h-6 w-6 animate-spin text-lime-500" />
+            </div>
+          ) : (
+            <DragDropContext onDragEnd={handleDragEnd}>
+              <div className="grid gap-4 lg:grid-cols-12">
+                {/* Left: People Pool */}
+                <div className="lg:col-span-4">
+                  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/60">
+                    <div className="border-b border-slate-200 p-4 dark:border-slate-800">
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                        People
+                      </h3>
+                      <Input
+                        className="mt-3"
+                        placeholder="Search..."
+                        value={poolSearch}
+                        onChange={(e) => setPoolSearch(e.target.value)}
+                      />
+                    </div>
+                    {loading ? (
+                      <div className="flex items-center justify-center py-12">
+                        <Loader2 className="h-5 w-5 animate-spin text-lime-500" />
+                      </div>
+                    ) : (
+                      <Droppable droppableId="people-pool" isDropDisabled>
+                        {(provided) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.droppableProps}
+                            className="max-h-[520px] space-y-1 overflow-y-auto p-2"
+                          >
+                            {filteredPool.length === 0 ? (
+                              <p className="p-4 text-center text-xs text-slate-500">
+                                No people available.{" "}
+                                <Link
+                                  href="/app/people"
+                                  className="text-lime-600 underline"
+                                >
+                                  Set up volunteers or staff
+                                </Link>{" "}
+                                first.
+                              </p>
+                            ) : (
+                              filteredPool.map((person, index) => {
+                                const dId = personDraggableId(person);
+                                return (
+                                  <Draggable key={dId} draggableId={dId} index={index}>
+                                    {(drag, snapshot) => (
+                                      <div
+                                        ref={drag.innerRef}
+                                        {...drag.draggableProps}
+                                        {...drag.dragHandleProps}
+                                        className={`flex cursor-grab items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm transition-colors active:cursor-grabbing ${
+                                          snapshot.isDragging
+                                            ? "border-lime-400 bg-lime-50 shadow-lg dark:border-lime-500 dark:bg-lime-900/20"
+                                            : "border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-white dark:border-slate-800 dark:bg-slate-950/40"
+                                        }`}
+                                      >
+                                        <GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-lime-100 text-[10px] font-bold text-lime-700 dark:bg-lime-500/15 dark:text-lime-300">
+                                          {person.displayName
+                                            .split(" ")
+                                            .map((n) => n[0])
+                                            .join("")
+                                            .slice(0, 2)
+                                            .toUpperCase()}
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                          <p className="truncate text-xs font-semibold text-slate-900 dark:text-white">
+                                            {person.displayName}
+                                          </p>
+                                          <p className="truncate text-[10px] text-slate-500">
+                                            {person.staffUserId ? "Staff" : "Volunteer"}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </Draggable>
+                                );
+                              })
+                            )}
+                            {provided.placeholder}
+                          </div>
+                        )}
+                      </Droppable>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right: Role Slots */}
+                <div className="lg:col-span-8">
+                  {assignmentsLoading && assignments.length === 0 ? (
+                    <div className="flex items-center justify-center py-24">
+                      <Loader2 className="h-6 w-6 animate-spin text-lime-500" />
+                    </div>
+                  ) : assignments.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-slate-300 p-12 text-center dark:border-slate-700">
+                      <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">
+                        No roles set up for this service
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Make sure you have roles configured in{" "}
+                        <Link
+                          href="/app/settings/role-matrix"
+                          className="text-lime-600 underline"
+                        >
+                          Church Roles
+                        </Link>
+                        , then click below to load them.
+                      </p>
+                      <Button
+                        variant="outline"
+                        className="mt-4"
+                        onClick={handleResetSeats}
+                        disabled={generating}
+                      >
+                        {generating && (
+                          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                        )}
+                        Load Roles for This Service
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {assignmentsByRole.map(({ roleName, rows }) => (
+                        <div
+                          key={roleName}
+                          className="rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/60"
+                        >
+                          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+                            <p className="text-sm font-bold text-slate-900 dark:text-white">
+                              {roleName}
+                            </p>
+                            <p className="text-xs text-slate-400">
+                              {
+                                rows.filter(
+                                  (r) =>
+                                    r.assignment.volunteerId || r.assignment.staffUserId
+                                ).length
+                              }
+                              /{rows.length} filled
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2 p-3">
+                            {rows.map((row) => {
+                              const isFilled = Boolean(
+                                row.assignment.volunteerId || row.assignment.staffUserId
+                              );
+                              const isWorking = assigningSeatId === row.assignment.id;
+                              return (
+                                <Droppable
+                                  key={row.assignment.id}
+                                  droppableId={row.assignment.id}
+                                >
+                                  {(drop, snapshot) => (
+                                    <div
+                                      ref={drop.innerRef}
+                                      {...drop.droppableProps}
+                                      className={`flex min-w-[160px] flex-1 items-center gap-2 rounded-xl border px-3 py-2.5 transition-colors ${
+                                        snapshot.isDraggingOver
+                                          ? "border-lime-400 bg-lime-50 dark:border-lime-500 dark:bg-lime-900/20"
+                                          : isFilled
+                                          ? "border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-900/20"
+                                          : "border-dashed border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-950/40"
+                                      }`}
+                                    >
+                                      {isWorking ? (
+                                        <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                                      ) : isFilled ? (
+                                        <>
+                                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-emerald-100 text-[10px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                                            {getAssigneeInitials(row).toUpperCase()}
+                                          </div>
+                                          <p className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-900 dark:text-white">
+                                            {getAssigneeLabel(row)}
+                                          </p>
+                                          <button
+                                            onClick={() =>
+                                              handleClearSeat(row.assignment.id)
+                                            }
+                                            className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                                          >
+                                            <X className="h-3.5 w-3.5" />
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <p className="text-xs text-slate-400">
+                                          Drag someone here...
+                                        </p>
+                                      )}
+                                      <div className="hidden">{drop.placeholder}</div>
+                                    </div>
+                                  )}
+                                </Droppable>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                      {/* Reset link */}
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleResetSeats}
+                          disabled={generating}
+                          className="text-xs text-slate-400 hover:text-slate-600 disabled:opacity-30 dark:hover:text-slate-300"
+                        >
+                          {generating ? "Resetting..." : "Reset role slots"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </DragDropContext>
+          )}
+        </div>
+      )}
+
+      {/* ── Tab: Availability ────────────────────────────────────────────────── */}
+      {activeTab === "availability" && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900/60">
+          <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+            Configure each person's availability and preferred roles for scheduling.
+          </p>
+          <div className="grid gap-4 lg:grid-cols-12">
+            {/* Person list */}
+            <div className="space-y-3 lg:col-span-5">
+              <Input
+                placeholder="Search..."
+                value={profileSearch}
+                onChange={(e) => setProfileSearch(e.target.value)}
+              />
+              <div className="max-h-[460px] space-y-2 overflow-y-auto rounded-lg border p-2">
+                {loading ? (
+                  <p className="p-3 text-sm text-slate-500">Loading...</p>
+                ) : filteredProfilePeople.length === 0 ? (
+                  <p className="p-3 text-sm text-slate-500">No people found.</p>
+                ) : (
+                  filteredProfilePeople.map((person) => (
+                    <button
+                      key={person.id}
+                      type="button"
+                      onClick={() => setSelectedPersonId(person.id)}
+                      className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                        selectedPersonId === person.id
+                          ? "border-slate-900 bg-slate-100 dark:border-white dark:bg-slate-800"
+                          : "border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900"
+                      }`}
+                    >
+                      <p className="text-sm font-semibold">{person.displayName}</p>
+                      <p className="text-xs text-slate-500">
+                        {person.personType === "paid_staff"
+                          ? "Paid Staff"
+                          : person.personType === "volunteer"
+                          ? "Volunteer"
+                          : "Member"}
+                        {" · "}
+                        {person.isSchedulable ? "Schedulable" : "Not schedulable"}
+                      </p>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Profile editor */}
+            <div className="lg:col-span-7">
+              {!selectedPerson || !scheduleDraft ? (
+                <div className="rounded-lg border border-dashed p-8 text-center text-sm text-slate-500">
+                  Select a person to configure their availability.
+                </div>
+              ) : (
+                <div className="space-y-5 rounded-lg border p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-base font-semibold">
+                        {selectedPerson.displayName}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {selectedPerson.personType === "paid_staff"
+                          ? "Paid Staff"
+                          : selectedPerson.personType === "volunteer"
+                          ? "Volunteer"
+                          : "Member"}
+                        {selectedPerson.email ? ` · ${selectedPerson.email}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500">Schedulable</span>
+                      <Switch
+                        checked={scheduleDraft.isSchedulable}
+                        onCheckedChange={(v) =>
+                          setScheduleDraft((c) => (c ? { ...c, isSchedulable: v } : c))
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <FormLabel>Preferred Roles</FormLabel>
+                    <Input
+                      placeholder="e.g. Greeter, Worship Leader, Sound Tech"
+                      value={scheduleDraft.preferredRolesText}
+                      onChange={(e) =>
+                        setScheduleDraft((c) =>
+                          c ? { ...c, preferredRolesText: e.target.value } : c
+                        )
+                      }
+                    />
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {enabledRoleNames.map((name) => {
+                        const selected = roleListIncludes(selectedPreferredRoles, name);
+                        return (
+                          <Button
+                            key={name}
+                            type="button"
+                            size="sm"
+                            variant={selected ? "default" : "outline"}
+                            onClick={() => {
+                              setScheduleDraft((c) => {
+                                if (!c) return c;
+                                const roles = parseRoleList(c.preferredRolesText);
+                                const next = roleListIncludes(roles, name)
+                                  ? roles.filter(
+                                      (r) =>
+                                        r.trim().toLowerCase() !==
+                                        name.trim().toLowerCase()
+                                    )
+                                  : [...roles, name];
+                                return { ...c, preferredRolesText: next.join(", ") };
+                              });
+                            }}
+                          >
+                            {name}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <FormLabel>Availability Windows</FormLabel>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setScheduleDraft((c) =>
+                            c
+                              ? {
+                                  ...c,
+                                  availabilitySlots: [
+                                    ...c.availabilitySlots,
+                                    { dayOfWeek: 0, startTime: "09:00", endTime: "12:00" },
+                                  ],
+                                }
+                              : c
+                          )
+                        }
+                      >
+                        Add Window
+                      </Button>
+                    </div>
+                    {scheduleDraft.availabilitySlots.length === 0 ? (
+                      <p className="rounded-md border border-dashed p-3 text-xs text-slate-500">
+                        No windows set. Treated as generally available.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {scheduleDraft.availabilitySlots.map((slot, i) => (
+                          <div key={`${slot.dayOfWeek}-${i}`} className="grid grid-cols-12 gap-2">
+                            <select
+                              value={slot.dayOfWeek}
+                              onChange={(e) => {
+                                const next = [...scheduleDraft.availabilitySlots];
+                                next[i] = { ...next[i]!, dayOfWeek: Number(e.target.value) };
+                                setScheduleDraft((c) =>
+                                  c ? { ...c, availabilitySlots: next } : c
+                                );
+                              }}
+                              className="col-span-4 rounded-md border bg-background px-2 py-2 text-sm"
+                            >
+                              {DAY_OPTIONS.map((d) => (
+                                <option key={d.value} value={d.value}>
+                                  {d.label}
+                                </option>
+                              ))}
+                            </select>
+                            <Input
+                              className="col-span-3"
+                              type="time"
+                              value={slot.startTime}
+                              onChange={(e) => {
+                                const next = [...scheduleDraft.availabilitySlots];
+                                next[i] = { ...next[i]!, startTime: e.target.value };
+                                setScheduleDraft((c) =>
+                                  c ? { ...c, availabilitySlots: next } : c
+                                );
+                              }}
+                            />
+                            <Input
+                              className="col-span-3"
+                              type="time"
+                              value={slot.endTime}
+                              onChange={(e) => {
+                                const next = [...scheduleDraft.availabilitySlots];
+                                next[i] = { ...next[i]!, endTime: e.target.value };
+                                setScheduleDraft((c) =>
+                                  c ? { ...c, availabilitySlots: next } : c
+                                );
+                              }}
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="col-span-2"
+                              onClick={() =>
+                                setScheduleDraft((c) =>
+                                  c
+                                    ? {
+                                        ...c,
+                                        availabilitySlots: c.availabilitySlots.filter(
+                                          (_, idx) => idx !== i
+                                        ),
+                                      }
+                                    : c
+                                )
+                              }
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <FormLabel>Notes</FormLabel>
+                    <Textarea
+                      placeholder="Optional notes..."
+                      value={scheduleDraft.notes}
+                      onChange={(e) =>
+                        setScheduleDraft((c) => (c ? { ...c, notes: e.target.value } : c))
+                      }
+                    />
+                  </div>
+
+                  <div className="flex justify-end">
+                    <Button type="button" onClick={handleSaveProfile} disabled={saving}>
+                      {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Save
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

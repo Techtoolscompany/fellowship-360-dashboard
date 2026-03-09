@@ -1,4 +1,4 @@
-"use client";6
+"use client";
 import React, { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { FiChevronDown } from "react-icons/fi";
@@ -7,7 +7,19 @@ const ReactApexChart = dynamic(() => import("react-apexcharts"), {
   ssr: false,
 });
 
-const TrendsBarChart = () => {
+interface AppointmentData {
+  total: number;
+  pending: number;
+  confirmed: number;
+  completed: number;
+  weeklyAttendance: Array<{ day: string; count: number }>;
+}
+
+interface TrendsBarChartProps {
+  data?: AppointmentData;
+}
+
+const TrendsBarChart = ({ data }: TrendsBarChartProps) => {
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {

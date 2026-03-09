@@ -64,6 +64,34 @@
       "when": 1772902800000,
       "tag": "0008_provider_config_org_channel_provider_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1772929430448,
+      "tag": "0009_sms_gateway",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1773019200000,
+      "tag": "0010_service_scheduling_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1773022800000,
+      "tag": "0011_service_role_slot_enabled_flag",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1773208800000,
+      "tag": "0012_grace_memory",
+      "breakpoints": true
     }
   ]
 }

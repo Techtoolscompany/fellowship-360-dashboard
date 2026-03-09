@@ -495,35 +495,32 @@ class StripeWebhookHandler {
 
 async function handler(req: NextRequest) {
   if (req.method === "POST") {
-    let data;
-    let eventType;
-    // Check if webhook signing is configured.
+    // Fail-secure: reject the request if the webhook secret is not configured.
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-    if (webhookSecret) {
-      // Retrieve the event by verifying the signature using the raw body and secret.
-      let event: Stripe.Event;
-      const signature = req.headers.get("stripe-signature") as string;
-
-      try {
-        const body = await req.text();
-        event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
-      } catch (err) {
-        console.error(`⚠️ Webhook signature verification failed.`, err);
-        return NextResponse.json({
-          received: true,
-          error: "Webhook signature verification failed",
-        });
-      }
-      // Extract the object from the event.
-      data = event.data;
-      eventType = event.type;
-    } else {
-      // Webhook signing is recommended, but if the secret is not configured in `config.js`,
-      // retrieve the event data directly from the request body.
-      const body = await req.json();
-      data = body.data;
-      eventType = body.type;
+    if (!webhookSecret) {
+      console.error("[stripe-webhook] STRIPE_WEBHOOK_SECRET not set — rejecting request");
+      return NextResponse.json(
+        { received: false, error: "Webhook not configured" },
+        { status: 503 }
+      );
     }
+
+    // Verify the Stripe signature.
+    let event: Stripe.Event;
+    const signature = req.headers.get("stripe-signature") as string;
+    try {
+      const body = await req.text();
+      event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+    } catch (err) {
+      console.error(`⚠️ Webhook signature verification failed.`, err);
+      return NextResponse.json(
+        { received: false, error: "Webhook signature verification failed" },
+        { status: 400 }
+      );
+    }
+    // Extract the object from the event.
+    const data = event.data;
+    const eventType = event.type;
 
     const handler = new StripeWebhookHandler(data, eventType);
 

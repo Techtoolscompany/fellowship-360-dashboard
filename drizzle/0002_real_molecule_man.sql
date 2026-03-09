@@ -1,0 +1,1 @@
+ALTER TYPE "public"."message_direction" ADD VALUE 'draft';

@@ -5,6 +5,7 @@ import {
   organizationMemberships,
   prayerRequests,
   tasks,
+  graceMemory,
   graceKnowledge,
   graceSessions,
   graceMessages,
@@ -418,6 +419,63 @@ const tasksCreate: GraceTool = {
   },
 };
 
+const memoryWrite: GraceTool = {
+  name: "memory.write",
+  allowedChannels: ["voice", "voice_internal", "in_app"],
+  async execute(input, ctx) {
+    const summary = String(input.summary || "").trim();
+    if (!summary) {
+      return { success: false, error: "summary is required" };
+    }
+
+    const requestedType = String(input.memoryType || "").trim();
+    const memoryType =
+      requestedType === "contact_memory" ||
+      requestedType === "org_pattern" ||
+      requestedType === "daily_briefing"
+        ? requestedType
+        : "contact_memory";
+
+    const contactId = input.contactId ? String(input.contactId) : ctx.contactId ?? null;
+    if (memoryType === "contact_memory" && !contactId) {
+      return { success: false, error: "contact_memory entries require contactId" };
+    }
+
+    const tags = Array.isArray(input.tags)
+      ? input.tags.map((tag) => String(tag).trim()).filter(Boolean)
+      : [];
+    const metadataJson =
+      input.metadataJson && typeof input.metadataJson === "object"
+        ? (input.metadataJson as Record<string, unknown>)
+        : undefined;
+
+    const [created] = await db
+      .insert(graceMemory)
+      .values({
+        organizationId: ctx.organizationId,
+        sessionId: ctx.sessionId,
+        contactId,
+        memoryType,
+        summary,
+        details: input.details ? String(input.details).trim() : null,
+        tags,
+        metadataJson,
+        createdByActorType: ctx.actorType === "staff" ? "staff" : "system",
+        createdByUserId: ctx.userId ?? null,
+      })
+      .returning();
+
+    return {
+      success: true,
+      output: {
+        memoryId: created.id,
+        memoryType: created.memoryType,
+        contactId: created.contactId,
+      },
+    };
+  },
+};
+
 const serviceRunsCreateFromTemplate: GraceTool = {
   name: "serviceRuns.createFromTemplate",
   allowedChannels: ["voice", "voice_internal", "in_app"],
@@ -577,6 +635,194 @@ const pipelinesAddToStage: GraceTool = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Executive assistant — CRUD tools for full data management
+// ---------------------------------------------------------------------------
+
+const contactsSearch: GraceTool = {
+  name: "contacts.search",
+  allowedChannels: ["voice", "voice_internal", "in_app"],
+  async execute(input, ctx) {
+    const query = String(input.query || "").trim();
+    if (!query) return { success: false, error: "query is required" };
+
+    const limit = Math.min(Number(input.limit ?? 10), 25);
+    const statusFilter = input.status ? String(input.status) : null;
+    const term = `%${query}%`;
+
+    const nameOrContactMatch = or(
+      ilike(churchContacts.firstName, term),
+      ilike(churchContacts.lastName, term),
+      ilike(churchContacts.email, term),
+      ilike(churchContacts.phone, term)
+    );
+
+    const where = statusFilter
+      ? and(
+          eq(churchContacts.organizationId, ctx.organizationId),
+          nameOrContactMatch,
+          eq(churchContacts.memberStatus, statusFilter as any)
+        )
+      : and(eq(churchContacts.organizationId, ctx.organizationId), nameOrContactMatch);
+
+    const rows = await db
+      .select({
+        id: churchContacts.id,
+        firstName: churchContacts.firstName,
+        lastName: churchContacts.lastName,
+        email: churchContacts.email,
+        phone: churchContacts.phone,
+        memberStatus: churchContacts.memberStatus,
+      })
+      .from(churchContacts)
+      .where(where)
+      .limit(limit);
+
+    return { success: true, output: { contacts: rows, count: rows.length } };
+  },
+};
+
+const contactsUpdate: GraceTool = {
+  name: "contacts.update",
+  allowedChannels: ["voice", "voice_internal", "in_app"],
+  async execute(input, _ctx) {
+    const contactId = String(input.contactId || "").trim();
+    if (!contactId) return { success: false, error: "contactId is required" };
+
+    const data: Record<string, unknown> = {};
+    if (input.firstName !== undefined) data.firstName = String(input.firstName);
+    if (input.lastName !== undefined) data.lastName = String(input.lastName);
+    if (input.email !== undefined) data.email = input.email ? String(input.email) : null;
+    if (input.phone !== undefined) data.phone = input.phone ? String(input.phone) : null;
+    if (input.memberStatus !== undefined) data.memberStatus = String(input.memberStatus);
+    if (input.notes !== undefined) data.notes = input.notes ? String(input.notes) : null;
+    if (input.source !== undefined) data.source = String(input.source);
+
+    if (Object.keys(data).length === 0) {
+      return { success: false, error: "No fields provided to update" };
+    }
+
+    const { updateContact } = await import("@/app/actions/contacts");
+    const updated = await updateContact(contactId, data as any);
+    return { success: true, output: { contactId: updated.id, updated: data } };
+  },
+};
+
+const tasksUpdate: GraceTool = {
+  name: "tasks.update",
+  allowedChannels: ["voice", "voice_internal", "in_app"],
+  async execute(input, ctx) {
+    const taskId = String(input.taskId || "").trim();
+    if (!taskId) return { success: false, error: "taskId is required" };
+
+    const { updateTask } = await import("@/app/actions/tasks");
+    const updated = await updateTask(taskId, {
+      organizationId: ctx.organizationId,
+      ...(input.title !== undefined && { title: String(input.title) }),
+      ...(input.description !== undefined && {
+        description: input.description ? String(input.description) : null,
+      }),
+      ...(input.status !== undefined && { status: String(input.status) }),
+      ...(input.priority !== undefined && { priority: String(input.priority) }),
+      ...(input.dueDate !== undefined && {
+        dueDate: input.dueDate ? new Date(String(input.dueDate)) : null,
+      }),
+    });
+    return { success: true, output: { taskId: updated.id, status: updated.status } };
+  },
+};
+
+const tasksComplete: GraceTool = {
+  name: "tasks.complete",
+  allowedChannels: ["voice", "voice_internal", "in_app"],
+  async execute(input, ctx) {
+    const taskId = String(input.taskId || "").trim();
+    if (!taskId) return { success: false, error: "taskId is required" };
+
+    const { updateTask } = await import("@/app/actions/tasks");
+    await updateTask(taskId, { organizationId: ctx.organizationId, status: "done" });
+    return { success: true, output: { completed: true, taskId } };
+  },
+};
+
+const prayerRequestsUpdate: GraceTool = {
+  name: "prayerRequests.update",
+  allowedChannels: ["voice", "voice_internal", "in_app"],
+  async execute(input, _ctx) {
+    const requestId = String(input.requestId || "").trim();
+    if (!requestId) return { success: false, error: "requestId is required" };
+
+    const { updatePrayerRequest } = await import("@/app/actions/prayer");
+    const updated = await updatePrayerRequest(requestId, {
+      ...(input.status !== undefined && { status: String(input.status) }),
+      ...(input.urgency !== undefined && { urgency: String(input.urgency) }),
+      ...(input.response !== undefined && { response: String(input.response) }),
+      ...(input.assignedTeam !== undefined && {
+        assignedTeam: input.assignedTeam ? String(input.assignedTeam) : null,
+      }),
+    });
+    return { success: true, output: { requestId: updated.id, status: updated.status } };
+  },
+};
+
+const appointmentsCancel: GraceTool = {
+  name: "appointments.cancel",
+  allowedChannels: ["voice", "voice_internal", "in_app"],
+  requiresApproval: true,
+  async execute(input, _ctx) {
+    const appointmentId = String(input.appointmentId || "").trim();
+    if (!appointmentId) return { success: false, error: "appointmentId is required" };
+
+    const { updateAppointment } = await import("@/app/actions/operations");
+    await updateAppointment(appointmentId, { status: "cancelled" });
+    return { success: true, output: { cancelled: true, appointmentId } };
+  },
+};
+
+const pipelineMoveStage: GraceTool = {
+  name: "pipeline.moveStage",
+  allowedChannels: ["voice", "voice_internal", "in_app"],
+  async execute(input, _ctx) {
+    const itemId = String(input.itemId || "").trim();
+    const stageId = String(input.stageId || "").trim();
+    if (!itemId || !stageId) return { success: false, error: "itemId and stageId are required" };
+
+    const { updateItemStage } = await import("@/app/actions/pipeline");
+    await updateItemStage(itemId, stageId, 0);
+    return { success: true, output: { moved: true, itemId, stageId } };
+  },
+};
+
+const ministriesAddMember: GraceTool = {
+  name: "ministries.addMember",
+  allowedChannels: ["voice", "voice_internal", "in_app"],
+  async execute(input, _ctx) {
+    const ministryId = String(input.ministryId || "").trim();
+    const contactId = String(input.contactId || "").trim();
+    if (!ministryId || !contactId) {
+      return { success: false, error: "ministryId and contactId are required" };
+    }
+
+    const role = input.role ? String(input.role) : undefined;
+    const { addMinistryMember } = await import("@/app/actions/ministries");
+    await addMinistryMember(ministryId, contactId, role);
+    return { success: true, output: { added: true, ministryId, contactId } };
+  },
+};
+
+const conversationsResolve: GraceTool = {
+  name: "conversations.resolve",
+  allowedChannels: ["voice", "voice_internal", "in_app"],
+  async execute(input, _ctx) {
+    const conversationId = String(input.conversationId || "").trim();
+    if (!conversationId) return { success: false, error: "conversationId is required" };
+
+    const { updateConversationStatus } = await import("@/app/actions/communications");
+    await updateConversationStatus(conversationId, "resolved");
+    return { success: true, output: { resolved: true, conversationId } };
+  },
+};
+
 export const graceTools: GraceTool[] = [
   contactsUpsert,
   churchInfoSearch,
@@ -588,10 +834,21 @@ export const graceTools: GraceTool[] = [
   staffAlert,
   handoffTransfer,
   tasksCreate,
+  memoryWrite,
   serviceRunsCreateFromTemplate,
   serviceRunsAutoStaff,
   serviceAssignmentsSendOfferSMS,
   pipelinesAddToStage,
+  // Executive assistant CRUD tools
+  contactsSearch,
+  contactsUpdate,
+  tasksUpdate,
+  tasksComplete,
+  prayerRequestsUpdate,
+  appointmentsCancel,
+  pipelineMoveStage,
+  ministriesAddMember,
+  conversationsResolve,
 ];
 
 export function findGraceTool(name: string): GraceTool | undefined {

@@ -8,6 +8,8 @@ import { enableCredits, onNewOrganizationCredits } from "../credits/config";
 import { addDays } from "date-fns";
 import { addCredits } from "../credits/recalculate";
 import { CreditType } from "../credits/credits";
+import { inngest } from "@/lib/inngest/client";
+import { INNGEST_EVENTS, buildOrgCreatedIdempotencyKey } from "@/lib/inngest/events";
 
 export type CreateOrganizationInput = {
   name: string;
@@ -86,6 +88,17 @@ export async function createOrganization({
       );
     }
   }
+
+  // Fire ORG_CREATED event to auto-provision AI config and provider configs
+  await inngest.send({
+    id: buildOrgCreatedIdempotencyKey({ organizationId: organization.id }),
+    name: INNGEST_EVENTS.ORG_CREATED,
+    data: {
+      organizationId: organization.id,
+      churchName: name,
+      idempotencyKey: buildOrgCreatedIdempotencyKey({ organizationId: organization.id }),
+    },
+  });
 
   return organization;
 }

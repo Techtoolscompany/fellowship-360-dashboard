@@ -189,10 +189,11 @@ export function CreateContactDialog({
                     </FormControl>
                     <SelectContent>
                       <SelectItem value="visitor">Visitor</SelectItem>
+                      <SelectItem value="prospect">Prospect</SelectItem>
+                      <SelectItem value="regular_attendee">Regular Attendee</SelectItem>
                       <SelectItem value="member">Member</SelectItem>
-                      <SelectItem value="child">Child</SelectItem>
-                      <SelectItem value="volunteer">Volunteer</SelectItem>
                       <SelectItem value="leader">Leader</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />

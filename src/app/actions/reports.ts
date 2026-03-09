@@ -13,6 +13,7 @@ import {
   volunteers,
 } from "@/db/schema";
 import { and, eq, gte, sql } from "drizzle-orm";
+import { requireOrgMembership } from "./utils";
 
 type Timeframe = "week" | "month" | "quarter" | "year";
 
@@ -59,6 +60,7 @@ function percentChange(current: number, previous: number) {
 }
 
 export async function getReportsData(orgId: string, timeframe: Timeframe = "month") {
+  await requireOrgMembership(orgId);
   const windowStart = getWindowStart(timeframe);
   const previousWindowStart = new Date(windowStart);
 

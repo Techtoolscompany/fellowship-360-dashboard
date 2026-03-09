@@ -6,17 +6,38 @@ import { applyRateLimit, getRateLimitHeaders } from "@/lib/rate-limiter";
 
 const { rewrite: rewriteLLM } = rewritePath("/docs/*path", "/llms.mdx/*path");
 
+// ── Security Headers applied to all responses ──
+const SECURITY_HEADERS: Record<string, string> = {
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+};
+
+function applySecurityHeaders(response: NextResponse): NextResponse {
+  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+    response.headers.set(key, value);
+  }
+  return response;
+}
+
+function secureNext(): NextResponse {
+  return applySecurityHeaders(NextResponse.next());
+}
+
 export async function proxy(req: NextRequest) {
   // ── Rate limiting for API routes ──
   if (req.nextUrl.pathname.startsWith("/api")) {
     const rateLimitResponse = await applyRateLimit(req);
-    if (rateLimitResponse) return rateLimitResponse;
+    if (rateLimitResponse) return applySecurityHeaders(rateLimitResponse);
   }
 
   if (isMarkdownPreferred(req)) {
     const result = rewriteLLM(req.nextUrl.pathname);
     if (result) {
-      return NextResponse.rewrite(new URL(result, req.nextUrl));
+      return applySecurityHeaders(
+        NextResponse.rewrite(new URL(result, req.nextUrl))
+      );
     }
   }
 
@@ -29,7 +50,7 @@ export async function proxy(req: NextRequest) {
     req.nextUrl.pathname.startsWith("/sign-out");
 
   if (isAuthPage) {
-    return NextResponse.next();
+    return secureNext();
   }
 
   if (req.nextUrl.pathname.startsWith("/app")) {
@@ -38,23 +59,41 @@ export async function proxy(req: NextRequest) {
       if (req.nextUrl.search) {
         callbackUrl += req.nextUrl.search;
       }
-      return NextResponse.redirect(
-        new URL(
-          `/sign-in?error=unauthorized&callbackUrl=${encodeURIComponent(callbackUrl)}`,
-          req.url
+      return applySecurityHeaders(
+        NextResponse.redirect(
+          new URL(
+            `/sign-in?error=unauthorized&callbackUrl=${encodeURIComponent(callbackUrl)}`,
+            req.url
+          )
         )
       );
     }
-    return NextResponse.next();
+    return secureNext();
   }
   
-  const isAPI = req.nextUrl.pathname.startsWith("/api/app");
+  // ── Auth-gated internal API routes ──
+  const isAppAPI = req.nextUrl.pathname.startsWith("/api/app");
+  const isGraceAPI = req.nextUrl.pathname.startsWith("/api/grace");
+  const isElevenLabsAPI = req.nextUrl.pathname.startsWith("/api/elevenlabs");
 
-  if (isAPI) {
+  if (isAppAPI || isGraceAPI || isElevenLabsAPI) {
     if (!isAuth) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return applySecurityHeaders(
+        NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      );
     }
-    const response = NextResponse.next();
+    const response = secureNext();
+    const headers = getRateLimitHeaders(req);
+    for (const [key, value] of Object.entries(headers)) {
+      response.headers.set(key, value);
+    }
+    return response;
+  }
+
+  // ── Webhook routes: no session auth (validated by signature in handler) ──
+  if (req.nextUrl.pathname.startsWith("/api/webhooks") ||
+      req.nextUrl.pathname.startsWith("/api/sms-gateway")) {
+    const response = secureNext();
     const headers = getRateLimitHeaders(req);
     for (const [key, value] of Object.entries(headers)) {
       response.headers.set(key, value);
@@ -65,8 +104,10 @@ export async function proxy(req: NextRequest) {
   if (req.nextUrl.pathname.startsWith("/super-admin")) {
     const email = session?.user?.email;
     if (!email) {
-      return NextResponse.redirect(
-        new URL("/sign-in?error=unauthorized", req.url)
+      return applySecurityHeaders(
+        NextResponse.redirect(
+          new URL("/sign-in?error=unauthorized", req.url)
+        )
       );
     }
     const isSuperAdmin =
@@ -74,16 +115,18 @@ export async function proxy(req: NextRequest) {
     const hasAccess = isSuperAdmin && !!email;
 
     if (!hasAccess) {
-      return NextResponse.redirect(
-        new URL("/sign-in?error=unauthorized", req.url)
+      return applySecurityHeaders(
+        NextResponse.redirect(
+          new URL("/sign-in?error=unauthorized", req.url)
+        )
       );
     }
     // Allow access to super admin pages
-    return NextResponse.next();
+    return secureNext();
   }
 
   if (req.nextUrl.pathname.startsWith("/api")) {
-    const response = NextResponse.next();
+    const response = secureNext();
     const headers = getRateLimitHeaders(req);
     for (const [key, value] of Object.entries(headers)) {
       response.headers.set(key, value);
@@ -91,7 +134,7 @@ export async function proxy(req: NextRequest) {
     return response;
   }
 
-  return NextResponse.next();
+  return secureNext();
 }
 
 export const config = {

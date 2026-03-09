@@ -1,10 +1,24 @@
-export type GraceChannel = "voice" | "sms" | "web" | "in_app";
+export type GraceChannel =
+  | "voice"
+  | "voice_internal"
+  | "voice_public"
+  | "sms"
+  | "sms_public"
+  | "web"
+  | "web_public"
+  | "in_app";
+
+export type GraceActorType = "staff" | "public" | "system";
+
+export type GraceMatchTier = "high" | "medium" | "low";
 
 export type GraceIntent =
   | "info_request"
   | "prayer_request"
   | "appointment_request"
   | "follow_up_request"
+  | "contact_request"
+  | "report_request"
   | "emergency"
   | "unknown";
 
@@ -16,15 +30,33 @@ export interface SlotState {
   urgency?: "normal" | "urgent" | "critical";
   preferredTime?: string;
   appointmentTitle?: string;
+  stageName?: string;
+  note?: string;
+  matchedContactId?: string;
+  matchTier?: GraceMatchTier;
   [key: string]: unknown;
+}
+
+export interface OrgPolicyOverride {
+  approvalsEnabled: boolean;
+  highRiskTools: string[];
+  allowedPublicTools: string[];
 }
 
 export interface GraceSessionContext {
   organizationId: string;
   sessionId: string;
   channel: GraceChannel;
+  actorType: GraceActorType;
   userId?: string;
   contactId?: string | null;
+  originSurface?: string;
+  matchConfidence?: GraceMatchTier | null;
+  policy?: OrgPolicyOverride;
+  providerContext?: {
+    orgSlug?: string;
+    provider?: string;
+  };
 }
 
 export interface ToolRequest {
@@ -45,6 +77,20 @@ export interface ProposedAction {
   input: Record<string, unknown>;
   reason: string;
   requiresApproval: boolean;
+}
+
+export type GraceActionOutcomeStatus = "executed" | "queued" | "failed" | "retried";
+
+export interface GraceActionOutcome {
+  actionId: string;
+  tool: string;
+  reason: string;
+  requiresApproval: boolean;
+  status: GraceActionOutcomeStatus;
+  occurredAt: string;
+  approvalId?: string;
+  output?: Record<string, unknown>;
+  error?: string;
 }
 
 export interface PolicyDecision {
@@ -70,4 +116,5 @@ export interface GraceRouterOutput {
   intent: GraceIntent;
   state: SlotState;
   proposedActions: ProposedAction[];
+  actionOutcomes: GraceActionOutcome[];
 }

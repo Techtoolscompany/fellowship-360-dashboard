@@ -126,7 +126,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      allowDangerousEmailAccountLinking: true,
+      // NOTE: allowDangerousEmailAccountLinking removed for security.
+      // Users must use the same provider they originally signed up with.
     }),
     emailProvider,
     // Password-based authentication

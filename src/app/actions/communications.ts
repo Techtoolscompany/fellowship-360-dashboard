@@ -9,12 +9,48 @@ import {
   churchContacts,
 } from "@/db/schema";
 import { eq, desc, and, sql } from "drizzle-orm";
+import { requireOrgMembership } from "./utils";
+
+async function requireConversationAccess(conversationId: string) {
+  const [conversation] = await db
+    .select({ id: conversations.id, organizationId: conversations.organizationId })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId))
+    .limit(1);
+  if (!conversation) throw new Error("Conversation not found");
+  await requireOrgMembership(conversation.organizationId);
+  return conversation;
+}
+
+async function requireBroadcastAccess(broadcastId: string) {
+  const [broadcast] = await db
+    .select()
+    .from(broadcasts)
+    .where(eq(broadcasts.id, broadcastId))
+    .limit(1);
+  if (!broadcast) throw new Error("Broadcast not found");
+  await requireOrgMembership(broadcast.organizationId);
+  return broadcast;
+}
+
+async function requireTemplateAccess(templateId: string) {
+  const [template] = await db
+    .select()
+    .from(messageTemplates)
+    .where(eq(messageTemplates.id, templateId))
+    .limit(1);
+  if (!template) throw new Error("Template not found");
+  await requireOrgMembership(template.organizationId);
+  return template;
+}
 
 // ── Conversations ──
 export async function getConversations(
   orgId: string,
   filters?: { status?: string }
 ) {
+  await requireOrgMembership(orgId);
+
   if (filters?.status) {
     return await db
       .select({ conversation: conversations, contact: churchContacts })
@@ -40,6 +76,7 @@ export async function getConversations(
 }
 
 export async function getConversationMessages(conversationId: string) {
+  await requireConversationAccess(conversationId);
   return await db
     .select()
     .from(messages)
@@ -54,6 +91,7 @@ export async function createConversation(data: {
   assigneeId?: string;
   organizationId: string;
 }) {
+  await requireOrgMembership(data.organizationId);
   const [conversation] = await db
     .insert(conversations)
     .values({
@@ -74,6 +112,7 @@ export async function addMessage(data: {
   senderType?: string;
   senderId?: string;
 }) {
+  const conversation = await requireConversationAccess(data.conversationId);
   const [message] = await db
     .insert(messages)
     .values({
@@ -89,7 +128,12 @@ export async function addMessage(data: {
   await db
     .update(conversations)
     .set({ lastMessageAt: new Date(), updatedAt: new Date() })
-    .where(eq(conversations.id, data.conversationId));
+    .where(
+      and(
+        eq(conversations.id, data.conversationId),
+        eq(conversations.organizationId, conversation.organizationId)
+      )
+    );
 
   return message;
 }
@@ -98,16 +142,18 @@ export async function updateConversationStatus(
   id: string,
   status: string
 ) {
+  const existing = await requireConversationAccess(id);
   const [conversation] = await db
     .update(conversations)
     .set({ status: status as any, updatedAt: new Date() })
-    .where(eq(conversations.id, id))
+    .where(and(eq(conversations.id, id), eq(conversations.organizationId, existing.organizationId)))
     .returning();
   return conversation;
 }
 
 // ── Broadcasts ──
 export async function getBroadcasts(orgId: string) {
+  await requireOrgMembership(orgId);
   return await db
     .select()
     .from(broadcasts)
@@ -123,6 +169,7 @@ export async function createBroadcast(data: {
   scheduledAt?: Date;
   organizationId: string;
 }) {
+  await requireOrgMembership(data.organizationId);
   const [broadcast] = await db
     .insert(broadcasts)
     .values({
@@ -145,11 +192,17 @@ export async function updateBroadcast(
     channel: string;
   }>
 ) {
+  const existing = await requireBroadcastAccess(id);
   const [broadcast] = await db
     .update(broadcasts)
-    .set({ ...data, updatedAt: new Date() } as any)
-    .where(eq(broadcasts.id, id))
+    .set({ ...data } as any)
+    .where(and(eq(broadcasts.id, id), eq(broadcasts.organizationId, existing.organizationId)))
     .returning();
+
+  if (!broadcast) {
+    throw new Error("Broadcast not found");
+  }
+
   return broadcast;
 }
 
@@ -158,6 +211,7 @@ export async function updateBroadcastStatus(
   status: string,
   stats?: { totalRecipients?: number; totalDelivered?: number }
 ) {
+  const existing = await requireBroadcastAccess(id);
   const [broadcast] = await db
     .update(broadcasts)
     .set({
@@ -165,13 +219,65 @@ export async function updateBroadcastStatus(
       sentAt: status === "sent" ? new Date() : undefined,
       ...stats,
     } as any)
-    .where(eq(broadcasts.id, id))
+    .where(and(eq(broadcasts.id, id), eq(broadcasts.organizationId, existing.organizationId)))
     .returning();
+
+  if (!broadcast) {
+    throw new Error("Broadcast not found");
+  }
+
+  return broadcast;
+}
+
+export async function triggerBroadcast(id: string) {
+  const broadcast = await requireBroadcastAccess(id);
+  if (broadcast.channel !== "sms") {
+    throw new Error("Only SMS broadcasts are supported in this demo.");
+  }
+  if (broadcast.status !== "draft" && broadcast.status !== "scheduled") {
+    throw new Error("Only draft or scheduled broadcasts can be sent.");
+  }
+
+  const { inngest } = await import("@/lib/inngest/client");
+  const {
+    INNGEST_EVENTS,
+    buildBroadcastSendIdempotencyKey,
+  } = await import("@/lib/inngest/events");
+  const idempotencyKey = buildBroadcastSendIdempotencyKey({
+    organizationId: broadcast.organizationId,
+    broadcastId: id,
+  });
+
+  await inngest.send({
+    id: idempotencyKey,
+    name: INNGEST_EVENTS.COMMUNICATIONS_BROADCAST_SEND_REQUESTED,
+    data: {
+      organizationId: broadcast.organizationId,
+      broadcastId: id,
+      idempotencyKey,
+    },
+  });
+
+  return broadcast;
+}
+
+export async function deleteBroadcast(id: string) {
+  const existing = await requireBroadcastAccess(id);
+  const [broadcast] = await db
+    .delete(broadcasts)
+    .where(and(eq(broadcasts.id, id), eq(broadcasts.organizationId, existing.organizationId)))
+    .returning();
+
+  if (!broadcast) {
+    throw new Error("Broadcast not found");
+  }
+
   return broadcast;
 }
 
 // ── Templates ──
 export async function getTemplates(orgId: string) {
+  await requireOrgMembership(orgId);
   return await db
     .select()
     .from(messageTemplates)
@@ -187,6 +293,7 @@ export async function createTemplate(data: {
   variables?: string[];
   organizationId: string;
 }) {
+  await requireOrgMembership(data.organizationId);
   const [template] = await db
     .insert(messageTemplates)
     .values({
@@ -211,20 +318,30 @@ export async function updateTemplate(
     variables: string[] | null;
   }>
 ) {
+  const existing = await requireTemplateAccess(id);
   const [template] = await db
     .update(messageTemplates)
     .set({ ...data, updatedAt: new Date() } as any)
-    .where(eq(messageTemplates.id, id))
+    .where(and(eq(messageTemplates.id, id), eq(messageTemplates.organizationId, existing.organizationId)))
     .returning();
+
+  if (!template) {
+    throw new Error("Template not found");
+  }
+
   return template;
 }
 
 export async function deleteTemplate(id: string) {
-  await db.delete(messageTemplates).where(eq(messageTemplates.id, id));
+  const existing = await requireTemplateAccess(id);
+  await db
+    .delete(messageTemplates)
+    .where(and(eq(messageTemplates.id, id), eq(messageTemplates.organizationId, existing.organizationId)));
 }
 
 // ── Stats ──
 export async function getConversationStats(orgId: string) {
+  await requireOrgMembership(orgId);
   const [stats] = await db
     .select({
       total: sql<number>`count(*)`,
@@ -238,6 +355,7 @@ export async function getConversationStats(orgId: string) {
 }
 
 export async function getPhoneCalls(orgId: string) {
+  await requireOrgMembership(orgId);
   return await db
     .select({
       conversation: conversations,

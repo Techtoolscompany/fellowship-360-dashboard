@@ -23,7 +23,7 @@ const GRACE_SYSTEM_INSTRUCTION = `You are Grace, an AI assistant for Fellowship 
 - Use markdown formatting for lists and emphasis when helpful
 - Keep responses focused and actionable`;
 
-const MODEL_NAME = "gemini-2.0-flash";
+const MODEL_NAME = "gemini-2.5-flash";
 
 const SAFETY_SETTINGS = [
   {
@@ -54,10 +54,9 @@ class GeminiClient {
 
   constructor() {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error("GEMINI_API_KEY environment variable is not set");
-    }
-    this.genAI = new GoogleGenerativeAI(apiKey);
+    // We intentionally don't throw an error here so the app can still boot without an API key.
+    // Instead, we initialize genAI with a dummy key or null, and handle the error at the call site.
+    this.genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null as any;
   }
 
   /**
@@ -66,14 +65,22 @@ class GeminiClient {
   async chat(
     userMessage: string,
     history: ChatMessage[] = [],
-    contextData?: string
+    contextData?: string,
+    systemPrompt?: string
   ): Promise<string> {
+    if (!this.genAI) {
+      throw new Error("Grace AI is not configured. Please add a valid GEMINI_API_KEY to your environment variables.");
+    }
+    
+    // Choose base instruction
+    const baseInstruction = systemPrompt || GRACE_SYSTEM_INSTRUCTION;
+
     const model = this.genAI.getGenerativeModel({
       model: MODEL_NAME,
       safetySettings: SAFETY_SETTINGS,
       systemInstruction: contextData
-        ? `${GRACE_SYSTEM_INSTRUCTION}\n\n## Current Church Data\n${contextData}`
-        : GRACE_SYSTEM_INSTRUCTION,
+        ? `${baseInstruction}\n\n## Current Church Data\n${contextData}`
+        : baseInstruction,
     });
 
     const chat = model.startChat({
@@ -111,14 +118,23 @@ class GeminiClient {
   async *chatStream(
     userMessage: string,
     history: ChatMessage[] = [],
-    contextData?: string
+    contextData?: string,
+    systemPrompt?: string
   ): AsyncGenerator<string, void, unknown> {
+    if (!this.genAI) {
+       yield "Grace AI is not configured. Please add a valid GEMINI_API_KEY to your environment variables.";
+       return;
+    }
+
+    // Choose base instruction
+    const baseInstruction = systemPrompt || GRACE_SYSTEM_INSTRUCTION;
+
     const model = this.genAI.getGenerativeModel({
       model: MODEL_NAME,
       safetySettings: SAFETY_SETTINGS,
       systemInstruction: contextData
-        ? `${GRACE_SYSTEM_INSTRUCTION}\n\n## Current Church Data\n${contextData}`
-        : GRACE_SYSTEM_INSTRUCTION,
+        ? `${baseInstruction}\n\n## Current Church Data\n${contextData}`
+        : baseInstruction,
     });
 
     const chat = model.startChat({

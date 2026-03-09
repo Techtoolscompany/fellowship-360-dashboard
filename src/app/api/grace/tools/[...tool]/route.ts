@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import withOrganizationAuthRequired from "@/lib/auth/withOrganizationAuthRequired";
 import { OrganizationRole } from "@/db/schema/organization";
-import { executeGraceToolByName } from "@/lib/grace/tools/execute";
-import { getOrCreateGraceSession } from "@/lib/grace/runtime";
+import { executePlannedActions } from "@/lib/grace/router/executor";
+import { getOrCreateGraceSession, loadOrgPolicy } from "@/lib/grace/runtime";
+import { findGraceTool } from "@/lib/grace/tools/registry";
 
 const bodySchema = z.object({
   sessionId: z.string().optional(),
@@ -49,27 +50,62 @@ async function handler(
   const session = await getOrCreateGraceSession({
     organizationId: org.id,
     channel: body.channel ?? "in_app",
+    actorType: "staff",
     sessionId: body.sessionId,
     contactId: body.contactId ?? null,
   });
 
-  const result = await executeGraceToolByName({
-    name: tool,
+  const resolvedTool = findGraceTool(tool);
+  if (!resolvedTool) {
+    return NextResponse.json({ error: `Unknown tool: ${tool}` }, { status: 404 });
+  }
+
+  const policy = await loadOrgPolicy(org.id);
+  const action = {
+    id: crypto.randomUUID(),
+    tool,
     input: body.input,
+    reason: "direct_tool_api_request",
+    requiresApproval: resolvedTool.requiresApproval ?? false,
+  };
+
+  const execution = await executePlannedActions({
+    actions: [action],
     context: {
       organizationId: org.id,
       sessionId: session.id,
       channel: body.channel ?? "in_app",
+      actorType: "staff",
       userId: user.id,
       contactId: body.contactId ?? null,
+      policy,
     },
   });
 
-  if (!result.success) {
-    return NextResponse.json({ error: result.error || "Tool execution failed" }, { status: 400 });
+  if (execution.queuedApprovals.length > 0) {
+    return NextResponse.json({
+      success: true,
+      queuedApproval: true,
+      approvalIds: execution.queuedApprovals,
+      actionOutcomes: execution.actionOutcomes,
+      sessionId: session.id,
+    });
   }
 
-  return NextResponse.json({ success: true, output: result.output, sessionId: session.id });
+  const [result] = execution.results;
+  if (!result?.success) {
+    return NextResponse.json(
+      { error: result?.error || "Tool execution failed" },
+      { status: 400 }
+    );
+  }
+
+  return NextResponse.json({
+    success: true,
+    output: result.output,
+    actionOutcomes: execution.actionOutcomes,
+    sessionId: session.id,
+  });
 }
 
 export const GET = withOrganizationAuthRequired(handler, OrganizationRole.enum.user);

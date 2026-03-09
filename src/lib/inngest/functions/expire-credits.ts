@@ -5,10 +5,12 @@ import { inngest } from "../client";
 import { enableCredits } from "@/lib/credits/config";
 import { addCreditTransaction } from "@/lib/credits/recalculate";
 import { endOfDay } from "date-fns";
+import { INNGEST_RETRY_PROFILES } from "../policy";
 
 export const expireCredits = inngest.createFunction(
   {
     id: "expire-credits",
+    retries: INNGEST_RETRY_PROFILES.SCHEDULED,
   },
   { cron: "0 2 * * *" },
   async ({ step, logger }) => {

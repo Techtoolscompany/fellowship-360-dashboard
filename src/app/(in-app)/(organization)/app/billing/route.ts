@@ -39,14 +39,12 @@ export const GET = withOrganizationAuthRequired(async (req, context) => {
 
   const lemonSqueezyCustomerId = organization.lemonSqueezyCustomerId;
   if (lemonSqueezyCustomerId) {
-    // TODO: Get lemonSqueezy customer and redirect to lemonSqueezy customer portal
-    // Replace with actual implementation when LemonSqueezy is implemented
     return NextResponse.json(
       {
-        message: "LemonSqueezy portal integration is not implemented yet.",
-        customerId: lemonSqueezyCustomerId,
+        message:
+          "LemonSqueezy billing is temporarily disabled for this app. Use Stripe, Dodo, or PayPal billing paths instead.",
       },
-      { status: 501 }
+      { status: 503 }
     );
   }
 

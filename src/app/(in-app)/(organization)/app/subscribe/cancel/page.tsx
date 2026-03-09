@@ -4,7 +4,7 @@ import { XCircle } from "lucide-react";
 import Link from "next/link";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import { subscribeParams } from "@/lib/plans/getSubscribeUrl";
+import { PlanProvider, subscribeParams } from "@/lib/plans/getSubscribeUrl";
 import { z } from "zod";
 import { db } from "@/db";
 import { plans } from "@/db/schema/plans";
@@ -30,6 +30,8 @@ export default async function SubscribeCancelPage({
 
   try {
     const { provider, codename, type, sessionId } = await searchParams;
+    const retryProvider =
+      provider === PlanProvider.LEMON_SQUEEZY ? PlanProvider.STRIPE : provider;
     
     // Validate the parameters
     cancelParams.parse({
@@ -64,7 +66,7 @@ export default async function SubscribeCancelPage({
 
             <div className="flex flex-row gap-2 items-center mt-4">
               <Button asChild>
-                <Link href={`/app/subscribe?codename=${codename}&type=${type}&provider=${provider}`}>
+                <Link href={`/app/subscribe?codename=${codename}&type=${type}&provider=${retryProvider}`}>
                   Try Again
                 </Link>
               </Button>

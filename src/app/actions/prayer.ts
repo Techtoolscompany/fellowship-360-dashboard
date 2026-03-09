@@ -3,11 +3,13 @@
 import { db } from "@/db";
 import { prayerRequests } from "@/db/schema";
 import { eq, desc, and } from "drizzle-orm";
+import { requireOrgMembership } from "./utils";
 
 export async function getPrayerRequests(
   orgId: string,
   filters?: { status?: string; urgency?: string }
 ) {
+  await requireOrgMembership(orgId);
   if (filters?.status) {
     return await db
       .select()
@@ -35,6 +37,7 @@ export async function createPrayerRequest(data: {
   isAnonymous?: boolean;
   organizationId: string;
 }) {
+  await requireOrgMembership(data.organizationId);
   const [request] = await db
     .insert(prayerRequests)
     .values({
@@ -62,14 +65,36 @@ export async function updatePrayerRequest(
     response: string | null;
   }>
 ) {
+  const [existing] = await db
+    .select({ organizationId: prayerRequests.organizationId })
+    .from(prayerRequests)
+    .where(eq(prayerRequests.id, id))
+    .limit(1);
+  if (!existing) throw new Error("Prayer request not found");
+  await requireOrgMembership(existing.organizationId);
+
+  const normalized = { ...data } as Record<string, unknown>;
+  if (typeof normalized.isAnonymous === "boolean") {
+    normalized.isAnonymous = normalized.isAnonymous ? "true" : "false";
+  }
+
   const [request] = await db
     .update(prayerRequests)
-    .set({ ...data, updatedAt: new Date() } as any)
-    .where(eq(prayerRequests.id, id))
+    .set({ ...normalized, updatedAt: new Date() } as any)
+    .where(and(eq(prayerRequests.id, id), eq(prayerRequests.organizationId, existing.organizationId)))
     .returning();
   return request;
 }
 
 export async function deletePrayerRequest(id: string) {
-  await db.delete(prayerRequests).where(eq(prayerRequests.id, id));
+  const [existing] = await db
+    .select({ organizationId: prayerRequests.organizationId })
+    .from(prayerRequests)
+    .where(eq(prayerRequests.id, id))
+    .limit(1);
+  if (!existing) return;
+  await requireOrgMembership(existing.organizationId);
+  await db
+    .delete(prayerRequests)
+    .where(and(eq(prayerRequests.id, id), eq(prayerRequests.organizationId, existing.organizationId)));
 }

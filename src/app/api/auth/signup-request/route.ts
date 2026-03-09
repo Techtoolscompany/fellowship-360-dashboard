@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { signUpRequestSchema } from "@/lib/validations/auth.schema";
 import { encryptJson } from "@/lib/encryption/edge-jwt";
 import { render } from "@react-email/components";
@@ -8,6 +8,7 @@ import { appConfig } from "@/lib/config";
 import { db } from "@/db";
 import { users } from "@/db/schema/user";
 import { eq } from "drizzle-orm";
+import { rateLimitKeyed } from "@/lib/grace/channels/webhooks";
 
 interface SignUpToken {
   name: string;
@@ -15,8 +16,13 @@ interface SignUpToken {
   expiry: string;
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
+    const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+    if (!(await rateLimitKeyed(`auth:signup:${ip}`, 5, 15 * 60_000))) {
+      return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+    }
+
     const body = await request.json();
     const validation = signUpRequestSchema.safeParse(body);
 

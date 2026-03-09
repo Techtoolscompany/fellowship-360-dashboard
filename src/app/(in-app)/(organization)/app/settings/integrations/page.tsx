@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AlertCircle, CheckCircle2, Loader2, Plug, RefreshCcw, Shield } from "lucide-react";
 import { getGraceProviderConfigs, upsertGraceProviderConfig } from "@/app/actions/grace";
+import { getAssignedSmsDevice } from "@/app/actions/sms";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -205,6 +206,7 @@ export default function IntegrationsPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [savingProviderKey, setSavingProviderKey] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [smsDevice, setSmsDevice] = useState<Awaited<ReturnType<typeof getAssignedSmsDevice>> | null>(null);
 
   const orgId = organization?.id ?? "";
   const appOrigin = useMemo(
@@ -219,9 +221,13 @@ export default function IntegrationsPage() {
       setErrorMessage(null);
 
       try {
-        const providerRows = await getGraceProviderConfigs(orgId);
+        const [providerRows, assignedDevice] = await Promise.all([
+          getGraceProviderConfigs(orgId),
+          getAssignedSmsDevice(orgId),
+        ]);
         setRows(providerRows);
         setDrafts(buildDraftMap(providerRows));
+        setSmsDevice(assignedDevice);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to load provider configs.";
@@ -458,34 +464,52 @@ export default function IntegrationsPage() {
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
-                  {definition.fields.map((field) => {
-                    const currentValue = draft.values[field.key] ?? "";
-                    const hasSecretStored = Boolean(row?.secretStatus?.[field.key]);
-                    const secretPlaceholder =
-                      field.secret && hasSecretStored
-                        ? "Saved securely (leave blank to keep current value)"
-                        : field.placeholder;
-
-                    return (
-                      <div key={field.key} className="space-y-2">
-                        <Label htmlFor={`${definition.key}-${field.key}`}>{field.label}</Label>
-                        <Input
-                          id={`${definition.key}-${field.key}`}
-                          type={field.secret ? "password" : "text"}
-                          value={currentValue}
-                          placeholder={secretPlaceholder}
-                          onChange={(event) =>
-                            handleFieldChange(definition.key, field.key, event.target.value)
-                          }
-                          disabled={!isByo}
-                          autoComplete="off"
-                        />
-                        {field.description ? (
-                          <p className="text-xs text-muted-foreground">{field.description}</p>
-                        ) : null}
+                  {definition.provider === "textbee" && draft.mode === "agency_managed" ? (
+                    <div className="col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/50">
+                      <div className="flex items-center gap-3">
+                        <div className={`h-2 w-2 rounded-full ${smsDevice?.isActive ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                        <div>
+                          <p className="text-sm font-medium text-slate-900 dark:text-white">
+                            {smsDevice ? "SMS Gateway Active" : "Waiting for Device Assignment"}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {smsDevice 
+                              ? `Sending from ${smsDevice.phoneNumber || "assigned device"}. Managed by your agency.` 
+                              : "The agency will assign an Android phone to this organization shortly to enable SMS features."}
+                          </p>
+                        </div>
                       </div>
-                    );
-                  })}
+                    </div>
+                  ) : (
+                    definition.fields.map((field) => {
+                      const currentValue = draft.values[field.key] ?? "";
+                      const hasSecretStored = Boolean(row?.secretStatus?.[field.key]);
+                      const secretPlaceholder =
+                        field.secret && hasSecretStored
+                          ? "Saved securely (leave blank to keep current value)"
+                          : field.placeholder;
+  
+                      return (
+                        <div key={field.key} className="space-y-2">
+                          <Label htmlFor={`${definition.key}-${field.key}`}>{field.label}</Label>
+                          <Input
+                            id={`${definition.key}-${field.key}`}
+                            type={field.secret ? "password" : "text"}
+                            value={currentValue}
+                            placeholder={secretPlaceholder}
+                            onChange={(event) =>
+                              handleFieldChange(definition.key, field.key, event.target.value)
+                            }
+                            disabled={!isByo}
+                            autoComplete="off"
+                          />
+                          {field.description ? (
+                            <p className="text-xs text-muted-foreground">{field.description}</p>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
 
                 {!validationOk && isByo && missing.length > 0 ? (

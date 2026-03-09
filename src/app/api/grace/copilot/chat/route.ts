@@ -31,6 +31,7 @@ export const POST = withOrganizationAuthRequired(async (req, context) => {
     return NextResponse.json({
       response: result.response,
       proposedActions: result.proposedActions,
+      actionOutcomes: result.actionOutcomes,
       threadId: result.threadId,
       sessionId: result.sessionId,
       intent: result.intent,

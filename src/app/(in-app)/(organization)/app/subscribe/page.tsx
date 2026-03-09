@@ -1,7 +1,6 @@
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { plans } from "@/db/schema/plans";
-import { createCheckoutSession, createCustomer } from "@/lib/lemonsqueezy";
 import {
   PlanProvider,
   PlanType,
@@ -237,65 +236,9 @@ async function SubscribePage({
       return redirect(stripeCheckoutSession.url);
 
     case PlanProvider.LEMON_SQUEEZY:
-      const lemonsqueezyKey: keyof typeof plan | null =
-        type === PlanType.MONTHLY
-          ? "monthlyLemonSqueezyVariantId"
-          : type === PlanType.YEARLY
-            ? "yearlyLemonSqueezyVariantId"
-            : type === PlanType.ONETIME
-              ? "onetimeLemonSqueezyVariantId"
-              : null;
-
-      if (!lemonsqueezyKey) {
-        return notFound();
-      }
-      const lemonsqueezyVariantId = plan[lemonsqueezyKey];
-      if (!lemonsqueezyVariantId) {
-        return notFound();
-      }
-
-      // Check if existing subscription for this organization
-      if (currentOrganization.lemonSqueezySubscriptionId) {
-        // If this is onetime plan then redirect to error page with message to
-        // cancel existing subscription
-        if (type === PlanType.ONETIME) {
-          return redirect(
-            `${process.env.NEXT_PUBLIC_APP_URL}/app/subscribe/error?code=LEMON_SQUEEZY_CANCEL_BEFORE_SUBSCRIBING`
-          );
-        }
-        // If this is monthly or yearly plan then redirect to billing page
-        return redirect(`${process.env.NEXT_PUBLIC_APP_URL}/app/billing`);
-      }
-
-      // Get or create LemonSqueezy customer
-      let lemonSqueezyCustomerId = currentOrganization.lemonSqueezyCustomerId;
-      if (!lemonSqueezyCustomerId) {
-        const customer = await createCustomer({
-          name: currentOrganization.name,
-          email: session.user.email,
-          metadata: {
-            organizationId: currentOrganization.id,
-          },
-        });
-        lemonSqueezyCustomerId = customer.data.id;
-
-        // Update organization with LemonSqueezy customer ID
-        await db
-          .update(organizations)
-          .set({ lemonSqueezyCustomerId })
-          .where(eq(organizations.id, currentOrganization.id));
-      }
-
-      const checkoutSession = await createCheckoutSession({
-        variantId: lemonsqueezyVariantId,
-        customerEmail: session.user.email,
-        customerId: lemonSqueezyCustomerId,
-      });
-
-      if (!checkoutSession.data.url) {
-        throw new Error("Checkout session URL not found");
-      }
-      return redirect(checkoutSession.data.url);
+      return redirect(
+        `${process.env.NEXT_PUBLIC_APP_URL}/app/subscribe/error?code=PROVIDER_UNAVAILABLE&message=LemonSqueezy%20is%20disabled%20for%20new%20subscriptions`
+      );
 
     case PlanProvider.DODO:
       const dodoKey: keyof typeof plan | null =

@@ -1,77 +1,100 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { inngest } from "@/lib/inngest/client";
+import { INNGEST_EVENTS, buildLeadReceivedIdempotencyKey } from "@/lib/inngest/events";
 import { db } from "@/db";
 import { organizations } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { rateLimitKeyed, verifyWebhookSignature } from "@/lib/grace/channels/webhooks";
 
 /**
- * Public Webhook Endpoint to Ingest Leads into the AI Brain.
- * 
- * Example POST request:
+ * Public webhook to ingest leads into the Grace AI pipeline.
+ * Authentication uses HMAC signature in `x-grace-signature`.
+ *
  * POST /api/webhooks/inbound-lead
- * Headers: { "Authorization": "Bearer YOUR_ORG_API_KEY" }
- * Body: { 
- *   "contactName": "John Doe",
- *   "contactEmail": "john@example.com",
- *   "message": "I would like to visit this Sunday, what time are services?"
+ * Headers: { "x-grace-signature": "<hex-hmac>" }
+ * Body: {
+ *   "organizationId": "...",
+ *   "contactName": "...",
+ *   "contactEmail": "...",
+ *   "message": "..."
  * }
  */
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    // 1. Authenticate the request
-    // In a real app we'd verify a Bearer token or Webhook Secret.
-    // For now, we'll extract the org ID directly if provided, or use a default test one.
-    const authHeader = req.headers.get("Authorization");
-    
-    // NOTE: Replace this with real API key validation later
-    let organizationId = "demo_org_id"; 
-    
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-       // Optional: validate token here
-       organizationId = authHeader.split(" ")[1];
-    } else {
-        // Fallback for fast local testing: grab the first organization in the DB
-        const [firstOrg] = await db.select().from(organizations).limit(1);
-        if (!firstOrg) {
-            return NextResponse.json({ error: "No organizations exist in the database to receive this lead." }, { status: 400 });
-        }
-        organizationId = firstOrg.id;
+    const secret = process.env.GRACE_INBOUND_LEAD_WEBHOOK_SECRET;
+    if (!secret) {
+      return NextResponse.json(
+        { error: "Inbound lead webhook secret is not configured." },
+        { status: 503 }
+      );
     }
 
-    // 2. Parse the incoming lead data
-    const body = await req.json();
-    const { contactName, contactEmail, message } = body;
+    const rawBody = await req.text();
+    const signature = req.headers.get("x-grace-signature");
+    const validSignature = verifyWebhookSignature(rawBody, signature, secret);
+    if (!validSignature) {
+      return NextResponse.json({ error: "Invalid signature." }, { status: 401 });
+    }
 
-    if (!contactName || !contactEmail || !message) {
+    const key = `${req.headers.get("x-forwarded-for") || "unknown"}:inbound-lead`;
+    if (!(await rateLimitKeyed(key, 60, 60_000))) {
+      return NextResponse.json({ error: "Rate limited" }, { status: 429 });
+    }
+
+    const body = JSON.parse(rawBody) as {
+      organizationId?: string;
+      contactName?: string;
+      contactEmail?: string;
+      message?: string;
+    };
+
+    const { organizationId, contactName, contactEmail, message } = body;
+
+    if (!organizationId || !contactName || !contactEmail || !message) {
       return NextResponse.json(
-        { error: "Missing required fields: contactName, contactEmail, message" },
+        { error: "Missing required fields: organizationId, contactName, contactEmail, message" },
         { status: 400 }
       );
     }
 
-    // 3. Fire the Inngest Event (The "AI Brain")
-    // This returns instantly. The AI logic runs asynchronously in the background.
+    // Verify the org exists — prevents fabricated org IDs from being accepted.
+    const [org] = await db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, organizationId))
+      .limit(1);
+
+    if (!org) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+
+    const idempotencyKey = buildLeadReceivedIdempotencyKey({
+      organizationId: org.id,
+      contactEmail,
+      message,
+    });
+
     await inngest.send({
-      name: "ai/process-website-lead",
+      id: idempotencyKey,
+      name: INNGEST_EVENTS.GRACE_LEAD_RECEIVED,
       data: {
-        organizationId,
+        organizationId: org.id,
         contactName,
         contactEmail,
         message,
+        idempotencyKey,
       },
     });
 
-    // 4. Return immediately to the caller
     return NextResponse.json({
       success: true,
-      message: "Lead received and dispatched to AI Brain for processing.",
+      message: "Lead received and queued for processing.",
     });
-
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error processing inbound lead webhook:", error);
-    return NextResponse.json(
-      { error: "Internal Server Error" },
-      { status: 500 }
-    );
+    if (error instanceof SyntaxError) {
+      return NextResponse.json({ error: "Invalid webhook payload" }, { status: 400 });
+    }
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
