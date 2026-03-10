@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState } from "react";
+import useSWR from "swr";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -28,27 +30,15 @@ export default function VolunteersPage() {
   const router = useRouter();
   const { organization } = useOrganization();
   const orgId = organization?.id;
-  const [volunteerList, setVolunteerList] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("All Volunteers");
   const [showAddModal, setShowAddModal] = useState(false);
   const [logShiftVolunteer, setLogShiftVolunteer] = useState<{ id: string; name: string } | null>(null);
 
-  const fetchData = useCallback(async () => {
-    if (!orgId) return;
-    setLoading(true);
-    try {
-      const data = await getVolunteers(orgId);
-      setVolunteerList(data);
-    } catch (err) {
-      console.error("Failed to fetch volunteers:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [orgId]);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const { data: volunteerList = [], error, mutate, isLoading: loading } = useSWR<any[]>(
+    orgId ? ["volunteers", orgId] : null,
+    () => getVolunteers(orgId!)
+  );
 
   const activeVolunteersCount = volunteerList.filter(v => v.volunteer.status === "active").length;
   const pendingVolunteersCount = volunteerList.filter(v => v.volunteer.status === "pending").length;
@@ -85,7 +75,7 @@ export default function VolunteersPage() {
               <span className="material-symbols-outlined text-lg">file_download</span>
               Export CSV
             </button>
-            <CreateVolunteerDialog open={showAddModal} onOpenChange={setShowAddModal} onSuccess={fetchData}>
+            <CreateVolunteerDialog open={showAddModal} onOpenChange={setShowAddModal} onSuccess={() => void mutate()}>
               <button className="inline-flex items-center gap-2 rounded-lg bg-lime-500 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-opacity-90 transition-all">
                 <span className="material-symbols-outlined text-lg">add</span>
                 Add Volunteer
@@ -94,7 +84,7 @@ export default function VolunteersPage() {
             <LogVolunteerShiftDialog
               open={!!logShiftVolunteer}
               onOpenChange={(open: boolean) => !open && setLogShiftVolunteer(null)}
-              onSuccess={fetchData}
+              onSuccess={() => void mutate()}
               volunteerId={logShiftVolunteer?.id || null}
               volunteerName={logShiftVolunteer?.name}
             />
@@ -202,11 +192,12 @@ export default function VolunteersPage() {
             ))}
           </div>
 
-          {/* Table */}
           <div className="overflow-x-auto min-h-[400px]">
             {loading ? (
-               <div className="flex items-center justify-center py-32">
-                 <span className="material-symbols-outlined h-8 w-8 animate-spin text-lime-500 mx-auto text-3xl">sync</span>
+               <div className="space-y-4 pt-10 px-6">
+                 {[1, 2, 3, 4, 5].map(i => (
+                   <Skeleton key={i} className="h-16 w-full rounded-xl bg-slate-200 dark:bg-slate-800" />
+                 ))}
                </div>
             ) : (
               <table className="w-full text-left border-collapse">

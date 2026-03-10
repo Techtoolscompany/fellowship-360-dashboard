@@ -91,6 +91,196 @@ function normalizePhoneNumber(value: string | null | undefined) {
   return digits;
 }
 
+function getServiceRunWindow(serviceAt: Date, durationMinutes: number | null | undefined) {
+  const safeDurationMinutes = Math.max(0, Number(durationMinutes ?? 90));
+  const bufferMs = 30 * 60 * 1000;
+  const durationMs = safeDurationMinutes * 60 * 1000;
+  return {
+    start: new Date(serviceAt.getTime() - bufferMs),
+    end: new Date(serviceAt.getTime() + durationMs + bufferMs),
+  };
+}
+
+function windowsOverlap(
+  a: { start: Date; end: Date },
+  b: { start: Date; end: Date }
+) {
+  return a.start <= b.end && a.end >= b.start;
+}
+
+const ACTIVE_ASSIGNMENT_CONFLICT_STATUSES = [
+  "proposed",
+  "offered",
+  "confirmed",
+  "needs_replacement",
+  "checked_in",
+] as const;
+
+async function findServiceAssignmentConflict(params: {
+  organizationId: string;
+  assignmentId: string;
+  serviceAt: Date;
+  durationMinutes: number | null | undefined;
+  staffUserId?: string;
+  volunteerId?: string;
+}) {
+  const clauses = [
+    eq(serviceAssignments.organizationId, params.organizationId),
+    ne(serviceAssignments.id, params.assignmentId),
+    inArray(serviceAssignments.status, [...ACTIVE_ASSIGNMENT_CONFLICT_STATUSES]),
+    ne(serviceRuns.status, "cancelled"),
+    ne(serviceRuns.status, "completed"),
+  ];
+
+  if (params.staffUserId) {
+    clauses.push(eq(serviceAssignments.staffUserId, params.staffUserId));
+  } else if (params.volunteerId) {
+    clauses.push(eq(serviceAssignments.volunteerId, params.volunteerId));
+  } else {
+    return null;
+  }
+
+  const rows = await db
+    .select({
+      assignmentId: serviceAssignments.id,
+      roleName: serviceAssignments.roleName,
+      runId: serviceRuns.id,
+      runName: serviceRuns.name,
+      runServiceAt: serviceRuns.serviceAt,
+      runDurationMinutes: serviceRuns.durationMinutes,
+      status: serviceAssignments.status,
+    })
+    .from(serviceAssignments)
+    .innerJoin(serviceRuns, eq(serviceAssignments.serviceRunId, serviceRuns.id))
+    .where(and(...clauses))
+    .orderBy(serviceRuns.serviceAt);
+
+  if (!rows.length) {
+    return null;
+  }
+
+  const currentWindow = getServiceRunWindow(
+    params.serviceAt,
+    params.durationMinutes
+  );
+  return (
+    rows.find((row) => {
+      const conflictWindow = getServiceRunWindow(
+        row.runServiceAt,
+        row.runDurationMinutes
+      );
+      return windowsOverlap(currentWindow, conflictWindow);
+    }) ?? null
+  );
+}
+
+async function findStaffSchedulingConflict(params: {
+  organizationId: string;
+  assignmentId: string;
+  staffUserId: string;
+  serviceAt: Date;
+  durationMinutes: number | null | undefined;
+}) {
+  const conflictWindow = getServiceRunWindow(
+    params.serviceAt,
+    params.durationMinutes
+  );
+
+  const [appointmentConflict] = await db
+    .select({
+      id: appointments.id,
+      title: appointments.title,
+      dateTime: appointments.dateTime,
+    })
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.organizationId, params.organizationId),
+        eq(appointments.staffId, params.staffUserId),
+        gte(appointments.dateTime, conflictWindow.start),
+        lte(appointments.dateTime, conflictWindow.end),
+        ne(appointments.status, "cancelled"),
+        ne(appointments.status, "completed"),
+        ne(appointments.status, "no_show")
+      )
+    )
+    .orderBy(appointments.dateTime)
+    .limit(1);
+
+  if (appointmentConflict) {
+    return `Staff member has a conflicting appointment (${appointmentConflict.title}) at ${formatShortDateTime(
+      appointmentConflict.dateTime
+    )}`;
+  }
+
+  const assignmentConflict = await findServiceAssignmentConflict({
+    organizationId: params.organizationId,
+    assignmentId: params.assignmentId,
+    serviceAt: params.serviceAt,
+    durationMinutes: params.durationMinutes,
+    staffUserId: params.staffUserId,
+  });
+
+  if (assignmentConflict) {
+    return `Staff member is already assigned to ${assignmentConflict.runName} (${assignmentConflict.roleName}) at ${formatShortDateTime(
+      assignmentConflict.runServiceAt
+    )}`;
+  }
+
+  return null;
+}
+
+async function findVolunteerSchedulingConflict(params: {
+  organizationId: string;
+  assignmentId: string;
+  volunteerId: string;
+  serviceAt: Date;
+  durationMinutes: number | null | undefined;
+}) {
+  const conflictWindow = getServiceRunWindow(
+    params.serviceAt,
+    params.durationMinutes
+  );
+
+  const [shiftConflict] = await db
+    .select({
+      id: volunteerShifts.id,
+      date: volunteerShifts.date,
+    })
+    .from(volunteerShifts)
+    .where(
+      and(
+        eq(volunteerShifts.volunteerId, params.volunteerId),
+        gte(volunteerShifts.date, conflictWindow.start),
+        lte(volunteerShifts.date, conflictWindow.end)
+      )
+    )
+    .orderBy(volunteerShifts.date)
+    .limit(1);
+
+  if (shiftConflict) {
+    return `Volunteer has a conflicting shift at ${formatShortDateTime(
+      shiftConflict.date
+    )}`;
+  }
+
+  const assignmentConflict = await findServiceAssignmentConflict({
+    organizationId: params.organizationId,
+    assignmentId: params.assignmentId,
+    serviceAt: params.serviceAt,
+    durationMinutes: params.durationMinutes,
+    volunteerId: params.volunteerId,
+  });
+
+  if (assignmentConflict) {
+    return `Volunteer is already assigned to ${assignmentConflict.runName} (${assignmentConflict.roleName}) at ${formatShortDateTime(
+      assignmentConflict.runServiceAt
+    )}`;
+  }
+
+  return null;
+}
+
 function parseAssignmentResponse(message: string) {
   const normalized = message.trim().toLowerCase();
   if (!normalized) return null;
@@ -1732,6 +1922,7 @@ export async function assignServiceAssignmentSeat(data: {
     .parse(data);
 
   const assignment = await requireServiceAssignmentAccess(parsed.assignmentId, "admin");
+  const serviceRun = await requireServiceRunAccess(assignment.serviceRunId);
 
   const hasVolunteer = Boolean(parsed.volunteerId);
   const hasStaff = Boolean(parsed.staffUserId);
@@ -1757,6 +1948,17 @@ export async function assignServiceAssignmentSeat(data: {
     if (!volunteer || volunteer.organizationId !== assignment.organizationId) {
       throw new Error("Volunteer not found in this organization");
     }
+
+    const conflictMessage = await findVolunteerSchedulingConflict({
+      organizationId: assignment.organizationId,
+      assignmentId: assignment.id,
+      volunteerId: parsed.volunteerId,
+      serviceAt: serviceRun.serviceAt,
+      durationMinutes: serviceRun.durationMinutes,
+    });
+    if (conflictMessage) {
+      throw new Error(`Scheduling conflict: ${conflictMessage}`);
+    }
   }
 
   if (parsed.staffUserId) {
@@ -1773,6 +1975,17 @@ export async function assignServiceAssignmentSeat(data: {
       );
     if (!membership) {
       throw new Error("Staff member not found in this organization");
+    }
+
+    const conflictMessage = await findStaffSchedulingConflict({
+      organizationId: assignment.organizationId,
+      assignmentId: assignment.id,
+      staffUserId: parsed.staffUserId,
+      serviceAt: serviceRun.serviceAt,
+      durationMinutes: serviceRun.durationMinutes,
+    });
+    if (conflictMessage) {
+      throw new Error(`Scheduling conflict: ${conflictMessage}`);
     }
   }
 
@@ -2788,5 +3001,127 @@ export async function clearServiceAssignmentSeat(assignmentId: string) {
     })
     .where(eq(serviceAssignments.id, assignment.id))
     .returning();
+  return updated;
+}
+
+const serviceAssignmentStatusSchema = z.enum([
+  "proposed",
+  "offered",
+  "confirmed",
+  "declined",
+  "needs_replacement",
+  "checked_in",
+  "checked_out",
+  "no_show",
+  "cancelled",
+]);
+
+export async function updateServiceAssignmentStatus(data: {
+  assignmentId: string;
+  status: z.infer<typeof serviceAssignmentStatusSchema>;
+  notes?: string | null;
+  responseChannel?: string | null;
+  responseText?: string | null;
+}) {
+  const parsed = z
+    .object({
+      assignmentId: z.string().min(1),
+      status: serviceAssignmentStatusSchema,
+      notes: z.string().nullable().optional(),
+      responseChannel: z.string().nullable().optional(),
+      responseText: z.string().nullable().optional(),
+    })
+    .parse(data);
+
+  const assignment = await requireServiceAssignmentAccess(parsed.assignmentId, "admin");
+  const hasAssignee = Boolean(assignment.volunteerId || assignment.staffUserId);
+
+  const assignedStatuses = new Set([
+    "offered",
+    "confirmed",
+    "declined",
+    "needs_replacement",
+    "checked_in",
+    "checked_out",
+    "no_show",
+  ]);
+  if (assignedStatuses.has(parsed.status) && !hasAssignee) {
+    throw new Error("Assign a volunteer or staff member before updating this status");
+  }
+
+  if (
+    parsed.status === "checked_in" &&
+    !["proposed", "offered", "confirmed", "checked_in"].includes(assignment.status)
+  ) {
+    throw new Error(`Cannot check in assignment from "${assignment.status}" status`);
+  }
+
+  if (parsed.status === "checked_out" && assignment.status !== "checked_in") {
+    throw new Error(`Cannot check out assignment from "${assignment.status}" status`);
+  }
+
+  if (parsed.status === "no_show" && assignment.status === "checked_out") {
+    throw new Error("Checked-out assignments cannot be marked no-show");
+  }
+
+  const now = new Date();
+  const patch: {
+    status: z.infer<typeof serviceAssignmentStatusSchema>;
+    notes?: string | null;
+    offeredAt?: Date | null;
+    respondedAt?: Date | null;
+    responseChannel?: string | null;
+    responseText?: string | null;
+    updatedAt: Date;
+  } = {
+    status: parsed.status,
+    updatedAt: now,
+  };
+
+  if (parsed.notes !== undefined) {
+    patch.notes = parsed.notes;
+  }
+
+  if (parsed.status === "proposed") {
+    patch.offeredAt = null;
+    patch.respondedAt = null;
+    patch.responseChannel = null;
+    patch.responseText = null;
+  } else if (parsed.status === "offered") {
+    patch.offeredAt = now;
+    patch.respondedAt = null;
+    patch.responseChannel = null;
+    patch.responseText = null;
+  } else if (
+    parsed.status === "confirmed" ||
+    parsed.status === "declined" ||
+    parsed.status === "needs_replacement" ||
+    parsed.status === "no_show"
+  ) {
+    patch.respondedAt = now;
+    patch.responseChannel = parsed.responseChannel ?? "manual";
+    patch.responseText = parsed.responseText ?? `Marked ${parsed.status.replaceAll("_", " ")} by staff`;
+  }
+
+  const [updated] = await db
+    .update(serviceAssignments)
+    .set(patch)
+    .where(eq(serviceAssignments.id, assignment.id))
+    .returning();
+
+  await auditAction({
+    organizationId: assignment.organizationId,
+    userId: assignment.session.userId,
+    actionType: "update",
+    entityName: "service_assignment",
+    entityId: updated.id,
+    details: {
+      fromStatus: assignment.status,
+      toStatus: updated.status,
+      volunteerId: updated.volunteerId,
+      staffUserId: updated.staffUserId,
+    },
+  });
+
   return updated;
 }

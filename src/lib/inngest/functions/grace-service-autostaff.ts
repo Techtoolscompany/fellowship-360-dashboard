@@ -1,7 +1,8 @@
 import { NonRetriableError } from "inngest";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  appointments,
   churchContacts,
   graceGoals,
   graceGoalSteps,
@@ -12,6 +13,7 @@ import {
   tasks,
   users,
   volunteers,
+  volunteerShifts,
 } from "@/db/schema";
 import { resolveSmsProvider } from "@/lib/grace/providers/resolver";
 import { sendTextBeeSMS } from "@/lib/grace/channels/sms/textbee";
@@ -72,6 +74,30 @@ function roleMatchScore(requiredRole: string, candidateRole: string | null | und
   if (candidate.includes(required) || required.includes(candidate)) return 20;
   return 5;
 }
+
+function getServiceRunWindow(serviceAt: Date, durationMinutes: number | null | undefined) {
+  const safeDurationMinutes = Math.max(0, Number(durationMinutes ?? 90));
+  const bufferMs = 30 * 60 * 1000;
+  return {
+    start: new Date(serviceAt.getTime() - bufferMs),
+    end: new Date(serviceAt.getTime() + safeDurationMinutes * 60 * 1000 + bufferMs),
+  };
+}
+
+function windowsOverlap(
+  a: { start: Date; end: Date },
+  b: { start: Date; end: Date }
+) {
+  return a.start <= b.end && a.end >= b.start;
+}
+
+const ACTIVE_ASSIGNMENT_CONFLICT_STATUSES = [
+  "proposed",
+  "offered",
+  "confirmed",
+  "needs_replacement",
+  "checked_in",
+] as const;
 
 function formatShortDateTime(value: Date | string) {
   const date = typeof value === "string" ? new Date(value) : value;
@@ -356,7 +382,30 @@ export const graceServiceAutostaff = inngest.createFunction(
         return output;
       }
 
-      const [volunteerPool, staffPool] = await Promise.all([
+      const parsedServiceAt = toDate(context.serviceRun.serviceAt);
+      if (!parsedServiceAt) {
+        const errorText = "Service run time is invalid for auto-staffing.";
+        await finishGoalStep({
+          goalId: context.goal.id,
+          stepKey: "seed_assignments",
+          status: "failed",
+          errorText,
+        });
+        throw new NonRetriableError(errorText);
+      }
+
+      const serviceWindow = getServiceRunWindow(
+        parsedServiceAt,
+        context.serviceRun.durationMinutes
+      );
+
+      const [
+        volunteerPool,
+        staffPool,
+        conflictingStaffAppointments,
+        conflictingVolunteerShifts,
+        conflictingCrossRunAssignments,
+      ] = await Promise.all([
         db
           .select({
             volunteerId: volunteers.id,
@@ -382,7 +431,82 @@ export const graceServiceAutostaff = inngest.createFunction(
           .from(organizationMemberships)
           .leftJoin(users, eq(organizationMemberships.userId, users.id))
           .where(eq(organizationMemberships.organizationId, context.goal.organizationId)),
+        db
+          .select({
+            staffUserId: appointments.staffId,
+          })
+          .from(appointments)
+          .where(
+            and(
+              eq(appointments.organizationId, context.goal.organizationId),
+              gte(appointments.dateTime, serviceWindow.start),
+              lte(appointments.dateTime, serviceWindow.end),
+              ne(appointments.status, "cancelled"),
+              ne(appointments.status, "completed"),
+              ne(appointments.status, "no_show")
+            )
+          ),
+        db
+          .select({
+            volunteerId: volunteerShifts.volunteerId,
+          })
+          .from(volunteerShifts)
+          .innerJoin(volunteers, eq(volunteerShifts.volunteerId, volunteers.id))
+          .where(
+            and(
+              eq(volunteers.organizationId, context.goal.organizationId),
+              gte(volunteerShifts.date, serviceWindow.start),
+              lte(volunteerShifts.date, serviceWindow.end)
+            )
+          ),
+        db
+          .select({
+            assignmentId: serviceAssignments.id,
+            staffUserId: serviceAssignments.staffUserId,
+            volunteerId: serviceAssignments.volunteerId,
+            runServiceAt: serviceRuns.serviceAt,
+            runDurationMinutes: serviceRuns.durationMinutes,
+          })
+          .from(serviceAssignments)
+          .innerJoin(serviceRuns, eq(serviceAssignments.serviceRunId, serviceRuns.id))
+          .where(
+            and(
+              eq(serviceAssignments.organizationId, context.goal.organizationId),
+              ne(serviceAssignments.serviceRunId, context.serviceRun.id),
+              inArray(serviceAssignments.status, [...ACTIVE_ASSIGNMENT_CONFLICT_STATUSES]),
+              ne(serviceRuns.status, "cancelled"),
+              ne(serviceRuns.status, "completed")
+            )
+          ),
       ]);
+
+      const blockedStaffIds = new Set<string>();
+      for (const row of conflictingStaffAppointments) {
+        if (row.staffUserId) {
+          blockedStaffIds.add(row.staffUserId);
+        }
+      }
+
+      const blockedVolunteerIds = new Set<string>();
+      for (const row of conflictingVolunteerShifts) {
+        blockedVolunteerIds.add(row.volunteerId);
+      }
+
+      for (const row of conflictingCrossRunAssignments) {
+        const conflictWindow = getServiceRunWindow(
+          row.runServiceAt,
+          row.runDurationMinutes
+        );
+        if (!windowsOverlap(serviceWindow, conflictWindow)) {
+          continue;
+        }
+        if (row.staffUserId) {
+          blockedStaffIds.add(row.staffUserId);
+        }
+        if (row.volunteerId) {
+          blockedVolunteerIds.add(row.volunteerId);
+        }
+      }
 
       const usedVolunteerIds = new Set(
         assignmentRows.filter((row) => row.volunteerId).map((row) => row.volunteerId as string)
@@ -407,6 +531,9 @@ export const graceServiceAutostaff = inngest.createFunction(
 
         if (assignment.assignmentType !== "paid_staff") {
           for (const volunteer of volunteerPool) {
+            if (blockedVolunteerIds.has(volunteer.volunteerId)) {
+              continue;
+            }
             const score =
               40 +
               roleMatchScore(assignment.roleName, volunteer.role) +
@@ -421,6 +548,9 @@ export const graceServiceAutostaff = inngest.createFunction(
 
         if (assignment.assignmentType !== "volunteer") {
           for (const staff of staffPool) {
+            if (blockedStaffIds.has(staff.userId)) {
+              continue;
+            }
             const leadershipBoost =
               normalizeRoleText(assignment.roleName).includes("leader") &&
               (staff.membershipRole === "admin" || staff.membershipRole === "owner")

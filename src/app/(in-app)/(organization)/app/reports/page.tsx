@@ -1,5 +1,7 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import React, { useState } from "react";
+import useSWR from "swr";
+import { Skeleton } from "@/components/ui/skeleton";
 import Link from "next/link";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { getReportsData } from "@/app/actions/reports";
@@ -15,7 +17,7 @@ const TIMEFRAMES: { id: Timeframe; label: string }[] = [
 
 const KPI_STYLES = [
   { icon: "person_add",         iconBg: "bg-blue-100 dark:bg-blue-900/30",     iconColor: "text-blue-600 dark:text-blue-400" },
-  { icon: "calendar_today",     iconBg: "bg-lime-500/10",                      iconColor: "text-lime-500" },
+  { icon: "calendar_today",     iconBg: "bg-[#84cc16]/10",                     iconColor: "text-[#84cc16]" },
   { icon: "task_alt",           iconBg: "bg-amber-100 dark:bg-amber-900/30",   iconColor: "text-amber-600 dark:text-amber-400" },
   { icon: "volunteer_activism", iconBg: "bg-purple-100 dark:bg-purple-900/30", iconColor: "text-purple-600 dark:text-purple-400" },
 ];
@@ -24,23 +26,13 @@ export default function ReportsPage() {
   const { organization } = useOrganization();
   const orgId = organization?.id;
   const [timeframe, setTimeframe] = useState<Timeframe>("month");
-  const [data, setData] = useState<Awaited<ReturnType<typeof getReportsData>> | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  const fetchData = useCallback(async () => {
-    if (!orgId) return;
-    setLoading(true);
-    try {
-      const result = await getReportsData(orgId, timeframe);
-      setData(result);
-    } catch (err) {
-      console.error("Failed to load reports data:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [orgId, timeframe]);
+  const { data, error, isLoading } = useSWR(
+    orgId ? ["reports", orgId, timeframe] : null,
+    () => getReportsData(orgId!, timeframe)
+  );
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const loading = isLoading;
 
   const kpis          = data?.kpis ?? [];
   const monthlyTrends = data?.monthlyTrends ?? [];
@@ -86,8 +78,16 @@ export default function ReportsPage() {
       </header>
 
       {loading ? (
-        <div className="flex items-center justify-center py-32">
-          <span className="material-symbols-outlined h-8 w-8 animate-spin text-lime-500 mx-auto text-3xl">sync</span>
+        <div className="p-8 space-y-8 mx-auto w-full max-w-7xl">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {[1, 2, 3, 4].map(i => (
+              <Skeleton key={i} className="h-32 w-full rounded-xl bg-slate-200 dark:bg-slate-800" />
+            ))}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Skeleton className="h-80 w-full lg:col-span-2 rounded-xl bg-slate-200 dark:bg-slate-800" />
+            <Skeleton className="h-80 w-full rounded-xl bg-slate-200 dark:bg-slate-800" />
+          </div>
         </div>
       ) : (
         <div className="p-8 space-y-8 mx-auto w-full max-w-7xl">

@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Loader2, XCircle } from "lucide-react";
+import useSWR from "swr";
 import { getContactProfile, updateContact, deleteContact } from "@/app/actions/contacts";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { toast } from "sonner";
@@ -70,41 +71,33 @@ export default function ContactProfilePage() {
   const contactId = params.id as string;
   const { organization } = useOrganization();
 
-  const [profile, setProfile] = useState<Awaited<ReturnType<typeof getContactProfile>> | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: profile, error, isLoading, mutate } = useSWR(
+    contactId && organization?.id ? ["contact", contactId, organization.id] : null,
+    () => getContactProfile(contactId, organization!.id)
+  );
+
+  const loading = isLoading;
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
-  const fetchProfile = useCallback(async () => {
-    if (!contactId || !organization?.id) return;
-    setLoading(true);
-    try {
-      const data = await getContactProfile(contactId, organization.id);
-      setProfile(data);
-      if (data.contact) {
-        setEditForm({
-          firstName:      data.contact.firstName ?? "",
-          lastName:       data.contact.lastName ?? "",
-          email:          data.contact.email ?? "",
-          phone:          data.contact.phone ?? "",
-          memberStatus:   data.contact.memberStatus ?? "visitor",
-          source:         data.contact.source ?? "walk_in",
-          dateOfBirth:    data.contact.dateOfBirth
-            ? new Date(data.contact.dateOfBirth).toISOString().split("T")[0] : "",
-          firstVisitDate: data.contact.firstVisitDate
-            ? new Date(data.contact.firstVisitDate).toISOString().split("T")[0] : "",
-          notes: data.contact.notes ?? "",
-        });
-      }
-    } catch {
-      toast.error("Failed to load contact");
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (profile?.contact) {
+      setEditForm({
+        firstName:      profile.contact.firstName ?? "",
+        lastName:       profile.contact.lastName ?? "",
+        email:          profile.contact.email ?? "",
+        phone:          profile.contact.phone ?? "",
+        memberStatus:   profile.contact.memberStatus ?? "visitor",
+        source:         profile.contact.source ?? "walk_in",
+        dateOfBirth:    profile.contact.dateOfBirth
+          ? new Date(profile.contact.dateOfBirth).toISOString().split("T")[0] : "",
+        firstVisitDate: profile.contact.firstVisitDate
+          ? new Date(profile.contact.firstVisitDate).toISOString().split("T")[0] : "",
+        notes: profile.contact.notes ?? "",
+      });
     }
-  }, [contactId, organization?.id]);
-
-  useEffect(() => { fetchProfile(); }, [fetchProfile]);
+  }, [profile]);
 
   const handleSave = async () => {
     if (!editForm.firstName || !editForm.lastName) {
@@ -124,7 +117,7 @@ export default function ContactProfilePage() {
       });
       toast.success("Contact updated");
       setEditOpen(false);
-      fetchProfile();
+      await mutate();
     } catch {
       toast.error("Failed to save changes");
     } finally {

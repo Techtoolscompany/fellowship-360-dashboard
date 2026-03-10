@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
+import { Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -70,75 +70,86 @@ export default function BroadcastsPage() {
   });
 
   return (
-      <div className="flex-1 flex flex-col h-full overflow-hidden bg-background-light dark:bg-slate-900 font-display text-slate-900 dark:text-slate-100 -m-4 sm:-m-8">
-        {/* Header */}
-        <header className="h-16 flex shrink-0 items-center justify-between px-8 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
-          <div className="flex items-center gap-4">
-            <h2 className="text-xl font-bold">Broadcasts</h2>
-            <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 mx-2"></div>
+    <div className="flex flex-col gap-6 pb-8 text-slate-900 dark:text-slate-100">
+      {/* Header */}
+      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-100 p-8 dark:border-slate-800 dark:from-slate-900 dark:to-slate-950">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Outbound Channels
+            </p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 dark:text-white">
+              Broadcasts
+            </h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
-              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
               <input 
-                className="pl-10 pr-4 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm focus:ring-2 focus:ring-lime-500/20 focus:border-lime-500 outline-none transition-all w-64" 
+                className="pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-medium focus:ring-2 focus:ring-[#84cc16]/20 focus:border-[#84cc16] outline-none transition-all w-64 shadow-sm" 
                 placeholder="Search broadcasts..." 
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-          </div>
-          <div className="flex items-center gap-4">
             <CreateBroadcastDialog
               open={showAddModal}
               onOpenChange={setShowAddModal}
               onSuccess={fetchData}
             >
-              <button className="flex items-center gap-2 bg-lime-500 hover:bg-lime-600 text-slate-900 dark:text-slate-950 px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+              <button className="flex items-center gap-2 bg-[#84cc16] hover:bg-[#65a30d] text-white px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm">
                 <span className="material-symbols-outlined text-lg">add</span>
                 Create Broadcast
               </button>
             </CreateBroadcastDialog>
           </div>
-        </header>
+        </div>
+      </section>
 
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-8 space-y-8">
+      {/* Scrollable Content */}
+      <div className="space-y-6">
           {/* Analytics Section */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden group">
-              <div className="absolute top-0 right-0 w-24 h-24 bg-lime-500/10 rounded-bl-full transition-transform group-hover:scale-110"></div>
-              <div className="flex items-center gap-4 mb-4">
-                <div className="w-10 h-10 rounded-lg bg-lime-500/20 flex items-center justify-center text-lime-600 dark:text-lime-500">
-                  <span className="material-symbols-outlined">send</span>
+            <div className="bg-white dark:bg-slate-900/60 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-[#84cc16]/10 rounded-bl-full transition-transform group-hover:scale-110"></div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-[#84cc16]/20 flex items-center justify-center text-[#84cc16]">
+                    <span className="material-symbols-outlined">send</span>
+                  </div>
+                  <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Sent Broadcasts</p>
                 </div>
-                <p className="text-sm font-medium text-slate-500 uppercase tracking-wider">Sent Broadcasts</p>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Live</span>
               </div>
-              <h3 className="text-3xl font-bold z-10 relative">{loading ? "..." : sentCount}</h3>
+              <h3 className="text-3xl font-black z-10 relative">{loading ? "..." : sentCount}</h3>
             </div>
 
-            <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden group">
+            <div className="bg-white dark:bg-slate-900/60 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden group">
               <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-bl-full transition-transform group-hover:scale-110"></div>
-              <div className="flex items-center gap-4 mb-4">
-                <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-500">
-                  <span className="material-symbols-outlined">group</span>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-500">
+                    <span className="material-symbols-outlined">group</span>
+                  </div>
+                  <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Total Recipients</p>
                 </div>
-                <p className="text-sm font-medium text-slate-500 uppercase tracking-wider">Total Recipients</p>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Live</span>
               </div>
-              <h3 className="text-3xl font-bold z-10 relative">{loading ? "..." : totalRecipients.toLocaleString()}</h3>
+              <h3 className="text-3xl font-black z-10 relative">{loading ? "..." : totalRecipients.toLocaleString()}</h3>
             </div>
           </div>
 
-          {/* Recent Broadcasts Table */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden mb-12">
+          <div className="bg-white dark:bg-slate-900/60 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden mb-12">
             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
-              <h4 className="font-bold text-lg">All Broadcasts</h4>
+              <h4 className="font-bold text-lg text-slate-900 dark:text-white">All Broadcasts</h4>
             </div>
             
             <div className="overflow-x-auto">
               {loading ? (
-                <div className="text-center py-20"><Loader2 className="h-8 w-8 animate-spin text-lime-500 mx-auto" /></div>
+                <div className="text-center py-20"><Loader2 className="h-8 w-8 animate-spin text-[#84cc16] mx-auto" /></div>
               ) : filteredBroadcasts.length === 0 ? (
-                <div className="text-center py-24 text-slate-500">
+                <div className="text-center py-24 text-slate-500 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl mx-5 my-5">
                   <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
                     <span className="material-symbols-outlined text-slate-400 dark:text-slate-500 text-3xl">campaign</span>
                   </div>
@@ -149,11 +160,11 @@ export default function BroadcastsPage() {
                 <table className="w-full text-left">
                   <thead className="bg-slate-50 dark:bg-slate-800/50">
                     <tr>
-                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Broadcast Name</th>
-                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Date</th>
-                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Status</th>
-                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Recipients</th>
-                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500"></th>
+                      <th className="px-6 py-4 text-[11px] font-bold uppercase tracking-wider text-slate-500">Broadcast Name</th>
+                      <th className="px-6 py-4 text-[11px] font-bold uppercase tracking-wider text-slate-500">Date</th>
+                      <th className="px-6 py-4 text-[11px] font-bold uppercase tracking-wider text-slate-500">Status</th>
+                      <th className="px-6 py-4 text-[11px] font-bold uppercase tracking-wider text-slate-500">Recipients</th>
+                      <th className="px-6 py-4 text-[11px] font-bold uppercase tracking-wider text-slate-500"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -163,26 +174,26 @@ export default function BroadcastsPage() {
                       return (
                         <tr key={bc.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
                           <td className="px-6 py-4">
-                            <div className={`font-semibold ${isSent ? "" : "text-slate-400 italic"}`}>{bc.title}</div>
-                            <div className="text-xs text-slate-400 uppercase">{bc.channel}</div>
+                            <div className={`font-semibold text-slate-900 dark:text-white ${isSent ? "" : "text-slate-400 italic"}`}>{bc.title}</div>
+                            <div className="text-[11px] font-semibold tracking-wide text-slate-400 uppercase mt-1">{bc.channel}</div>
                           </td>
-                          <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-400">
+                          <td className="px-6 py-4 text-sm font-medium text-slate-600 dark:text-slate-400">
                             {bc.sentAt ? new Date(bc.sentAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'}) : "—"}
                           </td>
                           <td className="px-6 py-4">
                             {isSent ? (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-lime-500/20 text-lime-700 dark:text-lime-400">
-                                <span className="w-1.5 h-1.5 rounded-full bg-lime-500"></span>
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold ring-1 ring-[#84cc16]/30 bg-[#84cc16]/10 text-[#65a30d] dark:text-[#84cc16]">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#84cc16]"></span>
                                 Sent
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-500">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold ring-1 ring-slate-200 dark:ring-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-500">
                                 <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
                                 Draft
                               </span>
                             )}
                           </td>
-                          <td className="px-6 py-4 text-sm font-medium">
+                          <td className="px-6 py-4 text-sm font-bold text-slate-900 dark:text-white">
                             {bc.totalRecipients ? bc.totalRecipients.toLocaleString() : "0"}
                           </td>
                           <td className="px-6 py-4 text-right">
@@ -216,8 +227,8 @@ export default function BroadcastsPage() {
             </div>
 
             {!loading && filteredBroadcasts.length > 0 && (
-              <div className="px-6 py-3 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800">
-                <p className="text-xs text-slate-500 font-medium">Showing {filteredBroadcasts.length} of {broadcastList.length} broadcasts</p>
+              <div className="px-6 py-3.5 bg-slate-50 dark:bg-slate-800/30 border-t border-slate-200 dark:border-slate-800">
+                <p className="text-xs font-medium text-slate-500">Showing {filteredBroadcasts.length} of {broadcastList.length} broadcasts</p>
               </div>
             )}
           </div>
@@ -228,8 +239,7 @@ export default function BroadcastsPage() {
             onSuccess={fetchData}
             broadcast={editBroadcast}
           />
-
         </div>
-      </div>
-    );
+    </div>
+  );
 }

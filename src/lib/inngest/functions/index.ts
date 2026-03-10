@@ -8,6 +8,7 @@ import { sendBroadcast } from "./send-broadcast";
 import { visitorFollowupSequence } from "./visitor-followup";
 import { missedCallRecoverySequence } from "./missed-call-recovery";
 import { graceServiceAutostaff } from "./grace-service-autostaff";
+import { serviceConfirmationReminders } from "./service-confirmation-reminders";
 import { provisionOrgProviders } from "./provision-org-providers";
 import { INNGEST_EVENTS } from "../events";
 
@@ -83,5 +84,6 @@ export const functions = [
   visitorFollowupSequence,
   missedCallRecoverySequence,
   graceServiceAutostaff,
+  serviceConfirmationReminders,
   provisionOrgProviders,
 ];

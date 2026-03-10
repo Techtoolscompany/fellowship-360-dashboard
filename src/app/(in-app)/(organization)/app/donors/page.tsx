@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useRouter } from "next/navigation";
@@ -59,63 +58,79 @@ export default function DonorsPage() {
   });
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <p className="text-muted-foreground mb-1 text-base">Manage Your Donor Relationships</p>
-          <h1 className="text-3xl font-bold text-foreground">Donors</h1>
+    <div className="flex flex-col gap-6 pb-8">
+      {/* Header */}
+      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-100 p-8 dark:border-slate-800 dark:from-slate-900 dark:to-slate-950">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Manage Your Donor Relationships
+            </p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 dark:text-white">
+              Donors
+            </h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button disabled className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all font-semibold text-sm opacity-50 cursor-not-allowed" title="Advanced filtering coming soon">
+              <Filter className="w-4 h-4" />
+              <span className="hidden sm:inline">Filter</span>
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled title="Advanced filtering coming soon"><Filter className="w-4 h-4 mr-2" />Filter</Button>
-        </div>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      {/* Summary Cards */}
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {kpiStats.map((stat, index) => (
-          <Card key={index}>
-            <CardContent className="pt-6">
-              <p className="text-muted-foreground text-sm mb-1">{stat.title}</p>
-              <h3 className="text-2xl font-bold">{loading ? "..." : stat.value}</h3>
-              <p className="text-sm text-muted-foreground mt-1">{stat.change}</p>
-            </CardContent>
-          </Card>
+          <div
+            key={index}
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/60"
+          >
+            <div className="mb-3 flex items-center justify-end">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Live</span>
+            </div>
+            <p className="text-3xl font-black text-slate-900 dark:text-white">
+              {loading ? "..." : stat.value}
+            </p>
+            <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.title} • {stat.change}</p>
+          </div>
         ))}
-      </div>
+      </section>
 
-      <div className="flex items-center gap-3 bg-card p-4 rounded-xl border border-border">
-        <div className="relative flex-1 max-w-sm">
-          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input 
-            type="text" 
-            className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring" 
-            placeholder="Search donors..." 
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+      <section className="rounded-3xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/60 overflow-hidden shadow-sm">
+        <div className="border-b border-slate-200 p-4 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">Donor Directory</h2>
+          <div className="relative">
+            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input 
+              type="text" 
+              className="w-full sm:w-64 pl-10 pr-4 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-sm bg-slate-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-[#84cc16]/40 transition-all font-semibold" 
+              placeholder="Search donors..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
         </div>
-        <span className="text-sm text-muted-foreground">{filteredDonors.length} donors</span>
-      </div>
 
-      {loading ? (
-        <div className="text-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#bbff00] mx-auto" /></div>
-      ) : (
-        <Card>
-          <CardContent className="p-0">
+        <div>
+          {loading ? (
+            <div className="text-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#84cc16] mx-auto" /></div>
+          ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 border-b">
+              <table className="w-full text-left">
+                <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
                   <tr>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Donor</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Total Given</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground"># of Gifts</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Last Gift</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground"></th>
+                    <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Donor</th>
+                    <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Given</th>
+                    <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider"># of Gifts</th>
+                    <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Last Gift</th>
+                    <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider"></th>
                   </tr>
                 </thead>
-                <tbody className="divide-y">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {filteredDonors.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-12 text-center text-muted-foreground">
+                      <td colSpan={5} className="px-5 py-12 text-center text-slate-500 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl mx-5 my-5">
                         No donors match your search.
                       </td>
                     </tr>
@@ -124,12 +139,12 @@ export default function DonorsPage() {
                       <td className="px-6 py-4">
                         <div>
                           <p className="font-semibold">{donor.firstName && donor.lastName ? `${donor.firstName} ${donor.lastName}` : "Anonymous"}</p>
-                          <p className="text-muted-foreground text-xs">{donor.email || "—"}</p>
+                          <p className="text-slate-500 text-xs">{donor.email || "—"}</p>
                         </div>
                       </td>
                       <td className="px-6 py-4 font-semibold text-emerald-600">${Number(donor.totalGiven).toLocaleString()}</td>
                       <td className="px-6 py-4">{donor.donationCount}</td>
-                      <td className="px-6 py-4 text-muted-foreground">{donor.lastDonation ? new Date(donor.lastDonation).toLocaleDateString() : "—"}</td>
+                      <td className="px-6 py-4 text-slate-500">{donor.lastDonation ? new Date(donor.lastDonation).toLocaleDateString() : "—"}</td>
                       <td className="px-6 py-4">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -137,7 +152,7 @@ export default function DonorsPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => donor.contactId && router.push(`/app/contacts/${donor.contactId}`)}>View Profile</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => donor.contactId && router.push(`/app/contacts/${donor.contactId}`)}>View History</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => donor.contactId && router.push(`/app/contacts/${donor.contactId}?tab=giving`)}>View History</DropdownMenuItem>
                             <DropdownMenuItem>Send Thank You</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -146,10 +161,15 @@ export default function DonorsPage() {
                   ))}
                 </tbody>
               </table>
+              <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-800/30 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-500">
+                  {filteredDonors.length} total donors
+                </span>
+              </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </div>
+      </section>
     </div>
   );
 }

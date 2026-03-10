@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState } from "react";
+import useSWR from "swr";
+import { Skeleton } from "@/components/ui/skeleton";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { CreateTaskDialog } from "@/components/dialogs/CreateTaskDialog";
 import { EditTaskDialog, EditableTask } from "@/components/dialogs/EditTaskDialog";
@@ -15,39 +17,27 @@ import {
 export default function TasksPage() {
   const { organization } = useOrganization();
   const orgId = organization?.id;
-  const [tasks, setTasks] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("All Tasks");
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editTaskState, setEditTaskState] = useState<EditableTask | null>(null);
 
-  const fetchTasks = useCallback(async () => {
-    if (!orgId) return;
-    setLoading(true);
-    try {
-      const data = await getTasks(orgId);
-      setTasks(data);
-    } catch (err) {
-      console.error("Failed to fetch tasks:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [orgId]);
-
-  useEffect(() => { fetchTasks(); }, [fetchTasks]);
+  const { data: tasks = [], error, mutate, isLoading: loading } = useSWR<any[]>(
+    orgId ? ["tasks", orgId] : null,
+    () => getTasks(orgId!)
+  );
 
   const handleComplete = async (id: string, currentStatus: string) => {
     if (currentStatus === "done") return;
     await updateTask(id, { status: "done", organizationId: orgId! });
-    await fetchTasks();
+    await mutate();
   };
 
   const handleDelete = async (id: string) => {
     if (!orgId) return;
     await deleteTask(id, orgId);
-    await fetchTasks();
+    await mutate();
   };
 
   const filteredTasks = tasks.filter(task => {
@@ -169,7 +159,11 @@ export default function TasksPage() {
             </h3>
 
             {loading ? (
-               <div className="text-center py-12"><span className="material-symbols-outlined text-4xl text-[#2b8cee] animate-spin">progress_activity</span></div>
+               <div className="space-y-4">
+                 {[1, 2, 3].map(i => (
+                   <Skeleton key={i} className="h-20 w-full rounded-xl bg-slate-200 dark:bg-slate-800" />
+                 ))}
+               </div>
             ) : displayTasks.length === 0 ? (
                <div className="text-center py-12 text-slate-500 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">No tasks to display in this view.</div>
             ) : (
@@ -272,12 +266,12 @@ export default function TasksPage() {
       <CreateTaskDialog
         open={showAddModal}
         onOpenChange={setShowAddModal}
-        onSuccess={fetchTasks}
+        onSuccess={() => void mutate()}
       />
       <EditTaskDialog
         open={!!editTaskState}
         onOpenChange={(open) => !open && setEditTaskState(null)}
-        onSuccess={fetchTasks}
+        onSuccess={() => void mutate()}
         task={editTaskState}
       />
     </div>

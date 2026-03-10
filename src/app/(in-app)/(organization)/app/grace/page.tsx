@@ -68,6 +68,7 @@ import {
 } from "@/app/actions/grace";
 import { getGraceSettings } from "@/app/actions/grace-settings";
 import type { GraceActionOutcome } from "@/lib/grace/types";
+import { PipelineBoard } from "@/components/features/PipelineBoard";
 import {
   buildServiceRunRoleMatrix,
   getNextUpcomingServiceRun,
@@ -490,6 +491,24 @@ function fmtDurationFromNow(value: Date | string | null | undefined) {
   return `${absHours} hour${absHours === 1 ? "" : "s"} ago`;
 }
 
+function fmtCompactCountdown(targetAt: Date, nowMs: number) {
+  const deltaMs = targetAt.getTime() - nowMs;
+  const absMinutes = Math.max(0, Math.round(Math.abs(deltaMs) / 60_000));
+
+  if (absMinutes <= 1) {
+    return deltaMs >= 0 ? "now" : "just now";
+  }
+
+  const hours = Math.floor(absMinutes / 60);
+  const minutes = absMinutes % 60;
+  const durationLabel =
+    hours > 0
+      ? `${hours}h${minutes > 0 ? ` ${minutes}m` : ""}`
+      : `${minutes}m`;
+
+  return deltaMs >= 0 ? `in ${durationLabel}` : `${durationLabel} ago`;
+}
+
 function formatDateTimeLocalInput(value: Date) {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, "0");
@@ -707,6 +726,8 @@ export default function GraceWorkspacePage() {
   const [serviceRunGenerateSaving, setServiceRunGenerateSaving] = useState(false);
   const [serviceRunOffersSending, setServiceRunOffersSending] = useState(false);
   const [serviceGoalStarting, setServiceGoalStarting] = useState(false);
+  const [assignmentStatusSavingId, setAssignmentStatusSavingId] = useState<string | null>(null);
+  const [runBoardNowMs, setRunBoardNowMs] = useState(() => Date.now());
   const [proposalDecisionId, setProposalDecisionId] = useState<string | null>(null);
 
   // Grace Command Bar state
@@ -795,6 +816,13 @@ export default function GraceWorkspacePage() {
   useEffect(() => {
     setActiveTab(normalizeTab(searchParams.get("tab")));
   }, [searchParams]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setRunBoardNowMs(Date.now());
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const switchTab = useCallback(
     (tab: GraceTab) => {
@@ -1726,6 +1754,64 @@ export default function GraceWorkspacePage() {
     serviceRunRoleMatrix,
   ]);
 
+  const runOfServiceTimeline = useMemo(
+    () =>
+      runOfServiceOverview
+        .slice()
+        .sort((a, b) => a.startAt.getTime() - b.startAt.getTime()),
+    [runOfServiceOverview]
+  );
+
+  const runOfServiceTimelineWithState = useMemo(
+    () =>
+      runOfServiceTimeline.map((step) => {
+        const durationMinutes = Math.max(5, step.durationMinutes ?? 15);
+        const startMs = step.startAt.getTime();
+        const endMs = startMs + durationMinutes * 60_000;
+        const isCurrent = runBoardNowMs >= startMs && runBoardNowMs < endMs;
+        const isPast = runBoardNowMs >= endMs;
+        const isUpcoming = runBoardNowMs < startMs;
+        return {
+          ...step,
+          durationMinutes,
+          startMs,
+          endMs,
+          isCurrent,
+          isPast,
+          isUpcoming,
+        };
+      }),
+    [runBoardNowMs, runOfServiceTimeline]
+  );
+
+  const activeRunStep = useMemo(
+    () => runOfServiceTimelineWithState.find((step) => step.isCurrent) ?? null,
+    [runOfServiceTimelineWithState]
+  );
+
+  const nextRunStep = useMemo(
+    () => runOfServiceTimelineWithState.find((step) => step.isUpcoming) ?? null,
+    [runOfServiceTimelineWithState]
+  );
+
+  const spotlightRunStep =
+    activeRunStep ??
+    nextRunStep ??
+    (runOfServiceTimelineWithState.length > 0
+      ? runOfServiceTimelineWithState[runOfServiceTimelineWithState.length - 1]
+      : null);
+
+  const runBoardCountdownLabel = useMemo(() => {
+    if (!spotlightRunStep) return "No run steps available";
+    if (activeRunStep) {
+      return `Ends ${fmtCompactCountdown(new Date(activeRunStep.endMs), runBoardNowMs)}`;
+    }
+    if (nextRunStep) {
+      return `Starts ${fmtCompactCountdown(new Date(nextRunStep.startMs), runBoardNowMs)}`;
+    }
+    return "Run sheet complete";
+  }, [activeRunStep, nextRunStep, runBoardNowMs, spotlightRunStep]);
+
   const selectedRunGoals = useMemo(() => {
     if (!selectedServiceRunId) return serviceStaffingGoals;
     return serviceStaffingGoals.filter(
@@ -1929,7 +2015,7 @@ export default function GraceWorkspacePage() {
       },
       {
         value: "calendar" as GraceTab,
-        label: "Schedule",
+        label: "Calendar",
         detail: "Services + events",
         icon: "event",
         badge: calendarEventsNext7Days > 0 ? String(calendarEventsNext7Days) : null,
@@ -2698,6 +2784,43 @@ export default function GraceWorkspacePage() {
       setServiceRunOffersSending(false);
     }
   };
+
+  const handleUpdateAssignmentStatus = useCallback(
+    async (assignmentId: string, status: ServiceAssignmentStatus) => {
+      setAssignmentStatusSavingId(`${assignmentId}:${status}`);
+      try {
+        const response = await fetch(
+          `/api/app/organizations/current/service-assignments/${assignmentId}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status }),
+          }
+        );
+        const payload = (await response.json().catch(() => ({}))) as {
+          success?: boolean;
+          message?: string;
+        };
+
+        if (!response.ok || payload.success === false) {
+          throw new Error(payload.message || "Failed to update assignment status");
+        }
+
+        if (selectedServiceRunId) {
+          await fetchServiceRunAssignments(selectedServiceRunId);
+        }
+        toast.success(`Assignment marked ${SERVICE_ASSIGNMENT_STATUS_LABELS[status]}`);
+      } catch (error) {
+        console.error("Failed to update assignment status:", error);
+        toast.error(
+          error instanceof Error ? error.message : "Failed to update assignment status"
+        );
+      } finally {
+        setAssignmentStatusSavingId(null);
+      }
+    },
+    [fetchServiceRunAssignments, selectedServiceRunId]
+  );
 
   const handleStartAutostaffGoal = async () => {
     if (!selectedServiceRunId) {
@@ -3890,94 +4013,47 @@ export default function GraceWorkspacePage() {
                 </Button>
               </div>
             </div>
-            <div className="p-6">
+            <div className="flex-1 overflow-x-auto p-6 flex gap-6 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full dark:[&::-webkit-scrollbar-thumb]:bg-slate-700 min-h-[500px]">
               {pipelineStages.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500 dark:border-slate-700">
+                <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500 dark:border-slate-700 w-full flex items-center justify-center">
                   Visitor stages are not configured yet. Open Pipeline to create or seed stages.
                 </div>
               ) : (
-                <div className="grid gap-4 lg:grid-cols-3">
-                  {visitorsByStage.map(({ stage, items }) => (
-                    <div
-                      key={stage.id}
-                      className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-lime-300 dark:border-slate-800 dark:bg-slate-900/35"
-                    >
-                      <div className="mb-3 flex items-center justify-between">
-                        <p className="text-sm font-bold text-slate-900 dark:text-white">
-                          {stage.name}
-                        </p>
-                        <Badge variant="outline">{items.length}</Badge>
-                      </div>
-                      <div className="space-y-3">
-                        {items.length === 0 ? (
-                          <p className="rounded-xl border border-dashed border-slate-300 px-3 py-4 text-xs text-slate-500 dark:border-slate-700">
-                            No visitors in this stage.
-                          </p>
-                        ) : (
-                          items.map((row) => (
-                            <div
-                              key={row.item.id}
-                              className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-950/40"
-                            >
-                              <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                                {getPipelineContactDisplayName(row)}
-                              </p>
-                              <p className="mt-1 text-xs text-slate-500">
-                                Priority:{" "}
-                                <span className="font-semibold uppercase">{row.item.priority}</span>
-                              </p>
-                              {row.contact?.phone || row.contact?.email ? (
-                                <p className="mt-1 text-xs text-slate-500">
-                                  {row.contact?.phone || row.contact?.email}
-                                </p>
-                              ) : null}
-
-                              <div className="mt-3 space-y-2">
-                                <Select
-                                  value={row.item.stageId}
-                                  onValueChange={(value) =>
-                                    handleMoveVisitorStage(row.item.id, value)
-                                  }
-                                  disabled={movingVisitorId === row.item.id}
-                                >
-                                  <SelectTrigger className="h-9">
-                                    <SelectValue placeholder="Move stage" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {pipelineStages.map((pipelineStage) => (
-                                      <SelectItem
-                                        key={pipelineStage.id}
-                                        value={pipelineStage.id}
-                                      >
-                                        {pipelineStage.name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="w-full border-slate-300 text-xs font-bold uppercase tracking-wide hover:border-lime-400 hover:bg-lime-50 dark:border-slate-700 dark:hover:bg-lime-500/10"
-                                  onClick={async () => {
-                                    await triggerGraceFromContext(
-                                      `Visitor follow-up request: ${getPipelineContactDisplayName(
-                                        row
-                                      )} is currently in "${stage.name}". Propose and queue the next best follow-up action.`
-                                    );
-                                    switchTab("center");
-                                    toast.success("Grace follow-up workflow queued");
-                                  }}
-                                >
-                                  Ask Grace For Next Step
-                                </Button>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <PipelineBoard
+                  stages={pipelineStages}
+                  items={pipelineItems}
+                  searchQuery=""
+                  handleDelete={async (id) => {
+                    import("@/app/actions/pipeline").then(async ({ deletePipelineItem }) => {
+                      if (!confirm("Remove this visitor from the pipeline?")) return;
+                      await deletePipelineItem(id);
+                      await fetchWorkspace();
+                      toast.success("Visitor removed");
+                    });
+                  }}
+                  handleMoveStage={handleMoveVisitorStage}
+                  onDragEndOptimistic={async (result: import("@hello-pangea/dnd").DropResult) => {
+                    const { source, destination, draggableId } = result;
+                    if (!destination) return;
+                    if (source.droppableId === destination.droppableId && source.index === destination.index) return;
+                    
+                    const newItems = [...pipelineItems];
+                    const itemIndex = newItems.findIndex(i => i.item.id === draggableId);
+                    if (itemIndex > -1) {
+                      newItems[itemIndex] = {
+                        ...newItems[itemIndex],
+                        item: {
+                          ...newItems[itemIndex].item,
+                          stageId: destination.droppableId,
+                          order: destination.index
+                        }
+                      };
+                      setPipelineItems(newItems);
+                    }
+                    
+                    await handleMoveVisitorStage(draggableId, destination.droppableId);
+                  }}
+                />
               )}
             </div>
           </div>
@@ -4396,6 +4472,113 @@ export default function GraceWorkspacePage() {
                     </div>
                   </div>
 
+                  {/* Run-of-service board */}
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-800">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Run-of-Service Board
+                        </p>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                          {spotlightRunStep?.title ?? "No live steps configured"}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={
+                          activeRunStep
+                            ? "border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-300"
+                            : nextRunStep
+                              ? "border-blue-300 text-blue-700 dark:border-blue-700 dark:text-blue-300"
+                              : "border-slate-300 text-slate-700 dark:border-slate-700 dark:text-slate-300"
+                        }
+                      >
+                        {activeRunStep ? "Live" : nextRunStep ? "Up Next" : "Complete"}
+                      </Badge>
+                    </div>
+                    {runOfServiceTimelineWithState.length === 0 ? (
+                      <p className="px-4 py-6 text-sm text-slate-500">
+                        No run sheet configured yet. Add timeline steps to your roles template.
+                      </p>
+                    ) : (
+                      <div className="grid gap-4 p-4 lg:grid-cols-[1.2fr,1fr]">
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Countdown
+                          </p>
+                          <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">
+                            {runBoardCountdownLabel}
+                          </p>
+                          {spotlightRunStep ? (
+                            <>
+                              <p className="mt-3 text-sm font-semibold text-slate-900 dark:text-white">
+                                {spotlightRunStep.title}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {fmtDateTime(spotlightRunStep.startAt)} · {spotlightRunStep.durationMinutes} min ·{" "}
+                                {spotlightRunStep.ownerLabel}
+                              </p>
+                              <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                Coverage
+                              </p>
+                              <p className="text-sm text-slate-700 dark:text-slate-300">
+                                {spotlightRunStep.coverageLabel}
+                              </p>
+                              <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                                {spotlightRunStep.detail}
+                              </p>
+                            </>
+                          ) : null}
+                        </div>
+
+                        <div className="space-y-2">
+                          {runOfServiceTimelineWithState.map((step) => (
+                            <div
+                              key={step.id}
+                              className={`rounded-xl border px-3 py-2.5 ${
+                                step.isCurrent
+                                  ? "border-emerald-300 bg-emerald-50/60 dark:border-emerald-700 dark:bg-emerald-950/20"
+                                  : step.isUpcoming
+                                    ? "border-blue-200 bg-blue-50/50 dark:border-blue-800 dark:bg-blue-950/20"
+                                    : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950/30"
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                                    {step.title}
+                                  </p>
+                                  <p className="mt-0.5 truncate text-xs text-slate-500">
+                                    {fmtDateTime(step.startAt)} · {step.durationMinutes} min · {step.ownerLabel}
+                                  </p>
+                                </div>
+                                <Badge
+                                  variant="outline"
+                                  className={
+                                    step.coverageTone === "attention"
+                                      ? "border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300"
+                                      : step.coverageTone === "healthy"
+                                        ? "border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-300"
+                                        : "border-slate-300 text-slate-700 dark:border-slate-700 dark:text-slate-300"
+                                  }
+                                >
+                                  {step.coverageLabel}
+                                </Badge>
+                              </div>
+                              <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                {step.isCurrent
+                                  ? `Live · ends ${fmtCompactCountdown(new Date(step.endMs), runBoardNowMs)}`
+                                  : step.isUpcoming
+                                    ? `Starts ${fmtCompactCountdown(new Date(step.startMs), runBoardNowMs)}`
+                                    : `Finished ${fmtCompactCountdown(new Date(step.endMs), runBoardNowMs)}`}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Actions */}
                   <div className="flex flex-wrap gap-2">
                     <Button
@@ -4459,27 +4642,108 @@ export default function GraceWorkspacePage() {
                       </p>
                     ) : (
                       <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                        {serviceRunAssignments.map((row) => (
-                          <div
-                            key={row.assignment.id}
-                            className="flex items-center gap-3 px-4 py-2.5"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
-                                {row.assignment.roleName}
-                              </p>
-                              <p className="truncate text-xs text-slate-500">
-                                {getServiceAssigneeLabel(row) || "Unassigned"}
-                              </p>
-                            </div>
-                            <Badge
-                              variant="outline"
-                              className={getServiceAssignmentBadgeClass(row.assignment.status)}
+                        {serviceRunAssignments.map((row) => {
+                          const hasAssignee = Boolean(
+                            row.assignment.volunteerId || row.assignment.staffUserId
+                          );
+                          const canCheckIn =
+                            hasAssignee &&
+                            ["proposed", "offered", "confirmed"].includes(
+                              row.assignment.status
+                            );
+                          const canCheckOut = row.assignment.status === "checked_in";
+                          const canNoShow =
+                            hasAssignee &&
+                            ["proposed", "offered", "confirmed", "needs_replacement", "checked_in"].includes(
+                              row.assignment.status
+                            );
+                          const isStatusSaving = assignmentStatusSavingId?.startsWith(
+                            `${row.assignment.id}:`
+                          );
+
+                          return (
+                            <div
+                              key={row.assignment.id}
+                              className="flex items-center gap-3 px-4 py-2.5"
                             >
-                              {SERVICE_ASSIGNMENT_STATUS_LABELS[row.assignment.status]}
-                            </Badge>
-                          </div>
-                        ))}
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                                  {row.assignment.roleName}
+                                </p>
+                                <p className="truncate text-xs text-slate-500">
+                                  {getServiceAssigneeLabel(row) || "Unassigned"}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <Badge
+                                  variant="outline"
+                                  className={getServiceAssignmentBadgeClass(row.assignment.status)}
+                                >
+                                  {SERVICE_ASSIGNMENT_STATUS_LABELS[row.assignment.status]}
+                                </Badge>
+                                {canCheckIn && (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 rounded-lg px-2 text-[11px]"
+                                    disabled={Boolean(isStatusSaving)}
+                                    onClick={() =>
+                                      handleUpdateAssignmentStatus(
+                                        row.assignment.id,
+                                        "checked_in"
+                                      )
+                                    }
+                                  >
+                                    {isStatusSaving ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      "Check in"
+                                    )}
+                                  </Button>
+                                )}
+                                {canCheckOut && (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 rounded-lg px-2 text-[11px]"
+                                    disabled={Boolean(isStatusSaving)}
+                                    onClick={() =>
+                                      handleUpdateAssignmentStatus(
+                                        row.assignment.id,
+                                        "checked_out"
+                                      )
+                                    }
+                                  >
+                                    {isStatusSaving ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      "Check out"
+                                    )}
+                                  </Button>
+                                )}
+                                {canNoShow && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 rounded-lg px-2 text-[11px] text-rose-600 hover:text-rose-700"
+                                    disabled={Boolean(isStatusSaving)}
+                                    onClick={() =>
+                                      handleUpdateAssignmentStatus(
+                                        row.assignment.id,
+                                        "no_show"
+                                      )
+                                    }
+                                  >
+                                    No-show
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

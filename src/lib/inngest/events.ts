@@ -1,5 +1,3 @@
-import { createHash } from "crypto";
-
 export const INNGEST_EVENTS = {
   TEST_HELLO_WORLD_REQUESTED: "test.hello-world.requested.v1",
   GRACE_LEAD_RECEIVED: "grace.lead.received.v1",
@@ -14,7 +12,27 @@ export type InngestEventName = (typeof INNGEST_EVENTS)[keyof typeof INNGEST_EVEN
 
 function hashParts(prefix: string, parts: Array<string | number | null | undefined>) {
   const payload = parts.map((part) => String(part ?? "")).join("|");
-  return `${prefix}:${createHash("sha256").update(payload).digest("hex")}`;
+  // Deterministic non-cryptographic hash that works in both Node and Edge runtimes.
+  let h1 = 0xdeadbeef ^ payload.length;
+  let h2 = 0x41c6ce57 ^ payload.length;
+
+  for (let i = 0; i < payload.length; i += 1) {
+    const code = payload.charCodeAt(i);
+    h1 = Math.imul(h1 ^ code, 2654435761);
+    h2 = Math.imul(h2 ^ code, 1597334677);
+  }
+
+  h1 =
+    Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^
+    Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 =
+    Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^
+    Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+
+  const hash = `${(h2 >>> 0).toString(16).padStart(8, "0")}${(h1 >>> 0)
+    .toString(16)
+    .padStart(8, "0")}`;
+  return `${prefix}:${hash}`;
 }
 
 export function buildLeadReceivedIdempotencyKey(params: {

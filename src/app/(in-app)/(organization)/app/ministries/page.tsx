@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState } from "react";
+import useSWR from "swr";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -100,37 +102,25 @@ function MinistryCard({ ministry, index, onEdit, onDelete, onViewMembers }: { mi
 export default function MinistriesPage() {
   const { organization } = useOrganization();
   const orgId = organization?.id;
-  const [ministriesList, setMinistriesList] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editMinistryState, setEditMinistryState] = useState<any>(null);
   const [viewMembersMinistry, setViewMembersMinistry] = useState<any>(null);
 
-  const fetchMinistries = useCallback(async () => {
-    if (!orgId) return;
-    setLoading(true);
-    try {
-      const data = await getMinistries(orgId);
-      setMinistriesList(data);
-    } catch (err) {
-      console.error("Failed to fetch ministries:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [orgId]);
-
-  useEffect(() => { fetchMinistries(); }, [fetchMinistries]);
+  const { data: ministriesList = [], error, mutate, isLoading: loading } = useSWR<any[]>(
+    orgId ? ["ministries", orgId] : null,
+    () => getMinistries(orgId!)
+  );
 
   const handleDelete = async (id: string) => {
     if (confirm("Are you sure you want to delete this ministry?")) {
       await deleteMinistry(id);
-      await fetchMinistries();
+      await mutate();
     }
   };
 
-  const filteredMinistries = ministriesList.filter(m => {
+  const filteredMinistries = ministriesList.filter((m: any) => {
     if (!searchQuery) return true;
     return m.ministry.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
            (m.ministry.description || "").toLowerCase().includes(searchQuery.toLowerCase());
@@ -152,7 +142,7 @@ export default function MinistriesPage() {
         </div>
         <div className="flex items-center gap-4">
            {/* Add Ministry Button placed in header */}
-           <CreateMinistryDialog open={showAddModal} onOpenChange={setShowAddModal} onSuccess={fetchMinistries}>
+           <CreateMinistryDialog open={showAddModal} onOpenChange={setShowAddModal} onSuccess={() => void mutate()}>
             <button className="bg-[#84cc16] hover:bg-[#84cc16]/90 text-slate-950 font-bold px-4 py-2 rounded-xl transition-all hidden sm:flex items-center gap-2 text-sm">
               <span className="material-symbols-outlined text-sm">add</span>Add Ministry
             </button>
@@ -198,8 +188,10 @@ export default function MinistriesPage() {
           </div>
           
           {loading ? (
-            <div className="flex items-center justify-center py-20">
-              <span className="material-symbols-outlined text-4xl text-[#84cc16] animate-spin">progress_activity</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+              {[1, 2, 3, 4].map(i => (
+                <Skeleton key={i} className="h-80 w-full rounded-3xl bg-slate-200 dark:bg-slate-800" />
+              ))}
             </div>
           ) : filteredMinistries.length === 0 ? (
             <div className="text-center py-20 bg-white dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-700">
@@ -240,10 +232,15 @@ export default function MinistriesPage() {
         )}
       </div>
 
+      <CreateMinistryDialog 
+        open={showAddModal} 
+        onOpenChange={setShowAddModal} 
+        onSuccess={() => void mutate()} 
+      />
       <EditMinistryDialog
         open={!!editMinistryState}
         onOpenChange={(open) => !open && setEditMinistryState(null)}
-        onSuccess={fetchMinistries}
+        onSuccess={() => void mutate()}
         ministry={editMinistryState}
       />
 
@@ -252,7 +249,7 @@ export default function MinistriesPage() {
         onOpenChange={(open) => {
           if (!open) {
             setViewMembersMinistry(null);
-            fetchMinistries(); 
+            void mutate(); 
           }
         }}
         ministryId={viewMembersMinistry?.id || null}

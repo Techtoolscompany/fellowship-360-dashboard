@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Search, Filter, TrendingUp, Target, Clock, DollarSign, MoreHorizontal, Loader2 } from "lucide-react";
@@ -54,109 +53,132 @@ export default function PledgesPage() {
   ];
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <p className="text-muted-foreground mb-1 text-base">Track Commitment Progress</p>
-          <h1 className="text-3xl font-bold text-foreground">Pledges</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm"><Filter className="w-4 h-4 mr-2" />Filter</Button>
-          <CreatePledgeDialog open={showAddModal} onOpenChange={setShowAddModal} onSuccess={fetchData}>
-            <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
-              <Plus className="w-4 h-4 mr-2" />Record Pledge
-            </Button>
-          </CreatePledgeDialog>
+    <div className="flex flex-col gap-6 pb-8">
+      {/* Header */}
+      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-100 p-8 dark:border-slate-800 dark:from-slate-900 dark:to-slate-950">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Track Commitment Progress
+            </p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 dark:text-white">
+              Pledges
+            </h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button disabled className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all font-semibold text-sm opacity-50 cursor-not-allowed" title="Advanced filtering coming soon">
+              <Filter className="w-4 h-4" />
+              <span className="hidden sm:inline">Filter</span>
+            </button>
+            <CreatePledgeDialog open={showAddModal} onOpenChange={setShowAddModal} onSuccess={fetchData}>
+              <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#84cc16] text-white font-bold text-sm hover:bg-[#65a30d] transition-colors shadow-sm ml-2">
+                <Plus className="w-4 h-4" />
+                Record Pledge
+              </button>
+            </CreatePledgeDialog>
 
-          <EditPledgeDialog
-            open={!!editPledgeState}
-            onOpenChange={(open) => !open && setEditPledgeState(null)}
-            onSuccess={fetchData}
-            pledge={editPledgeState}
-          />
+            <EditPledgeDialog
+              open={!!editPledgeState}
+              onOpenChange={(open) => !open && setEditPledgeState(null)}
+              onSuccess={fetchData}
+              pledge={editPledgeState}
+            />
+          </div>
         </div>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {kpiStats.map((stat, index) => (
-          <Card key={index}>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-muted-foreground text-sm mb-1">{stat.title}</p>
-                  <h3 className="text-2xl font-bold">{loading ? "..." : stat.value}</h3>
-                  {stat.subtitle && <p className="text-sm text-muted-foreground mt-1">{stat.subtitle}</p>}
-                </div>
-                <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
-                  <stat.icon className="w-6 h-6 text-blue-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <div
+            key={index}
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/60"
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <stat.icon className="h-5 w-5 text-slate-500 dark:text-slate-300" />
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Live</span>
+            </div>
+            <p className="text-3xl font-black text-slate-900 dark:text-white">
+              {loading ? "..." : stat.value}
+            </p>
+            <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.title} {stat.subtitle ? `• ${stat.subtitle}` : ''}</p>
+          </div>
         ))}
-      </div>
+      </section>
 
-      {loading ? (
-        <div className="text-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#bbff00] mx-auto" /></div>
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle>Active Pledges</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 border-b">
-                  <tr>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Donor</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Fund</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Pledged</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Fulfilled</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Progress</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">Frequency</th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {pledgeList.map((row) => {
-                    const progress = Number(row.pledge.totalAmount) > 0
-                      ? Math.round((Number(row.pledge.amountPaid || 0) / Number(row.pledge.totalAmount)) * 100)
-                      : 0;
-                    return (
-                      <tr key={row.pledge.id} className="hover:bg-muted/30">
-                        <td className="px-6 py-4 font-semibold">
-                          {row.contact ? `${row.contact.firstName} ${row.contact.lastName}` : "Anonymous"}
-                        </td>
-                        <td className="px-6 py-4 text-muted-foreground">{row.pledge.fund}</td>
-                        <td className="px-6 py-4 font-semibold">${Number(row.pledge.totalAmount).toLocaleString()}</td>
-                        <td className="px-6 py-4 text-emerald-600">${Number(row.pledge.amountPaid || 0).toLocaleString()}</td>
-                        <td className="px-6 py-4 w-40">
-                          <div className="flex items-center gap-2">
-                            <Progress value={progress} className="h-2" />
-                            <span className="text-xs text-muted-foreground">{progress}%</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">{row.pledge.frequency}</td>
-                        <td className="px-6 py-4">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon"><MoreHorizontal className="w-4 h-4" /></Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => setEditPledgeState(row.pledge)}>Edit Pledge</DropdownMenuItem>
-                              <DropdownMenuItem>Send Reminder</DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+      <div>
+        {loading ? (
+          <div className="text-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#84cc16] mx-auto" /></div>
+        ) : (
+          <section className="rounded-3xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/60 overflow-hidden shadow-sm">
+            <div className="border-b border-slate-200 p-4 dark:border-slate-800">
+              <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">Active Pledges</h2>
+            </div>
+            <div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Donor</th>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Fund</th>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Pledged</th>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Fulfilled</th>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Progress</th>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Frequency</th>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {pledgeList.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-5 py-12 text-center text-slate-500 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl mx-5 my-5">
+                          No active pledges.
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    ) : pledgeList.map((row) => {
+                      const progress = Number(row.pledge.totalAmount) > 0
+                        ? Math.round((Number(row.pledge.amountPaid || 0) / Number(row.pledge.totalAmount)) * 100)
+                        : 0;
+                      return (
+                        <tr key={row.pledge.id} className="hover:bg-muted/30">
+                          <td className="px-6 py-4 font-semibold">
+                            {row.contact ? `${row.contact.firstName} ${row.contact.lastName}` : "Anonymous"}
+                          </td>
+                          <td className="px-6 py-4 text-slate-500">{row.pledge.fund}</td>
+                          <td className="px-6 py-4 font-bold text-slate-900 dark:text-white">${Number(row.pledge.totalAmount).toLocaleString()}</td>
+                          <td className="px-6 py-4 font-bold text-[#84cc16]">${Number(row.pledge.amountPaid || 0).toLocaleString()}</td>
+                          <td className="px-6 py-4 w-40">
+                            <div className="flex items-center gap-2">
+                              <Progress value={progress} className="h-2 flex-1 bg-slate-100 dark:bg-slate-800 [&>div]:bg-[#84cc16]" />
+                              <span className="text-xs font-semibold text-slate-500">{progress}%</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4"><Badge variant="outline" className="font-semibold text-xs rounded-lg">{row.pledge.frequency}</Badge></td>
+                          <td className="px-6 py-4">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon"><MoreHorizontal className="w-4 h-4" /></Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => setEditPledgeState(row.pledge)}>Edit Pledge</DropdownMenuItem>
+                                <DropdownMenuItem>Send Reminder</DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-800/30 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-500">
+                    {pledgeList.length} total pledges
+                  </span>
+                </div>
+              </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </section>
+        )}
+      </div>
     </div>
   );
 }

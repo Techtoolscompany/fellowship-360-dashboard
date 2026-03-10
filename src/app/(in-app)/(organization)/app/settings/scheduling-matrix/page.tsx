@@ -676,7 +676,7 @@ export default function SchedulingMatrixPage() {
       {activeTab === "availability" && (
         <div className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900/60">
           <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
-            Configure each person's availability and preferred roles for scheduling.
+            Configure each person&apos;s availability and preferred roles for scheduling.
           </p>
           <div className="grid gap-4 lg:grid-cols-12">
             {/* Person list */}

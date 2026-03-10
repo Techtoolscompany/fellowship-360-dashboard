@@ -8,11 +8,13 @@ import { useState } from "react";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 
 const navItems: { label: string; href: string }[] = [
-  // { label: "Pricing", href: "/#pricing" },
+  { label: "Roadmap", href: "/roadmap" },
+  { label: "Blog", href: "/blog" },
+  { label: "Contact", href: "/contact" },
 ];
 
 const CTAText = "Get Started";
-const CTAHref = "/#pricing";
+const CTAHref = "/sign-up";
 
 const signInEnabled = process.env.NEXT_PUBLIC_SIGNIN_ENABLED === "true";
 
@@ -76,24 +78,15 @@ export function Header() {
         {isMenuOpen && (
           <div className="border-t border-border/40 md:hidden">
             <div className="space-y-1 px-2 pb-3 pt-2">
-              <Link
-                href="/features"
-                className="block rounded-md px-3 py-2 text-base font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              >
-                Features
-              </Link>
-              <Link
-                href="/solutions"
-                className="block rounded-md px-3 py-2 text-base font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              >
-                Solutions
-              </Link>
-              <Link
-                href="/blog"
-                className="block rounded-md px-3 py-2 text-base font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              >
-                Blog
-              </Link>
+              {navItems.map((item) => (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  className="block rounded-md px-3 py-2 text-base font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                >
+                  {item.label}
+                </Link>
+              ))}
               <Link
                 href="/sign-in"
                 className="block rounded-md px-3 py-2 text-base font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
@@ -102,7 +95,7 @@ export function Header() {
               </Link>
               <div className="px-3 py-2">
                 <Button className="w-full" asChild>
-                  <Link href="/get-started">Get Started</Link>
+                  <Link href={CTAHref}>{CTAText}</Link>
                 </Button>
               </div>
             </div>

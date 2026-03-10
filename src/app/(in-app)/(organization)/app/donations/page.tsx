@@ -2,11 +2,11 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { DollarSign, TrendingUp, Users, PieChart, Download, Calendar, Loader2, Mail, ChevronLeft, ChevronRight } from "lucide-react";
+const ReactApexChart = dynamic(() => import('react-apexcharts'), { ssr: false });
 import useOrganization from "@/lib/organizations/useOrganization";
 import { getDonations, getDonationStats, resendDonationReceipt, sendYearEndGivingStatement } from "@/app/actions/finances";
 import { CreateDonationDialog } from "@/components/dialogs/CreateDonationDialog";
@@ -16,8 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-
-const ReactApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
+import Link from "next/link";
 
 export default function DonationsPage() {
   const { organization } = useOrganization();
@@ -150,14 +149,20 @@ export default function DonationsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <p className="text-muted-foreground mb-1 text-base">Track Your Church Giving</p>
-          <h1 className="text-3xl font-bold text-foreground">Donations</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <Popover>
+    <div className="flex flex-col gap-6 pb-8">
+      {/* Header */}
+      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-100 p-8 dark:border-slate-800 dark:from-slate-900 dark:to-slate-950">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Track Your Church Giving
+            </p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 dark:text-white">
+              Donations
+            </h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Popover>
             <PopoverTrigger asChild>
               <Button
                 variant={"outline"}
@@ -193,60 +198,69 @@ export default function DonationsPage() {
               />
             </PopoverContent>
           </Popover>
-          <Button variant="outline" size="sm" onClick={handleExport}><Download className="w-4 h-4 mr-2" />Export</Button>
+          <button className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all font-semibold text-sm" onClick={handleExport}>
+            <Download className="w-4 h-4" />
+            <span className="hidden sm:inline">Export</span>
+          </button>
+          
           <CreateDonationDialog open={showAddModal} onOpenChange={setShowAddModal} onSuccess={() => fetchData(1, date)}>
-            <Button className="bg-[#bbff00] text-[#1a1d21] hover:bg-[#a8e600]">
-              <DollarSign className="w-4 h-4 mr-2" />Record Donation
-            </Button>
+            <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#84cc16] text-white font-bold text-sm hover:bg-[#65a30d] transition-colors shadow-sm ml-2">
+              <DollarSign className="w-4 h-4" />
+              Record Donation
+            </button>
           </CreateDonationDialog>
         </div>
-      </div>
+        </div>
+      </section>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      {/* Summary Cards */}
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {kpiStats.map((stat, index) => (
-          <Card key={index}>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-muted-foreground text-sm mb-1">{stat.title}</p>
-                  <h3 className="text-2xl font-bold">{loading ? "..." : stat.amount}</h3>
-                </div>
-                <div className={`w-12 h-12 rounded-full ${stat.iconBg} flex items-center justify-center`}>
-                  <stat.icon className={`w-6 h-6 ${stat.iconColor}`} />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <div
+            key={index}
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/60"
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <stat.icon className="h-5 w-5 text-slate-500 dark:text-slate-300" />
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Live</span>
+            </div>
+            <p className="text-3xl font-black text-slate-900 dark:text-white">
+              {loading ? "..." : stat.amount}
+            </p>
+            <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.title}</p>
+          </div>
         ))}
-      </div>
+      </section>
 
-      {/* Fund Breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Recent Donations</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
+      {/* Tables and Charts Section */}
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 rounded-3xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/60 overflow-hidden shadow-sm">
+          {/* Header */}
+          <div className="border-b border-slate-200 p-4 dark:border-slate-800">
+            <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">Recent Donations</h2>
+          </div>
+          
+          <div>
             {loading ? (
-              <div className="text-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#bbff00] mx-auto" /></div>
+              <div className="text-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#84cc16] mx-auto" /></div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 border-b">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
                     <tr>
-                      <th className="px-6 py-3 text-left font-medium text-muted-foreground">Date</th>
-                      <th className="px-6 py-3 text-left font-medium text-muted-foreground">Donor</th>
-                      <th className="px-6 py-3 text-left font-medium text-muted-foreground">Amount</th>
-                      <th className="px-6 py-3 text-left font-medium text-muted-foreground">Fund</th>
-                      <th className="px-6 py-3 text-left font-medium text-muted-foreground">Method</th>
-                      <th className="px-6 py-3 text-left font-medium text-muted-foreground">Receipt</th>
-                      <th className="px-6 py-3 text-left font-medium text-muted-foreground">Actions</th>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Date</th>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Donor</th>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Amount</th>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Fund</th>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Method</th>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Receipt</th>
+                      <th className="px-5 py-3.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y">
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {donationList.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground">
+                        <td colSpan={7} className="px-5 py-12 text-center text-slate-500 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl mx-5 my-5">
                           No donations recorded yet.
                         </td>
                       </tr>
@@ -300,62 +314,63 @@ export default function DonationsPage() {
                 </table>
               </div>
             )}
+            
+            {/* Pagination */}
             {!loading && pageCount > 1 && (
-              <div className="flex items-center justify-between px-6 py-3 border-t text-sm text-muted-foreground">
-                <span>
-                  Showing {Math.min((page - 1) * 50 + 1, total)}–{Math.min(page * 50, total)} of {total} donations
+              <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-800/30 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-500">
+                  Showing {Math.min((page - 1) * 50 + 1, total)}–{Math.min(page * 50, total)} of {total.toLocaleString()}
                 </span>
                 <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
+                  <button
                     disabled={page <= 1}
                     onClick={() => { const p = page - 1; setPage(p); fetchData(p, date); }}
+                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <ChevronLeft className="w-4 h-4" />
-                  </Button>
-                  <span className="px-2">{page} / {pageCount}</span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-xs font-medium text-slate-600 dark:text-slate-400 px-2">{page} / {pageCount}</span>
+                  <button
                     disabled={page >= pageCount}
                     onClick={() => { const p = page + 1; setPage(p); fetchData(p, date); }}
+                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <ChevronRight className="w-4 h-4" />
-                  </Button>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Fund Breakdown</CardTitle>
-          </CardHeader>
-          <CardContent className="flex items-center justify-center">
+          </div>
+        </div>
+        <div className="rounded-3xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/60 overflow-hidden shadow-sm">
+          <div className="border-b border-slate-200 p-4 dark:border-slate-800">
+            <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">Fund Breakdown</h2>
+          </div>
+          <div className="p-6 flex items-center justify-center">
             {!loading && <ReactApexChart options={fundBreakdownData.options} series={fundBreakdownData.series} type="donut" height={280} />}
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </div>
+      </section>
+      
       <Dialog open={!!yearEndContactId} onOpenChange={(open) => !open && setYearEndContactId(null)}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-sm rounded-3xl">
           <DialogHeader>
             <DialogTitle>Send Year-End Giving Statement</DialogTitle>
           </DialogHeader>
           <div className="py-4">
-            <label className="text-sm font-medium text-foreground block mb-2">Statement Year</label>
+            <label className="text-sm font-medium text-slate-900 dark:text-slate-200 block mb-2">Statement Year</label>
             <input
               type="number"
               min={2000}
               max={new Date().getFullYear()}
               value={yearEndYear}
               onChange={(e) => setYearEndYear(e.target.value)}
-              className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-lime-500/40"
+              className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-[#84cc16]/40 transition-all font-semibold"
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setYearEndContactId(null)}>Cancel</Button>
-            <Button onClick={handleSendYearEnd} disabled={sendingYearEnd} className="bg-lime-500 text-slate-950 hover:bg-lime-400">
+            <Button variant="outline" className="rounded-xl" onClick={() => setYearEndContactId(null)}>Cancel</Button>
+            <Button onClick={handleSendYearEnd} disabled={sendingYearEnd} className="rounded-xl bg-[#84cc16] text-white font-bold hover:bg-[#65a30d]">
               {sendingYearEnd ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
               Send Statement
             </Button>

@@ -26,18 +26,18 @@ export function Footer() {
             <ul className="mt-2 space-y-2 text-sm">
               <li>
                 <Link
-                  href="/features"
+                  href="/app/grace"
                   className="text-muted-foreground hover:text-primary"
                 >
-                  Features
+                  Grace Workspace
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/pricing"
+                  href="/roadmap"
                   className="text-muted-foreground hover:text-primary"
                 >
-                  Pricing
+                  Roadmap
                 </Link>
               </li>
               <li>
@@ -50,10 +50,10 @@ export function Footer() {
               </li>
               <li>
                 <Link
-                  href="/api"
+                  href="/join-waitlist"
                   className="text-muted-foreground hover:text-primary"
                 >
-                  API
+                  Join Waitlist
                 </Link>
               </li>
             </ul>
@@ -73,10 +73,10 @@ export function Footer() {
               </li>
               <li>
                 <Link
-                  href="/careers"
+                  href="/contact"
                   className="text-muted-foreground hover:text-primary"
                 >
-                  Careers
+                  Contact
                 </Link>
               </li>
               <li>
@@ -89,10 +89,10 @@ export function Footer() {
               </li>
               <li>
                 <Link
-                  href="/partners"
+                  href="/terms"
                   className="text-muted-foreground hover:text-primary"
                 >
-                  Partners
+                  Terms
                 </Link>
               </li>
             </ul>
@@ -104,34 +104,34 @@ export function Footer() {
             <ul className="mt-2 space-y-2 text-sm">
               <li>
                 <Link
-                  href="/community"
+                  href="/app/grace-center"
                   className="text-muted-foreground hover:text-primary"
                 >
-                  Community
+                  Grace Center
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/contact"
+                  href="/docs"
                   className="text-muted-foreground hover:text-primary"
                 >
-                  Contact
+                  Docs
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/support"
+                  href="/privacy"
                   className="text-muted-foreground hover:text-primary"
                 >
-                  Support
+                  Privacy
                 </Link>
               </li>
               <li>
                 <Link
-                  href="/status"
+                  href="/refund"
                   className="text-muted-foreground hover:text-primary"
                 >
-                  Status
+                  Refund
                 </Link>
               </li>
             </ul>

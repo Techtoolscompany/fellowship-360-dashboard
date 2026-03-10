@@ -173,7 +173,7 @@ function SidebarContent({ className, isCollapsed }: { className?: string; isColl
             <NavItem href="/app?tab=inbox" icon={MessageCircle} isCollapsed={isCollapsed}>
               Communications
             </NavItem>
-            <NavItem href="/app/people" icon={Users} isCollapsed={isCollapsed}>
+            <NavItem href="/app/contacts" icon={Users} isCollapsed={isCollapsed}>
               People
             </NavItem>
             <NavItem href="/app/tasks" icon={CheckCircle} isCollapsed={isCollapsed}>

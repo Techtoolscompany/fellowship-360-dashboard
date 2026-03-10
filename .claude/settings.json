@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /Users/studiocomp/Documents/fellowship-360-app/src/components/dialogs/*.tsx)",
+      "Bash(ls -la /Users/studiocomp/Documents/fellowship-360-app/src/app/\\\\\\(in-app\\\\\\)/\\\\\\(organization\\\\\\)/app/pipeline/)",
+      "Bash(grep -l \"TODO\\\\|FIXME\\\\|placeholder\\\\|skeleton\" /Users/studiocomp/Documents/fellowship-360-app/src/app/\\\\\\(in-app\\\\\\)/\\\\\\(organization\\\\\\)/app/**/*.tsx)",
+      "Bash(ls /Users/studiocomp/Documents/fellowship-360-app/drizzle/*.sql)",
+      "Bash(pnpm drizzle-kit generate --name=sms_gateway)",
+      "Bash(pnpm tsc --noEmit)",
+      "Bash(pnpm build)",
+      "Bash(grep -n \"auditLog\\\\|audit_log\\\\|console.log\" /Users/studiocomp/Documents/fellowship-360-app/src/app/api/super-admin/users/*/impersonate/route.ts)",
+      "Bash(xargs cat)",
+      "Bash(pnpm tsc --noEmit --skipLibCheck)",
+      "Bash(for file in \"/Users/studiocomp/Documents/fellowship-360-app/src/components/dialogs/EditMinistryDialog.tsx\" \"/Users/studiocomp/Documents/fellowship-360-app/src/components/dialogs/CreatePrayerRequestDialog.tsx\" \"/Users/studiocomp/Documents/fellowship-360-app/src/components/dialogs/EditPrayerRequestDialog.tsx\" \"/Users/studiocomp/Documents/fellowship-360-app/src/components/dialogs/CreateAppointmentDialog.tsx\" \"/Users/studiocomp/Documents/fellowship-360-app/src/components/dialogs/CreatePledgeDialog.tsx\" \"/Users/studiocomp/Documents/fellowship-360-app/src/components/dialogs/EditAppointmentDialog.tsx\" \"/Users/studiocomp/Documents/fellowship-360-app/src/components/dialogs/EditPledgeDialog.tsx\" \"/Users/studiocomp/Documents/fellowship-360-app/src/components/dialogs/CreateMinistryDialog.tsx\")",
+      "Bash(do)",
+      "Bash(python3 -c \":*)",
+      "Bash(done)",
+      "Bash(ls -la /Users/studiocomp/Documents/fellowship-360-app/src/app/\\\\\\(in-app\\\\\\)/\\\\\\(organization\\\\\\)/app/)",
+      "Bash(ls -la /Users/studiocomp/Documents/fellowship-360-app/src/app/\\\\\\(in-app\\\\\\)/\\\\\\(organization\\\\\\)/app/settings/)",
+      "Bash(ls -la /Users/studiocomp/Documents/fellowship-360-app/src/app/\\\\\\(in-app\\\\\\)/\\\\\\(organization\\\\\\)/app/get-started/)",
+      "Bash(head -2000 /Users/studiocomp/Documents/fellowship-360-app/src/app/\\\\\\(in-app\\\\\\)/\\\\\\(organization\\\\\\)/app/grace/page.tsx)",
+      "Bash(wc -l /Users/studiocomp/Documents/fellowship-360-app/src/app/\\\\\\(in-app\\\\\\)/\\\\\\(organization\\\\\\)/app/grace/page.tsx)",
+      "Bash(ls -la /Users/studiocomp/Documents/fellowship-360-app/src/app/\\\\\\(in-app\\\\\\)/\\\\\\(organization\\\\\\)/app/grace/components/)",
+      "Bash(wc -l /Users/studiocomp/Documents/fellowship-360-app/src/app/actions/*.ts)",
+      "Bash(ls /Users/studiocomp/Documents/fellowship-360-app/src/app/\\\\\\(in-app\\\\\\)/\\\\\\(organization\\\\\\)/app/grace/components/)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx tsx -e \":*)",
+      "Bash(RESET_EMAIL=\"admin@fellowship360.com\" RESET_PASSWORD=\"Admin1234!\" npx tsx scripts/reset-password.ts)",
+      "Bash(ls /Users/studiocomp/Documents/fellowship-360-app/src/app/\\\\\\(in-app\\\\\\)/\\\\\\(organization\\\\\\)/app/people/)",
+      "Bash(ls /Users/studiocomp/Documents/fellowship-360-app/src/app/\\\\\\(in-app\\\\\\)/\\\\\\(organization\\\\\\)/app/settings/scheduling-matrix/)",
+      "Bash(ls /Users/studiocomp/Documents/fellowship-360-app/src/app/\\\\\\(in-app\\\\\\)/\\\\\\(organization\\\\\\)/app/settings/role-matrix/)",
+      "Bash(git commit:*)"
+    ]
+  }
+}
