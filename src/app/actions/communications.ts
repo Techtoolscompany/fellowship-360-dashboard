@@ -8,12 +8,33 @@ import {
   messageTemplates,
   churchContacts,
 } from "@/db/schema";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, sql, ne } from "drizzle-orm";
 import { requireOrgMembership } from "./utils";
+
+const CONVERSATION_STATUSES = ["open", "waiting", "resolved", "archived"] as const;
+type ConversationStatus = (typeof CONVERSATION_STATUSES)[number];
+const CONVERSATION_STATUS_SET = new Set<string>(CONVERSATION_STATUSES);
+const CONVERSATION_STATUS_TRANSITIONS: Record<ConversationStatus, Set<ConversationStatus>> = {
+  open: new Set(["waiting", "resolved", "archived"]),
+  waiting: new Set(["open", "resolved", "archived"]),
+  resolved: new Set(["open", "archived"]),
+  archived: new Set(["open"]),
+};
+
+function parseConversationStatus(status: string): ConversationStatus {
+  if (!CONVERSATION_STATUS_SET.has(status)) {
+    throw new Error(`Invalid conversation status: ${status}`);
+  }
+  return status as ConversationStatus;
+}
 
 async function requireConversationAccess(conversationId: string) {
   const [conversation] = await db
-    .select({ id: conversations.id, organizationId: conversations.organizationId })
+    .select({
+      id: conversations.id,
+      organizationId: conversations.organizationId,
+      status: conversations.status,
+    })
     .from(conversations)
     .where(eq(conversations.id, conversationId))
     .limit(1);
@@ -47,32 +68,34 @@ async function requireTemplateAccess(templateId: string) {
 // ── Conversations ──
 export async function getConversations(
   orgId: string,
-  filters?: { status?: string }
+  filters?: { status?: string; includeArchived?: boolean }
 ) {
   await requireOrgMembership(orgId);
 
   if (filters?.status) {
-    return await db
+    const status = parseConversationStatus(filters.status);
+    return db
       .select({ conversation: conversations, contact: churchContacts })
       .from(conversations)
-      .leftJoin(
-        churchContacts,
-        eq(conversations.contactId, churchContacts.id)
-      )
-      .where(
-        and(
-          eq(conversations.organizationId, orgId),
-          eq(conversations.status, filters.status as any)
-        )
-      )
-      .orderBy(desc(conversations.lastMessageAt));
+      .leftJoin(churchContacts, eq(conversations.contactId, churchContacts.id))
+      .where(and(eq(conversations.organizationId, orgId), eq(conversations.status, status)))
+      .orderBy(desc(conversations.lastMessageAt), desc(conversations.updatedAt));
   }
-  return await db
+
+  const query = db
     .select({ conversation: conversations, contact: churchContacts })
     .from(conversations)
-    .leftJoin(churchContacts, eq(conversations.contactId, churchContacts.id))
-    .where(eq(conversations.organizationId, orgId))
-    .orderBy(desc(conversations.lastMessageAt));
+    .leftJoin(churchContacts, eq(conversations.contactId, churchContacts.id));
+
+  if (filters?.includeArchived) {
+    return query
+      .where(eq(conversations.organizationId, orgId))
+      .orderBy(desc(conversations.lastMessageAt), desc(conversations.updatedAt));
+  }
+
+  return query
+    .where(and(eq(conversations.organizationId, orgId), ne(conversations.status, "archived")))
+    .orderBy(desc(conversations.lastMessageAt), desc(conversations.updatedAt));
 }
 
 export async function getConversationMessages(conversationId: string) {
@@ -142,13 +165,43 @@ export async function updateConversationStatus(
   id: string,
   status: string
 ) {
+  const nextStatus = parseConversationStatus(status);
   const existing = await requireConversationAccess(id);
+  const currentStatus = parseConversationStatus(existing.status);
+  if (currentStatus !== nextStatus) {
+    const allowedNextStatuses = CONVERSATION_STATUS_TRANSITIONS[currentStatus];
+    if (!allowedNextStatuses.has(nextStatus)) {
+      throw new Error(
+        `Cannot transition conversation from ${currentStatus} to ${nextStatus}`
+      );
+    }
+  }
+
   const [conversation] = await db
     .update(conversations)
-    .set({ status: status as any, updatedAt: new Date() })
+    .set({ status: nextStatus, updatedAt: new Date() } as any)
     .where(and(eq(conversations.id, id), eq(conversations.organizationId, existing.organizationId)))
     .returning();
+  if (!conversation) {
+    throw new Error("Conversation not found");
+  }
   return conversation;
+}
+
+export async function markConversationWaiting(id: string) {
+  return updateConversationStatus(id, "waiting");
+}
+
+export async function resolveConversation(id: string) {
+  return updateConversationStatus(id, "resolved");
+}
+
+export async function archiveConversation(id: string) {
+  return updateConversationStatus(id, "archived");
+}
+
+export async function reopenConversation(id: string) {
+  return updateConversationStatus(id, "open");
 }
 
 // ── Broadcasts ──
@@ -348,6 +401,7 @@ export async function getConversationStats(orgId: string) {
       open: sql<number>`count(*) filter (where ${conversations.status} = 'open')`,
       waiting: sql<number>`count(*) filter (where ${conversations.status} = 'waiting')`,
       resolved: sql<number>`count(*) filter (where ${conversations.status} = 'resolved')`,
+      archived: sql<number>`count(*) filter (where ${conversations.status} = 'archived')`,
     })
     .from(conversations)
     .where(eq(conversations.organizationId, orgId));

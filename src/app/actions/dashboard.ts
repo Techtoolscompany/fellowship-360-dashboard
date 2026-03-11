@@ -57,6 +57,7 @@ export async function getGraceDashboardData(orgId: string) {
       open: count(sql`CASE WHEN ${conversations.status} = 'open' THEN 1 END`),
       waiting: count(sql`CASE WHEN ${conversations.status} = 'waiting' THEN 1 END`),
       resolved: count(sql`CASE WHEN ${conversations.status} = 'resolved' THEN 1 END`),
+      archived: count(sql`CASE WHEN ${conversations.status} = 'archived' THEN 1 END`),
     }).from(conversations).where(eq(conversations.organizationId, orgId)),
 
     // Broadcast stats (statuses: draft, scheduled, sending, sent, failed)

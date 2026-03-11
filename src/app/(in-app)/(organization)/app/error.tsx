@@ -23,7 +23,10 @@ export default function InAppError({
         </p>
         <div className="flex items-center justify-center gap-3">
           <Button onClick={reset}>Retry</Button>
-          <Button variant="outline" onClick={() => window.location.assign("/app?tab=command")}>
+          <Button
+            variant="outline"
+            onClick={() => window.location.assign("/app/grace?tab=command")}
+          >
             Command Center
           </Button>
         </div>

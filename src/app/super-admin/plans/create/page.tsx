@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import type { PlanFormValues } from "@/lib/validations/plan.schema";
+import { toast } from "sonner";
 
 export default function CreatePlanPage() {
   const router = useRouter();
@@ -21,13 +22,17 @@ export default function CreatePlanPage() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to create plan");
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(payload.error || "Failed to create plan");
       }
 
+      toast.success("Plan created");
       router.push("/super-admin/plans");
     } catch (error) {
       console.error("Error creating plan:", error);
-      // TODO: Add error toast
+      toast.error(error instanceof Error ? error.message : "Failed to create plan");
     }
   };
 

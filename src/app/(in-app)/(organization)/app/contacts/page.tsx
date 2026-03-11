@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { CreateContactDialog } from "@/components/dialogs/CreateContactDialog";
 import { ImportContactsDialog } from "@/components/dialogs/ImportContactsDialog";
 import useOrganization from "@/lib/organizations/useOrganization";
-import { getContacts, deleteContact } from "@/app/actions/contacts";
+import { getContacts, archiveContact, restoreContact } from "@/app/actions/contacts";
 
 const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
   member:           { label: "Member",          className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400" },
@@ -86,10 +86,27 @@ export default function ContactsPage() {
     return () => clearTimeout(t);
   }, [fetchContacts, page]);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this contact?")) return;
-    await deleteContact(id);
-    fetchContacts();
+  const handleArchiveToggle = async (id: string, currentlyInactive: boolean) => {
+    const confirmed = confirm(
+      currentlyInactive
+        ? "Restore this contact to active status?"
+        : "Archive this contact? You can restore it later."
+    );
+    if (!confirmed) return;
+
+    try {
+      if (currentlyInactive) {
+        await restoreContact(id, "visitor");
+        toast.success("Contact restored");
+      } else {
+        await archiveContact(id);
+        toast.success("Contact archived");
+      }
+      await fetchContacts();
+    } catch (error) {
+      console.error("Failed to update contact status:", error);
+      toast.error("Failed to update contact status");
+    }
   };
 
   const handleExport = () => {
@@ -109,12 +126,14 @@ export default function ContactsPage() {
   const memberCount = contacts.filter(c => c.memberStatus === "member").length;
   const visitorCount = contacts.filter(c => c.memberStatus === "visitor").length;
   const prospectCount = contacts.filter(c => c.memberStatus === "prospect").length;
+  const archivedCount = contacts.filter(c => c.memberStatus === "inactive").length;
 
   const STATUS_FILTERS = [
     { id: "all",      label: "All",       count: statusFilter === "all" ? total : null },
     { id: "member",   label: "Members",   count: statusFilter === "member" ? total : null },
     { id: "visitor",  label: "Visitors",  count: statusFilter === "visitor" ? total : null },
     { id: "prospect", label: "Prospects", count: statusFilter === "prospect" ? total : null },
+    { id: "inactive", label: "Archived",  count: statusFilter === "inactive" ? total : null },
   ];
 
   return (
@@ -150,12 +169,13 @@ export default function ContactsPage() {
       </div>
 
       {/* Stat chips */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
           { label: "Total", value: total,              color: "text-slate-900 dark:text-white",          bg: "bg-white dark:bg-slate-900" },
           { label: "Members",   value: memberCount,    color: "text-emerald-700 dark:text-emerald-400",  bg: "bg-emerald-50 dark:bg-emerald-500/10" },
           { label: "Visitors",  value: visitorCount,   color: "text-sky-700 dark:text-sky-400",          bg: "bg-sky-50 dark:bg-sky-500/10" },
           { label: "Prospects", value: prospectCount,  color: "text-orange-700 dark:text-orange-400",     bg: "bg-orange-50 dark:bg-orange-500/10" },
+          { label: "Archived",  value: archivedCount,  color: "text-slate-700 dark:text-slate-300",      bg: "bg-slate-100 dark:bg-slate-700/30" },
         ].map(({ label, value, color, bg }) => (
           <div key={label} className={`${bg} border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm`}>
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">{label}</p>
@@ -328,10 +348,17 @@ export default function ContactsPage() {
                       </td>
                       <td className="px-5 py-4 text-right">
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }}
-                          className="text-xs font-semibold text-slate-400 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 px-2 py-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleArchiveToggle(c.id, c.memberStatus === "inactive");
+                          }}
+                          className={`text-xs font-semibold transition-colors opacity-0 group-hover:opacity-100 px-2 py-1 rounded-lg ${
+                            c.memberStatus === "inactive"
+                              ? "text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10"
+                              : "text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10"
+                          }`}
                         >
-                          Delete
+                          {c.memberStatus === "inactive" ? "Restore" : "Archive"}
                         </button>
                       </td>
                     </tr>

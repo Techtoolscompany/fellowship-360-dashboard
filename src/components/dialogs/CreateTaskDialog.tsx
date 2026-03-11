@@ -1,5 +1,6 @@
+"use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -41,7 +42,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
-import { createTask } from "@/app/actions/tasks";
+import { createTask, getTaskAssignees } from "@/app/actions/tasks";
 import useOrganization from "@/lib/organizations/useOrganization";
 
 const formSchema = z.object({
@@ -67,6 +68,9 @@ export function CreateTaskDialog({
 }: CreateTaskDialogProps) {
   const { organization } = useOrganization();
   const [loading, setLoading] = useState(false);
+  const [assignees, setAssignees] = useState<
+    Array<{ id: string; name: string | null; email: string; role: string }>
+  >([]);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -76,6 +80,20 @@ export function CreateTaskDialog({
       priority: "medium",
     },
   });
+
+  useEffect(() => {
+    if (!organization?.id) {
+      setAssignees([]);
+      return;
+    }
+
+    void getTaskAssignees(organization.id)
+      .then((rows) => setAssignees(rows))
+      .catch((error) => {
+        console.error("Failed to load task assignees:", error);
+        setAssignees([]);
+      });
+  }, [organization?.id]);
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     if (!organization?.id) return;
@@ -103,7 +121,7 @@ export function CreateTaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
+      {children ? <DialogTrigger asChild>{children}</DialogTrigger> : null}
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>Add Task</DialogTitle>
@@ -148,6 +166,7 @@ export function CreateTaskDialog({
                         <SelectItem value="low">Low</SelectItem>
                         <SelectItem value="medium">Medium</SelectItem>
                         <SelectItem value="high">High</SelectItem>
+                        <SelectItem value="urgent">Urgent</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -197,6 +216,38 @@ export function CreateTaskDialog({
                 )}
               />
             </div>
+
+            <FormField
+              control={form.control}
+              name="assigneeId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Owner</FormLabel>
+                  <Select
+                    value={field.value || "unassigned"}
+                    onValueChange={(value) =>
+                      field.onChange(value === "unassigned" ? undefined : value)
+                    }
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Assign owner" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
+                      {assignees.map((assignee) => (
+                        <SelectItem key={assignee.id} value={assignee.id}>
+                          {(assignee.name || assignee.email) +
+                            (assignee.role ? ` · ${assignee.role}` : "")}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <FormField
               control={form.control}

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function AppointmentsPage() {
-  redirect("/app?tab=command");
+  redirect("/app/grace?tab=calendar");
 }

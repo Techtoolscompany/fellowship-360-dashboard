@@ -11,13 +11,15 @@ import {
   graceFollowupProposals,
   graceMemory,
   graceGoals,
+  graceHandoffs,
   churchContacts,
+  conversations,
   tasks,
   providerConfigs,
   gracePolicyConfigs,
 } from "@/db/schema";
 import { organizationMemberships } from "@/db/schema/organization-membership";
-import { and, desc, eq, gte, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { runGraceMessage } from "@/lib/grace/runtime";
 import { sendTextBeeSMS } from "@/lib/grace/channels/sms/textbee";
@@ -64,6 +66,26 @@ function normalizeMetadata(value: unknown): Record<string, unknown> {
     return {};
   }
   return { ...(value as Record<string, unknown>) };
+}
+
+function normalizeOptionalText(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const text = String(value).trim();
+  return text.length > 0 ? text : null;
+}
+
+function normalizeOptionalDate(
+  value: Date | string | null | undefined,
+  label: string
+): Date | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`${label} must be a valid date`);
+  }
+  return date;
 }
 
 function renderProposalEmailBody(message: string): string {
@@ -169,10 +191,390 @@ export async function getGraceSessions(organizationId: string) {
 export async function getGraceCalls(organizationId: string) {
   await requireOrgMembership(organizationId);
   return db
-    .select()
+    .select({
+      call: graceCalls,
+      session: graceSessions,
+      contact: churchContacts,
+      linkedConversationId: sql<string | null>`(
+        select c.id
+        from conversation c
+        where c.organization_id = ${graceCalls.organizationId}
+          and c.channel = 'phone'
+          and (
+            (${graceCalls.contactId} is not null and c.contact_id = ${graceCalls.contactId})
+            or (${graceCalls.contactId} is null and ${graceSessions.matchedContactId} is not null and c.contact_id = ${graceSessions.matchedContactId})
+          )
+        order by c.last_message_at desc nulls last, c.created_at desc
+        limit 1
+      )`,
+      latestHandoffId: sql<string | null>`(
+        select gh.id
+        from grace_handoff gh
+        where gh.organization_id = ${graceCalls.organizationId}
+          and gh.session_id = ${graceCalls.sessionId}
+        order by gh.created_at desc
+        limit 1
+      )`,
+      latestHandoffStatus: sql<"open" | "acknowledged" | "resolved" | null>`(
+        select gh.status
+        from grace_handoff gh
+        where gh.organization_id = ${graceCalls.organizationId}
+          and gh.session_id = ${graceCalls.sessionId}
+        order by gh.created_at desc
+        limit 1
+      )`,
+      latestHandoffReason: sql<string | null>`(
+        select gh.reason
+        from grace_handoff gh
+        where gh.organization_id = ${graceCalls.organizationId}
+          and gh.session_id = ${graceCalls.sessionId}
+        order by gh.created_at desc
+        limit 1
+      )`,
+      latestHandoffCreatedAt: sql<Date | null>`(
+        select gh.created_at
+        from grace_handoff gh
+        where gh.organization_id = ${graceCalls.organizationId}
+          and gh.session_id = ${graceCalls.sessionId}
+        order by gh.created_at desc
+        limit 1
+      )`,
+    })
     .from(graceCalls)
+    .leftJoin(graceSessions, eq(graceCalls.sessionId, graceSessions.id))
+    .leftJoin(
+      churchContacts,
+      sql`${churchContacts.id} = coalesce(${graceCalls.contactId}, ${graceSessions.contactId}, ${graceSessions.matchedContactId})`
+    )
     .where(eq(graceCalls.organizationId, organizationId))
     .orderBy(desc(graceCalls.createdAt));
+}
+
+export async function updateGraceCall(input: {
+  organizationId: string;
+  callId: string;
+  contactId?: string | null;
+  startedAt?: Date | string | null;
+  endedAt?: Date | string | null;
+  durationSec?: number | null;
+  recordingUrl?: string | null;
+  transcriptText?: string | null;
+  summaryText?: string | null;
+  intent?: string | null;
+  outcome?: string | null;
+}) {
+  await requireOrgMembership(input.organizationId);
+  const [existing] = await db
+    .select({
+      id: graceCalls.id,
+      contactId: graceCalls.contactId,
+      startedAt: graceCalls.startedAt,
+      endedAt: graceCalls.endedAt,
+      durationSec: graceCalls.durationSec,
+      recordingUrl: graceCalls.recordingUrl,
+      transcriptText: graceCalls.transcriptText,
+      summaryText: graceCalls.summaryText,
+      intent: graceCalls.intent,
+      outcome: graceCalls.outcome,
+    })
+    .from(graceCalls)
+    .where(
+      and(
+        eq(graceCalls.organizationId, input.organizationId),
+        eq(graceCalls.id, input.callId)
+      )
+    )
+    .limit(1);
+
+  if (!existing) {
+    throw new Error("Call record not found");
+  }
+
+  const updates: {
+    contactId?: string | null;
+    startedAt?: Date | null;
+    endedAt?: Date | null;
+    durationSec?: number | null;
+    recordingUrl?: string | null;
+    transcriptText?: string | null;
+    summaryText?: string | null;
+    intent?: string | null;
+    outcome?: string | null;
+  } = {};
+
+  if (input.contactId !== undefined) {
+    const nextContactId = input.contactId ? String(input.contactId).trim() : null;
+    if (nextContactId) {
+      const [contact] = await db
+        .select({ id: churchContacts.id })
+        .from(churchContacts)
+        .where(
+          and(
+            eq(churchContacts.organizationId, input.organizationId),
+            eq(churchContacts.id, nextContactId)
+          )
+        )
+        .limit(1);
+
+      if (!contact) {
+        throw new Error("Contact not found for this organization");
+      }
+      updates.contactId = contact.id;
+    } else {
+      updates.contactId = null;
+    }
+  }
+
+  const startedAt = normalizeOptionalDate(input.startedAt, "startedAt");
+  if (startedAt !== undefined) {
+    updates.startedAt = startedAt;
+  }
+
+  const endedAt = normalizeOptionalDate(input.endedAt, "endedAt");
+  if (endedAt !== undefined) {
+    updates.endedAt = endedAt;
+  }
+
+  const nextStartedAt =
+    updates.startedAt !== undefined ? updates.startedAt : existing.startedAt;
+  const nextEndedAt = updates.endedAt !== undefined ? updates.endedAt : existing.endedAt;
+  if (nextStartedAt && nextEndedAt && nextEndedAt.getTime() < nextStartedAt.getTime()) {
+    throw new Error("endedAt cannot be before startedAt");
+  }
+
+  if (input.durationSec !== undefined) {
+    if (input.durationSec === null) {
+      updates.durationSec = null;
+    } else {
+      const parsed = Number(input.durationSec);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        throw new Error("durationSec must be a non-negative number");
+      }
+      updates.durationSec = Math.round(parsed);
+    }
+  } else if (updates.startedAt !== undefined || updates.endedAt !== undefined) {
+    if (nextStartedAt && nextEndedAt) {
+      updates.durationSec = Math.max(
+        0,
+        Math.round((nextEndedAt.getTime() - nextStartedAt.getTime()) / 1000)
+      );
+    }
+  }
+
+  const recordingUrl = normalizeOptionalText(input.recordingUrl);
+  if (recordingUrl !== undefined) updates.recordingUrl = recordingUrl;
+
+  const transcriptText = normalizeOptionalText(input.transcriptText);
+  if (transcriptText !== undefined) updates.transcriptText = transcriptText;
+
+  const summaryText = normalizeOptionalText(input.summaryText);
+  if (summaryText !== undefined) updates.summaryText = summaryText;
+
+  const intent = normalizeOptionalText(input.intent);
+  if (intent !== undefined) updates.intent = intent;
+
+  const outcome = normalizeOptionalText(input.outcome);
+  if (outcome !== undefined) updates.outcome = outcome;
+
+  if (Object.keys(updates).length === 0) {
+    throw new Error("No call fields provided to update");
+  }
+
+  const [updated] = await db
+    .update(graceCalls)
+    .set(updates)
+    .where(
+      and(
+        eq(graceCalls.organizationId, input.organizationId),
+        eq(graceCalls.id, input.callId)
+      )
+    )
+    .returning();
+
+  if (!updated) {
+    throw new Error("Call record not found");
+  }
+
+  return updated;
+}
+
+export async function escalateGraceCall(input: {
+  organizationId: string;
+  callId: string;
+  reason: string;
+  summaryText?: string | null;
+  assignedTeam?: string | null;
+  metadataJson?: Record<string, unknown>;
+}) {
+  await requireOrgMembership(input.organizationId);
+  const reason = String(input.reason || "").trim();
+  if (!reason) {
+    throw new Error("reason is required");
+  }
+
+  const [callRow] = await db
+    .select({
+      id: graceCalls.id,
+      sessionId: graceCalls.sessionId,
+      callContactId: graceCalls.contactId,
+      callSummaryText: graceCalls.summaryText,
+      callTranscriptText: graceCalls.transcriptText,
+      sessionActorType: graceSessions.actorType,
+      sessionContactId: graceSessions.contactId,
+      sessionMatchedContactId: graceSessions.matchedContactId,
+    })
+    .from(graceCalls)
+    .innerJoin(
+      graceSessions,
+      and(
+        eq(graceCalls.sessionId, graceSessions.id),
+        eq(graceSessions.organizationId, input.organizationId)
+      )
+    )
+    .where(
+      and(
+        eq(graceCalls.organizationId, input.organizationId),
+        eq(graceCalls.id, input.callId)
+      )
+    )
+    .limit(1);
+
+  if (!callRow) {
+    throw new Error("Call record not found");
+  }
+
+  const summaryText =
+    normalizeOptionalText(input.summaryText) ??
+    normalizeOptionalText(callRow.callSummaryText) ??
+    normalizeOptionalText(callRow.callTranscriptText) ??
+    `Call ${callRow.id} requires escalation`;
+  const assignedTeam = normalizeOptionalText(input.assignedTeam) ?? "pastoral_care";
+  const resolvedContactId =
+    callRow.callContactId ??
+    callRow.sessionContactId ??
+    callRow.sessionMatchedContactId ??
+    null;
+
+  await db
+    .update(graceSessions)
+    .set({
+      status: "escalated",
+      handoffReason: reason,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(graceSessions.organizationId, input.organizationId),
+        eq(graceSessions.id, callRow.sessionId)
+      )
+    );
+
+  await db
+    .update(graceCalls)
+    .set({
+      outcome: "escalated",
+      ...(resolvedContactId && { contactId: resolvedContactId }),
+    })
+    .where(
+      and(
+        eq(graceCalls.organizationId, input.organizationId),
+        eq(graceCalls.id, callRow.id)
+      )
+    );
+
+  const [existingOpenHandoff] = await db
+    .select({ id: graceHandoffs.id })
+    .from(graceHandoffs)
+    .where(
+      and(
+        eq(graceHandoffs.organizationId, input.organizationId),
+        eq(graceHandoffs.sessionId, callRow.sessionId),
+        eq(graceHandoffs.status, "open")
+      )
+    )
+    .limit(1);
+
+  let handoffId = existingOpenHandoff?.id ?? null;
+  let createdHandoff = false;
+
+  if (!handoffId) {
+    const [createdHandoffRow] = await db
+      .insert(graceHandoffs)
+      .values({
+        organizationId: input.organizationId,
+        sessionId: callRow.sessionId,
+        contactId: resolvedContactId,
+        actorType: callRow.sessionActorType,
+        reason,
+        summaryText,
+        assignedTeam,
+        status: "open",
+        metadataJson: {
+          ...(input.metadataJson ?? {}),
+          source: "calls.escalate",
+          callId: callRow.id,
+        },
+      })
+      .returning({ id: graceHandoffs.id });
+
+    handoffId = createdHandoffRow?.id ?? null;
+    createdHandoff = Boolean(handoffId);
+  }
+
+  let linkedConversationId: string | null = null;
+  if (resolvedContactId) {
+    const [conversation] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.organizationId, input.organizationId),
+          eq(conversations.channel, "phone"),
+          eq(conversations.contactId, resolvedContactId)
+        )
+      )
+      .orderBy(desc(conversations.lastMessageAt), desc(conversations.createdAt))
+      .limit(1);
+
+    if (conversation) {
+      linkedConversationId = conversation.id;
+      await db
+        .update(conversations)
+        .set({
+          status: "waiting",
+          lastMessageAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(conversations.organizationId, input.organizationId),
+            eq(conversations.id, conversation.id)
+          )
+        );
+    } else {
+      const [createdConversation] = await db
+        .insert(conversations)
+        .values({
+          organizationId: input.organizationId,
+          contactId: resolvedContactId,
+          channel: "phone",
+          status: "waiting",
+          subject: `Grace call escalation: ${reason}`,
+          lastMessageAt: new Date(),
+        })
+        .returning({ id: conversations.id });
+      linkedConversationId = createdConversation?.id ?? null;
+    }
+  }
+
+  return {
+    callId: callRow.id,
+    sessionId: callRow.sessionId,
+    handoffId,
+    linkedConversationId,
+    createdHandoff,
+    contactId: resolvedContactId,
+  };
 }
 
 export async function getGraceMessages(organizationId: string) {

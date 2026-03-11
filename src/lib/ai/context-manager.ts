@@ -43,14 +43,14 @@ ${contacts.length > 0 ? `\nRecent contacts:\n${contacts.slice(0, 10).map((c: any
     const tasks = await getTasks(orgId).catch(() => []);
     const now = new Date();
     const today = now.toDateString();
-    const overdueTasks = tasks.filter((t: any) =>
-      t.dueDate && new Date(t.dueDate) < now && t.status !== "completed"
+    const pendingTasks = tasks.filter((t: any) => t.status !== "done" && t.status !== "cancelled");
+    const overdueTasks = pendingTasks.filter(
+      (t: any) => t.dueDate && new Date(t.dueDate) < now
     );
-    const todayTasks = tasks.filter((t: any) =>
-      t.dueDate && new Date(t.dueDate).toDateString() === today
+    const todayTasks = pendingTasks.filter(
+      (t: any) => t.dueDate && new Date(t.dueDate).toDateString() === today
     );
-    const pendingTasks = tasks.filter((t: any) => t.status !== "completed");
-    const completedTasks = tasks.filter((t: any) => t.status === "completed");
+    const completedTasks = tasks.filter((t: any) => t.status === "done");
 
     sections.push(`### Tasks (${tasks.length} total)
 - Pending: ${pendingTasks.length}
@@ -81,7 +81,9 @@ ${upcomingAppts.length > 0 ? `\nUpcoming this week:\n${upcomingAppts.slice(0, 5)
 
     // ── Prayer Requests ──
     const prayerRequests = await getPrayerRequests(orgId).catch(() => []);
-    const activeRequests = prayerRequests.filter((p: any) => p.status === "active");
+    const activeRequests = prayerRequests.filter(
+      (p: any) => p.status === "new" || p.status === "praying"
+    );
     const urgentRequests = prayerRequests.filter((p: any) =>
       p.urgency === "urgent" || p.urgency === "critical"
     );

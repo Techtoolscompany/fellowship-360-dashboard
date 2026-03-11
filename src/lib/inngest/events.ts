@@ -2,9 +2,14 @@ export const INNGEST_EVENTS = {
   TEST_HELLO_WORLD_REQUESTED: "test.hello-world.requested.v1",
   GRACE_LEAD_RECEIVED: "grace.lead.received.v1",
   CONTACT_CREATED: "contacts.created.v1",
+  GRACE_FIRST_TIME_GUEST_APPOINTMENT_REQUESTED:
+    "grace.guest.first-time-appointment.requested.v1",
   COMMUNICATIONS_BROADCAST_SEND_REQUESTED: "communications.broadcast.send.requested.v1",
   GRACE_MISSED_CALL_RECOVERY_REQUESTED: "grace.call.missed.v1",
   GRACE_SERVICE_AUTOSTAFF_REQUESTED: "grace.service.autostaff.requested.v1",
+  GRACE_SERVICE_ASSIGNMENT_REPLACEMENT_REQUESTED:
+    "grace.service.assignment.replacement.requested.v1",
+  GRACE_PRAYER_REQUEST_FOLLOWUP_REQUESTED: "grace.prayer-request.followup.requested.v1",
   ORG_CREATED: "org.created.v1",
 } as const;
 
@@ -61,6 +66,24 @@ export function buildContactCreatedIdempotencyKey(params: {
   return hashParts("contact", [params.organizationId, params.contactId]);
 }
 
+export function buildFirstTimeGuestAppointmentIdempotencyKey(params: {
+  organizationId: string;
+  pipelineItemId: string;
+  contactId: string;
+  stageId: string;
+  trigger: "created" | "stage_changed" | "ai_categorized";
+  occurredAt: string;
+}) {
+  return hashParts("first-time-guest-appointment", [
+    params.organizationId,
+    params.pipelineItemId,
+    params.contactId,
+    params.stageId,
+    params.trigger,
+    params.occurredAt,
+  ]);
+}
+
 export function buildMissedCallRecoveryIdempotencyKey(params: {
   organizationId: string;
   callId?: string | null;
@@ -86,6 +109,40 @@ export function buildGraceServiceAutostaffIdempotencyKey(params: {
     params.organizationId,
     params.serviceRunId,
     params.goalId ?? "",
+  ]);
+}
+
+export function buildServiceAssignmentReplacementIdempotencyKey(params: {
+  organizationId: string;
+  serviceRunId: string;
+  assignmentId: string;
+  reasonStatus: "needs_replacement" | "no_show";
+  occurredAt: string;
+}) {
+  return hashParts("service-assignment-replacement", [
+    params.organizationId,
+    params.serviceRunId,
+    params.assignmentId,
+    params.reasonStatus,
+    params.occurredAt,
+  ]);
+}
+
+export function buildPrayerRequestFollowupIdempotencyKey(params: {
+  organizationId: string;
+  requestId: string;
+  trigger: "created" | "updated";
+  status: "new" | "praying" | "answered" | "archived";
+  urgency: "normal" | "urgent" | "critical";
+  occurredAt: string;
+}) {
+  return hashParts("prayer-followup", [
+    params.organizationId,
+    params.requestId,
+    params.trigger,
+    params.status,
+    params.urgency,
+    params.occurredAt,
   ]);
 }
 

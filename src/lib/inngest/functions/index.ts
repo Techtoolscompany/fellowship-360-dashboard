@@ -6,9 +6,13 @@ import { dailyBriefing } from "./daily-briefing";
 import { memberRetention } from "./member-retention";
 import { sendBroadcast } from "./send-broadcast";
 import { visitorFollowupSequence } from "./visitor-followup";
+import { firstTimeGuestAppointmentSequence } from "./first-time-guest-appointment";
 import { missedCallRecoverySequence } from "./missed-call-recovery";
 import { graceServiceAutostaff } from "./grace-service-autostaff";
 import { serviceConfirmationReminders } from "./service-confirmation-reminders";
+import { serviceAssignmentReplacementSequence } from "./service-assignment-replacement";
+import { prayerRequestFollowupSequence } from "./prayer-request-followup";
+import { appointmentRemindersNoShowRecovery } from "./appointment-reminders-no-show-recovery";
 import { provisionOrgProviders } from "./provision-org-providers";
 import { INNGEST_EVENTS } from "../events";
 
@@ -31,6 +35,18 @@ export type InngestEvents = {
     data: {
       organizationId: string;
       contactId: string;
+      idempotencyKey: string;
+    };
+  };
+  [INNGEST_EVENTS.GRACE_FIRST_TIME_GUEST_APPOINTMENT_REQUESTED]: {
+    data: {
+      organizationId: string;
+      pipelineItemId: string;
+      contactId: string;
+      stageId: string;
+      stageName: string;
+      trigger: "created" | "stage_changed" | "ai_categorized";
+      occurredAt: string;
       idempotencyKey: string;
     };
   };
@@ -62,6 +78,27 @@ export type InngestEvents = {
       idempotencyKey: string;
     };
   };
+  [INNGEST_EVENTS.GRACE_SERVICE_ASSIGNMENT_REPLACEMENT_REQUESTED]: {
+    data: {
+      organizationId: string;
+      serviceRunId: string;
+      assignmentId: string;
+      reasonStatus: "needs_replacement" | "no_show";
+      occurredAt: string;
+      idempotencyKey: string;
+    };
+  };
+  [INNGEST_EVENTS.GRACE_PRAYER_REQUEST_FOLLOWUP_REQUESTED]: {
+    data: {
+      organizationId: string;
+      requestId: string;
+      trigger: "created" | "updated";
+      status: "new" | "praying" | "answered" | "archived";
+      urgency: "normal" | "urgent" | "critical";
+      occurredAt: string;
+      idempotencyKey: string;
+    };
+  };
   [INNGEST_EVENTS.ORG_CREATED]: {
     data: {
       organizationId: string;
@@ -82,8 +119,12 @@ export const functions = [
   memberRetention,
   sendBroadcast,
   visitorFollowupSequence,
+  firstTimeGuestAppointmentSequence,
   missedCallRecoverySequence,
   graceServiceAutostaff,
   serviceConfirmationReminders,
+  serviceAssignmentReplacementSequence,
+  prayerRequestFollowupSequence,
+  appointmentRemindersNoShowRecovery,
   provisionOrgProviders,
 ];

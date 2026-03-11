@@ -66,7 +66,31 @@ const adapter = DrizzleAdapter(db, {
   verificationTokensTable: verificationTokens,
 });
 
+function isLocalHostUrl(value: string | undefined) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return (
+      parsed.hostname === "localhost" ||
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "::1"
+    );
+  } catch {
+    return false;
+  }
+}
+
+const authBaseUrl =
+  process.env.AUTH_URL ||
+  process.env.NEXTAUTH_URL ||
+  process.env.NEXT_PUBLIC_APP_URL;
+const shouldTrustHost =
+  process.env.AUTH_TRUST_HOST === "true" ||
+  process.env.NODE_ENV !== "production" ||
+  isLocalHostUrl(authBaseUrl);
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  trustHost: shouldTrustHost,
   pages: {
     signIn: "/sign-in",
     signOut: "/sign-out",

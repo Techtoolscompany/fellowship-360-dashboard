@@ -1,6 +1,6 @@
 # GRACE Built-In Sequence Templates (Launch MVP)
 
-Last updated: March 7, 2026
+Last updated: March 11, 2026
 
 ## TPL-001 Visitor Follow-Up
 
@@ -29,3 +29,24 @@ Last updated: March 7, 2026
 - Logging:
   - Writes follow-up actions to `grace_followup_proposal`
   - Records `sequence=missed_call_recovery` metadata per step
+
+## TPL-003 First-Time Guest -> Appointment
+
+- Trigger: `grace.guest.first-time-appointment.requested.v1`
+- Source:
+  - Pipeline item created in first-time guest stage
+  - Pipeline item moved into first-time guest stage
+  - AI lead categorization into first-time guest stage
+- Eligibility:
+  - Stage name matches first/new + guest/visitor semantics
+  - Contact has SMS or email channel
+- Flow:
+  - Immediate appointment invite outreach
+  - Wait 24h, stop if inbound reply or appointment booked
+  - Reminder appointment invite
+  - Wait 48h, stop if inbound reply or appointment booked
+  - Create manual outreach task if still no engagement
+- Logging:
+  - Writes follow-up actions to `grace_followup_proposal`
+  - Records `sequence=first_time_guest_appointment` metadata per step
+  - Uses `grace_message.providerMessageId` dedupe keys

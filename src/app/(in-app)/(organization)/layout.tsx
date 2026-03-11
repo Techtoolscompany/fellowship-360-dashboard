@@ -40,6 +40,7 @@ import { UserDropdown } from "@/components/in-app/user-dropdown";
 import { PageLoader } from "@/components/in-app/page-loader";
 import { OrganizationSwitcher } from "@/components/in-app/organization-switcher";
 import { ThemeSwitcher } from "@/components/theme-switcher";
+import { GraceFab } from "@/components/grace/GraceFab";
 
 function NavItem({
   href,
@@ -160,7 +161,7 @@ function SidebarContent({ className, isCollapsed }: { className?: string; isColl
         <SectionHeader title="Grace" section="grace" />
         {!collapsedSections.grace && (
           <div className="space-y-0.5">
-            <NavItem href="/app?tab=command" icon={Zap} isCollapsed={isCollapsed} badgeLabel="Live">
+            <NavItem href="/app/grace?tab=command" icon={Zap} isCollapsed={isCollapsed} badgeLabel="Live">
               Grace
             </NavItem>
           </div>
@@ -170,7 +171,7 @@ function SidebarContent({ className, isCollapsed }: { className?: string; isColl
         <SectionHeader title="Ministry Workflows" section="core" />
         {!collapsedSections.core && (
           <div className="space-y-0.5">
-            <NavItem href="/app?tab=inbox" icon={MessageCircle} isCollapsed={isCollapsed}>
+            <NavItem href="/app/grace?tab=inbox" icon={MessageCircle} isCollapsed={isCollapsed}>
               Communications
             </NavItem>
             <NavItem href="/app/contacts" icon={Users} isCollapsed={isCollapsed}>
@@ -179,10 +180,10 @@ function SidebarContent({ className, isCollapsed }: { className?: string; isColl
             <NavItem href="/app/tasks" icon={CheckCircle} isCollapsed={isCollapsed}>
               Action Items
             </NavItem>
-            <NavItem href="/app?tab=calendar" icon={Clock} isCollapsed={isCollapsed}>
+            <NavItem href="/app/grace?tab=calendar" icon={Clock} isCollapsed={isCollapsed}>
               Calendar
             </NavItem>
-            <NavItem href="/app?tab=operations" icon={Bot} isCollapsed={isCollapsed}>
+            <NavItem href="/app/grace?tab=operations" icon={Bot} isCollapsed={isCollapsed}>
               Service Planning
             </NavItem>
             <NavItem href="/app/settings/role-matrix" icon={ListChecks} isCollapsed={isCollapsed}>
@@ -191,7 +192,7 @@ function SidebarContent({ className, isCollapsed }: { className?: string; isColl
             <NavItem href="/app/settings/scheduling-matrix" icon={CalendarClock} isCollapsed={isCollapsed}>
               Scheduling
             </NavItem>
-            <NavItem href="/app?tab=visitors" icon={MapPin} isCollapsed={isCollapsed}>
+            <NavItem href="/app/grace?tab=visitors" icon={MapPin} isCollapsed={isCollapsed}>
               Guest Follow-Up
             </NavItem>
           </div>
@@ -263,6 +264,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
   // Close mobile menu when route changes
   const pathname = usePathname();
+  const hideGraceFab = pathname === "/app" || pathname === "/app/grace";
   useEffect(() => {
     // Remove the setIsMobileOpen call since we no longer need it
   }, [pathname]);
@@ -341,6 +343,8 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
           <InAppFooter />
         </div>
+
+        {!hideGraceFab && <GraceFab />}
       </div>
     </TooltipProvider>
   );

@@ -42,6 +42,8 @@ const formSchema = z.object({
   content: z.string().min(1, "Request details are required"),
   urgency: z.enum(["normal", "urgent", "critical"]).default("normal"),
   status: z.enum(["new", "praying", "answered", "archived"]).default("new"),
+  assignedTeam: z.string().default("Prayer Team"),
+  response: z.string().optional(),
   isAnonymous: z.boolean().default(false),
 });
 
@@ -68,6 +70,8 @@ export function EditPrayerRequestDialog({
       content: prayerRequest?.content || "",
       urgency: prayerRequest?.urgency || "normal",
       status: prayerRequest?.status || "new",
+      assignedTeam: prayerRequest?.assignedTeam || "Prayer Team",
+      response: prayerRequest?.response || "",
       contactId: prayerRequest?.contactId || "",
       contactName: prayerRequest?.contactName || "",
       isAnonymous: prayerRequest?.isAnonymous === "true",
@@ -83,6 +87,8 @@ export function EditPrayerRequestDialog({
         content: prayerRequest.content || "",
         urgency: prayerRequest.urgency || "normal",
         status: prayerRequest.status || "new",
+        assignedTeam: prayerRequest.assignedTeam || "Prayer Team",
+        response: prayerRequest.response || "",
         contactId: prayerRequest.contactId || "",
         contactName: prayerRequest.contactName || "",
         isAnonymous: prayerRequest.isAnonymous === "true",
@@ -106,6 +112,8 @@ export function EditPrayerRequestDialog({
         content: values.content,
         urgency: values.urgency,
         status: values.status,
+        assignedTeam: values.assignedTeam || null,
+        response: values.response?.trim() ? values.response.trim() : null,
         isAnonymous: values.isAnonymous ? "true" : "false",
       });
       toast.success("Updated successfully");
@@ -264,6 +272,33 @@ export function EditPrayerRequestDialog({
 
             <FormField
               control={form.control}
+              name="assignedTeam"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Assigned Team</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    defaultValue={field.value}
+                    value={field.value}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select team" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="Prayer Team">Prayer Team</SelectItem>
+                      <SelectItem value="Care Team">Care Team</SelectItem>
+                      <SelectItem value="Pastoral Team">Pastoral Team</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
               name="content"
               render={({ field }) => (
                 <FormItem>
@@ -272,6 +307,24 @@ export function EditPrayerRequestDialog({
                     <Textarea
                       placeholder="Enter the prayer request details..."
                       className="min-h-[100px] resize-none"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="response"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Pastoral Response (optional)</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Add notes about prayer response, follow-up, or outcome..."
+                      className="min-h-[90px] resize-none"
                       {...field}
                     />
                   </FormControl>

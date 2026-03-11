@@ -8,7 +8,7 @@ import { format } from "date-fns";
 import { CalendarIcon, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { updateTask } from "@/app/actions/tasks";
+import { getTaskAssignees, updateTask } from "@/app/actions/tasks";
 import { cn } from "@/lib/utils";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,10 @@ export type EditableTask = {
   dueDate: Date | string | null;
   status: "todo" | "in_progress" | "done" | "cancelled";
   priority: "low" | "medium" | "high" | "urgent";
+  assigneeId?: string | null;
+  assigneeName?: string | null;
+  assigneeEmail?: string | null;
+  slaStatus?: "overdue" | "due_soon" | "due_next_72h" | "on_track" | "no_due_date" | "closed";
 };
 
 const formSchema = z.object({
@@ -59,6 +63,7 @@ const formSchema = z.object({
   status: z.enum(["todo", "in_progress", "done", "cancelled"]),
   priority: z.enum(["low", "medium", "high", "urgent"]),
   dueDate: z.date().optional(),
+  assigneeId: z.string().nullable().optional(),
 });
 
 interface EditTaskDialogProps {
@@ -82,6 +87,13 @@ const priorityLabel: Record<EditableTask["priority"], string> = {
   urgent: "Urgent",
 };
 
+const statusTransitions: Record<EditableTask["status"], EditableTask["status"][]> = {
+  todo: ["in_progress", "done", "cancelled"],
+  in_progress: ["todo", "done", "cancelled"],
+  done: ["todo"],
+  cancelled: ["todo"],
+};
+
 export function EditTaskDialog({
   open,
   onOpenChange,
@@ -90,6 +102,9 @@ export function EditTaskDialog({
 }: EditTaskDialogProps) {
   const { organization } = useOrganization();
   const [loading, setLoading] = useState(false);
+  const [assignees, setAssignees] = useState<
+    Array<{ id: string; name: string | null; email: string; role: string }>
+  >([]);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -99,8 +114,23 @@ export function EditTaskDialog({
       status: "todo",
       priority: "medium",
       dueDate: undefined,
+      assigneeId: null,
     },
   });
+
+  useEffect(() => {
+    if (!organization?.id) {
+      setAssignees([]);
+      return;
+    }
+
+    void getTaskAssignees(organization.id)
+      .then((rows) => setAssignees(rows))
+      .catch((error) => {
+        console.error("Failed to load task assignees:", error);
+        setAssignees([]);
+      });
+  }, [organization?.id]);
 
   useEffect(() => {
     if (!task) {
@@ -113,8 +143,13 @@ export function EditTaskDialog({
       status: task.status,
       priority: task.priority,
       dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
+      assigneeId: task.assigneeId ?? null,
     });
   }, [task, form]);
+
+  const allowedStatusValues = task
+    ? [task.status, ...statusTransitions[task.status]]
+    : (Object.keys(statusLabel) as EditableTask["status"][]);
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     if (!task?.id || !organization?.id) {
@@ -129,6 +164,7 @@ export function EditTaskDialog({
         status: values.status,
         priority: values.priority,
         dueDate: values.dueDate || null,
+        assigneeId: values.assigneeId ?? null,
         organizationId: organization.id,
       });
       toast.success("Task updated");
@@ -182,7 +218,7 @@ export function EditTaskDialog({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {(Object.keys(statusLabel) as EditableTask["status"][]).map((value) => (
+                        {allowedStatusValues.map((value) => (
                           <SelectItem key={value} value={value}>
                             {statusLabel[value]}
                           </SelectItem>
@@ -219,6 +255,38 @@ export function EditTaskDialog({
                 )}
               />
             </div>
+
+            <FormField
+              control={form.control}
+              name="assigneeId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Owner</FormLabel>
+                  <Select
+                    value={field.value ?? "unassigned"}
+                    onValueChange={(value) =>
+                      field.onChange(value === "unassigned" ? null : value)
+                    }
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Assign owner" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
+                      {assignees.map((assignee) => (
+                        <SelectItem key={assignee.id} value={assignee.id}>
+                          {(assignee.name || assignee.email) +
+                            (assignee.role ? ` · ${assignee.role}` : "")}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <FormField
               control={form.control}

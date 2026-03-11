@@ -4,6 +4,9 @@ import {
   aiConfig,
   churchContacts,
   conversations,
+  graceCalls,
+  graceHandoffs,
+  graceSessions,
   graceFollowupProposals,
   messages,
   tasks,
@@ -23,6 +26,7 @@ type MissedCallContext = {
   recipient: string | null;
   churchName: string;
   callId: string | null;
+  callRecordId: string | null;
   fromNumber: string | null;
   sequenceStartedAt: string;
 };
@@ -40,7 +44,15 @@ export const missedCallRecoverySequence = inngest.createFunction(
   },
   { event: INNGEST_EVENTS.GRACE_MISSED_CALL_RECOVERY_REQUESTED },
   async ({ event, step, logger }) => {
-    const { organizationId, callId, sessionId, fromNumber, toNumber } = event.data;
+    const { organizationId, callId, sessionId, fromNumber, toNumber, callRecordId } =
+      event.data as {
+      organizationId: string;
+      callId?: string | null;
+      sessionId?: string | null;
+      fromNumber?: string | null;
+      toNumber?: string | null;
+      callRecordId?: string | null;
+    };
 
     const prepared = await step.run("prepare-context", async () => {
       const [orgConfig] = await db
@@ -51,6 +63,44 @@ export const missedCallRecoverySequence = inngest.createFunction(
 
       const churchName = orgConfig?.churchName?.trim() || "your church";
       const normalizedIncoming = normalizePhone(fromNumber);
+      const callRecordIdFromEvent = callRecordId ? String(callRecordId) : null;
+
+      const [existingCall] = callRecordIdFromEvent
+        ? await db
+            .select({ id: graceCalls.id })
+            .from(graceCalls)
+            .where(
+              and(
+                eq(graceCalls.organizationId, organizationId),
+                eq(graceCalls.id, callRecordIdFromEvent)
+              )
+            )
+            .limit(1)
+        : callId
+          ? await db
+              .select({ id: graceCalls.id })
+              .from(graceCalls)
+              .where(
+                and(
+                  eq(graceCalls.organizationId, organizationId),
+                  eq(graceCalls.externalCallId, callId)
+                )
+              )
+              .orderBy(desc(graceCalls.createdAt))
+              .limit(1)
+          : sessionId
+            ? await db
+                .select({ id: graceCalls.id })
+                .from(graceCalls)
+                .where(
+                  and(
+                    eq(graceCalls.organizationId, organizationId),
+                    eq(graceCalls.sessionId, sessionId)
+                  )
+                )
+                .orderBy(desc(graceCalls.createdAt))
+                .limit(1)
+            : [];
 
       let contact: typeof churchContacts.$inferSelect | null = null;
       if (fromNumber) {
@@ -133,6 +183,23 @@ export const missedCallRecoverySequence = inngest.createFunction(
       const contactName = contact ? `${contact.firstName} ${contact.lastName}`.trim() : "Caller";
       const recipient = contact?.phone ?? fromNumber ?? null;
 
+      if (existingCall?.id) {
+        await db
+          .update(graceCalls)
+          .set({
+            contactId: contact?.id ?? null,
+            intent: "missed_call",
+            outcome: "recovery_sequence_started",
+            summaryText: "Missed call recovery sequence started.",
+          })
+          .where(
+            and(
+              eq(graceCalls.organizationId, organizationId),
+              eq(graceCalls.id, existingCall.id)
+            )
+          );
+      }
+
       return {
         organizationId,
         sessionId: session.id,
@@ -142,10 +209,34 @@ export const missedCallRecoverySequence = inngest.createFunction(
         recipient,
         churchName,
         callId: callId ?? null,
+        callRecordId: existingCall?.id ?? callRecordIdFromEvent,
         fromNumber: fromNumber ?? null,
         sequenceStartedAt: new Date().toISOString(),
       } satisfies MissedCallContext;
     });
+
+    const updateCallLifecycle = async (values: {
+      outcome?: string;
+      summaryText?: string;
+      intent?: string;
+      contactId?: string | null;
+    }) => {
+      if (!prepared.callRecordId) return;
+      await db
+        .update(graceCalls)
+        .set({
+          ...(values.outcome ? { outcome: values.outcome } : {}),
+          ...(values.summaryText ? { summaryText: values.summaryText } : {}),
+          ...(values.intent ? { intent: values.intent } : {}),
+          ...(values.contactId !== undefined ? { contactId: values.contactId } : {}),
+        })
+        .where(
+          and(
+            eq(graceCalls.organizationId, prepared.organizationId),
+            eq(graceCalls.id, prepared.callRecordId)
+          )
+        );
+    };
 
     const firstRecoveryMessage = `Hi ${prepared.contactName.split(" ")[0] || "there"}, this is Grace from ${prepared.churchName}. We missed your call and want to help. Reply here and we will follow up right away.`;
     const secondRecoveryMessage = `Quick follow-up from ${prepared.churchName}: we still want to connect after your missed call. Reply with the best time and our team will reach out.`;
@@ -216,6 +307,14 @@ export const missedCallRecoverySequence = inngest.createFunction(
         status,
         deliveryError,
       });
+
+      await updateCallLifecycle({
+        outcome: status === "sent" ? "recovery_first_touch_sent" : "recovery_first_touch_pending",
+        summaryText:
+          status === "sent"
+            ? "Missed-call recovery message sent to caller."
+            : "Missed-call recovery pending due to delivery issue.",
+      });
     });
 
     await step.run("create-callback-task", async () => {
@@ -249,6 +348,26 @@ export const missedCallRecoverySequence = inngest.createFunction(
     });
 
     if (engaged) {
+      await step.run("mark-call-recovered", async () => {
+        await db
+          .update(conversations)
+          .set({ status: "resolved", updatedAt: new Date() })
+          .where(eq(conversations.id, prepared.conversationId));
+
+        await db
+          .update(graceSessions)
+          .set({
+            status: "closed",
+            finalSummary: "Missed call recovery completed after caller reply.",
+            updatedAt: new Date(),
+          })
+          .where(eq(graceSessions.id, prepared.sessionId));
+
+        await updateCallLifecycle({
+          outcome: "recovered_after_reply",
+          summaryText: "Caller replied after missed-call recovery message.",
+        });
+      });
       return { status: "completed", reason: "member_replied_after_initial_recovery" };
     }
 
@@ -308,6 +427,57 @@ export const missedCallRecoverySequence = inngest.createFunction(
         reason: "step_2_human_escalation",
         status: "pending",
         metadata: { escalationTaskId: task.id },
+      });
+
+      await db
+        .update(conversations)
+        .set({ status: "waiting", updatedAt: new Date() })
+        .where(eq(conversations.id, prepared.conversationId));
+
+      await db
+        .update(graceSessions)
+        .set({
+          status: "escalated",
+          handoffReason: "missed_call_unresolved",
+          updatedAt: new Date(),
+        })
+        .where(eq(graceSessions.id, prepared.sessionId));
+
+      const [existingOpenHandoff] = await db
+        .select({ id: graceHandoffs.id })
+        .from(graceHandoffs)
+        .where(
+          and(
+            eq(graceHandoffs.organizationId, prepared.organizationId),
+            eq(graceHandoffs.sessionId, prepared.sessionId),
+            eq(graceHandoffs.status, "open")
+          )
+        )
+        .limit(1);
+
+      if (!existingOpenHandoff) {
+        await db.insert(graceHandoffs).values({
+          organizationId: prepared.organizationId,
+          sessionId: prepared.sessionId,
+          contactId: prepared.contactId,
+          actorType: "system",
+          reason: "missed_call_unresolved",
+          summaryText: "Missed call recovery exhausted; escalated to staff.",
+          assignedTeam: "pastoral_care",
+          status: "open",
+          metadataJson: {
+            source: "missed_call_recovery",
+            conversationId: prepared.conversationId,
+            callId: prepared.callId,
+            callRecordId: prepared.callRecordId,
+            escalationTaskId: task.id,
+          },
+        });
+      }
+
+      await updateCallLifecycle({
+        outcome: "escalated_after_no_reply",
+        summaryText: "No reply after recovery sequence. Escalated to staff.",
       });
     });
 

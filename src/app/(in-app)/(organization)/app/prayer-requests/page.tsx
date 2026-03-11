@@ -19,6 +19,12 @@ export default function PrayerWallPage() {
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "active" | "new" | "praying" | "answered" | "archived"
+  >("all");
+  const [urgencyFilter, setUrgencyFilter] = useState<"all" | "normal" | "urgent" | "critical">(
+    "all"
+  );
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editRequest, setEditRequest] = useState<any>(null);
@@ -38,17 +44,41 @@ export default function PrayerWallPage() {
 
   useEffect(() => { fetchRequests(); }, [fetchRequests]);
 
+  const handleRequestUpdate = useCallback(
+    async (id: string, payload: Record<string, unknown>, successMessage?: string) => {
+      try {
+        await updatePrayerRequest(id, payload);
+        await fetchRequests();
+        if (successMessage) toast.success(successMessage);
+      } catch (error) {
+        console.error("Failed to update prayer request:", error);
+        toast.error(error instanceof Error ? error.message : "Failed to update prayer request");
+      }
+    },
+    [fetchRequests]
+  );
+
   const handleMarkAnswered = async (id: string) => {
-    await updatePrayerRequest(id, { status: "answered" });
-    await fetchRequests();
+    await handleRequestUpdate(id, { status: "answered" }, "Marked as answered");
   };
 
   const filteredRequests = requests.filter(pr => {
+    if (statusFilter === "active" && !["new", "praying"].includes(pr.status)) {
+      return false;
+    }
+    if (statusFilter !== "all" && statusFilter !== "active" && pr.status !== statusFilter) {
+      return false;
+    }
+    if (urgencyFilter !== "all" && pr.urgency !== urgencyFilter) {
+      return false;
+    }
+
     if (!searchQuery) return true;
     const lowerQuery = searchQuery.toLowerCase();
     const contactName = pr.contactName || "Member";
     const nameMatch = pr.isAnonymous === "true" ? "anonymous".includes(lowerQuery) : contactName.toLowerCase().includes(lowerQuery);
-    return nameMatch || pr.content?.toLowerCase().includes(lowerQuery);
+    const teamMatch = (pr.assignedTeam || "").toLowerCase().includes(lowerQuery);
+    return nameMatch || pr.content?.toLowerCase().includes(lowerQuery) || teamMatch;
   });
 
   const activeCount = requests.filter(r => r.status === "new" || r.status === "praying").length;
@@ -201,10 +231,46 @@ export default function PrayerWallPage() {
             />
           </div>
           <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0 scrollbar-hide">
-            <button className="px-4 py-2 bg-lime-500 text-white rounded-lg text-sm font-bold whitespace-nowrap">All Categories</button>
-            <button onClick={() => toast.info('Filtering feature available soon')} className="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap text-slate-600 dark:text-slate-300">Healing</button>
-            <button onClick={() => toast.info('Filtering feature available soon')} className="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap text-slate-600 dark:text-slate-300">Job Search</button>
-            <button onClick={() => toast.info('Filtering feature available soon')} className="px-4 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap text-slate-600 dark:text-slate-300">Family</button>
+            <button
+              onClick={() => setStatusFilter("all")}
+              className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${
+                statusFilter === "all"
+                  ? "bg-lime-500 text-white"
+                  : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+              }`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setStatusFilter("active")}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap ${
+                statusFilter === "active"
+                  ? "bg-lime-500 text-white"
+                  : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+              }`}
+            >
+              Active
+            </button>
+            <button
+              onClick={() => setStatusFilter("answered")}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap ${
+                statusFilter === "answered"
+                  ? "bg-emerald-500 text-white"
+                  : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+              }`}
+            >
+              Answered
+            </button>
+            <button
+              onClick={() => setUrgencyFilter(urgencyFilter === "all" ? "urgent" : "all")}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap ${
+                urgencyFilter !== "all"
+                  ? "bg-rose-500 text-white"
+                  : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+              }`}
+            >
+              {urgencyFilter === "all" ? "Urgent" : `Urgency: ${urgencyFilter}`}
+            </button>
           </div>
         </div>
 
@@ -278,14 +344,25 @@ export default function PrayerWallPage() {
                         <span className="material-symbols-outlined text-base">calendar_today</span> 
                         {new Date(pr.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'})}
                       </span>
-                      <span className="flex items-center gap-1 text-lime-500 font-bold">
-                        <span className="material-symbols-outlined text-base font-variation-settings-'FILL' 1">volunteer_activism</span> General
+                      <span className="flex items-center gap-1 text-indigo-500 font-bold">
+                        <span className="material-symbols-outlined text-base font-variation-settings-'FILL' 1">groups</span>{" "}
+                        {pr.assignedTeam || "Unassigned"}
+                      </span>
+                      <span className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
+                        <span className="material-symbols-outlined text-base">flag</span>
+                        {(pr.urgency || "normal").toUpperCase()}
                       </span>
                     </div>
                     
                     <p className="text-slate-600 dark:text-slate-400 leading-relaxed mb-4 whitespace-pre-wrap">
                       {pr.content}
                     </p>
+
+                    {pr.response && (
+                      <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-900/10 dark:text-emerald-300">
+                        <span className="font-semibold">Response:</span> {pr.response}
+                      </div>
+                    )}
                     
                     <div className="flex items-center justify-between">
                       <div className="flex -space-x-2">
@@ -316,11 +393,57 @@ export default function PrayerWallPage() {
                             <DropdownMenuItem onClick={() => setEditRequest(pr)} className="font-medium rounded-lg">
                               Edit Request
                             </DropdownMenuItem>
+                            {pr.status !== "praying" && (
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  handleRequestUpdate(pr.id, { status: "praying" }, "Marked as praying")
+                                }
+                                className="font-medium rounded-lg"
+                              >
+                                Mark as Praying
+                              </DropdownMenuItem>
+                            )}
                             {!isAnswered && (
                               <DropdownMenuItem onClick={() => handleMarkAnswered(pr.id)} className="font-medium text-emerald-600 dark:text-emerald-400 rounded-lg focus:text-emerald-600 focus:bg-emerald-50 dark:focus:bg-emerald-950/20">
                                 Mark as Answered
                               </DropdownMenuItem>
                             )}
+                            <DropdownMenuItem
+                              onClick={() =>
+                                handleRequestUpdate(
+                                  pr.id,
+                                  { assignedTeam: "Prayer Team" },
+                                  "Routed to Prayer Team"
+                                )
+                              }
+                              className="font-medium rounded-lg"
+                            >
+                              Route to Prayer Team
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() =>
+                                handleRequestUpdate(
+                                  pr.id,
+                                  { assignedTeam: "Care Team" },
+                                  "Routed to Care Team"
+                                )
+                              }
+                              className="font-medium rounded-lg"
+                            >
+                              Route to Care Team
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() =>
+                                handleRequestUpdate(
+                                  pr.id,
+                                  { assignedTeam: "Pastoral Team", urgency: "critical" },
+                                  "Escalated to Pastoral Team"
+                                )
+                              }
+                              className="font-medium text-rose-600 dark:text-rose-400 rounded-lg"
+                            >
+                              Escalate to Pastoral Team
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>

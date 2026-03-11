@@ -9,12 +9,19 @@ import {
   organizationMemberships,
   serviceAssignments,
   serviceRuns,
+  serviceSchedulingProfiles,
   serviceTemplateRoleSlots,
   tasks,
   users,
   volunteers,
   volunteerShifts,
 } from "@/db/schema";
+import {
+  isAvailabilityMatch,
+  normalizeAvailabilitySlots,
+  scoreStaffCandidate,
+  scoreVolunteerCandidate,
+} from "@/lib/grace/assignment-scoring";
 import { resolveSmsProvider } from "@/lib/grace/providers/resolver";
 import { sendTextBeeSMS } from "@/lib/grace/channels/sms/textbee";
 import { inngest } from "../client";
@@ -53,10 +60,6 @@ const AUTOSTAFF_STEPS: Array<{
   },
 ];
 
-function normalizeRoleText(value: string | null | undefined) {
-  return (value ?? "").trim().toLowerCase();
-}
-
 function normalizePhoneNumber(value: string | null | undefined) {
   if (!value) return "";
   const digits = value.replace(/\D/g, "");
@@ -64,15 +67,6 @@ function normalizePhoneNumber(value: string | null | undefined) {
     return digits.slice(1);
   }
   return digits;
-}
-
-function roleMatchScore(requiredRole: string, candidateRole: string | null | undefined) {
-  const required = normalizeRoleText(requiredRole);
-  const candidate = normalizeRoleText(candidateRole);
-  if (!candidate) return 0;
-  if (candidate === required) return 35;
-  if (candidate.includes(required) || required.includes(candidate)) return 20;
-  return 5;
 }
 
 function getServiceRunWindow(serviceAt: Date, durationMinutes: number | null | undefined) {
@@ -398,6 +392,9 @@ export const graceServiceAutostaff = inngest.createFunction(
         parsedServiceAt,
         context.serviceRun.durationMinutes
       );
+      const loadWindowStart = new Date(
+        parsedServiceAt.getTime() - 30 * 24 * 60 * 60 * 1000
+      );
 
       const [
         volunteerPool,
@@ -405,10 +402,14 @@ export const graceServiceAutostaff = inngest.createFunction(
         conflictingStaffAppointments,
         conflictingVolunteerShifts,
         conflictingCrossRunAssignments,
+        recentStaffAppointments,
+        recentVolunteerShifts,
+        schedulingProfiles,
       ] = await Promise.all([
         db
           .select({
             volunteerId: volunteers.id,
+            contactId: volunteers.contactId,
             role: volunteers.role,
             totalHours: volunteers.totalHours,
             firstName: churchContacts.firstName,
@@ -478,6 +479,44 @@ export const graceServiceAutostaff = inngest.createFunction(
               ne(serviceRuns.status, "completed")
             )
           ),
+        db
+          .select({
+            staffUserId: appointments.staffId,
+          })
+          .from(appointments)
+          .where(
+            and(
+              eq(appointments.organizationId, context.goal.organizationId),
+              gte(appointments.dateTime, loadWindowStart),
+              lte(appointments.dateTime, parsedServiceAt),
+              ne(appointments.status, "cancelled"),
+              ne(appointments.status, "no_show")
+            )
+          ),
+        db
+          .select({
+            volunteerId: volunteerShifts.volunteerId,
+          })
+          .from(volunteerShifts)
+          .innerJoin(volunteers, eq(volunteerShifts.volunteerId, volunteers.id))
+          .where(
+            and(
+              eq(volunteers.organizationId, context.goal.organizationId),
+              gte(volunteerShifts.date, loadWindowStart),
+              lte(volunteerShifts.date, parsedServiceAt)
+            )
+          ),
+        db
+          .select({
+            personType: serviceSchedulingProfiles.personType,
+            contactId: serviceSchedulingProfiles.contactId,
+            staffUserId: serviceSchedulingProfiles.staffUserId,
+            isSchedulable: serviceSchedulingProfiles.isSchedulable,
+            preferredRoles: serviceSchedulingProfiles.preferredRoles,
+            availabilitySlots: serviceSchedulingProfiles.availabilitySlots,
+          })
+          .from(serviceSchedulingProfiles)
+          .where(eq(serviceSchedulingProfiles.organizationId, context.goal.organizationId)),
       ]);
 
       const blockedStaffIds = new Set<string>();
@@ -508,6 +547,58 @@ export const graceServiceAutostaff = inngest.createFunction(
         }
       }
 
+      const staffLoadCountById = new Map<string, number>();
+      for (const row of recentStaffAppointments) {
+        if (!row.staffUserId) continue;
+        staffLoadCountById.set(
+          row.staffUserId,
+          (staffLoadCountById.get(row.staffUserId) ?? 0) + 1
+        );
+      }
+
+      const volunteerLoadCountById = new Map<string, number>();
+      for (const row of recentVolunteerShifts) {
+        volunteerLoadCountById.set(
+          row.volunteerId,
+          (volunteerLoadCountById.get(row.volunteerId) ?? 0) + 1
+        );
+      }
+
+      const staffProfileByUserId = new Map<
+        string,
+        {
+          isSchedulable: boolean;
+          preferredRoles: string[];
+          availabilitySlots: ReturnType<typeof normalizeAvailabilitySlots>;
+        }
+      >();
+
+      const volunteerProfileByContactId = new Map<
+        string,
+        {
+          isSchedulable: boolean;
+          preferredRoles: string[];
+          availabilitySlots: ReturnType<typeof normalizeAvailabilitySlots>;
+        }
+      >();
+
+      for (const profile of schedulingProfiles) {
+        const normalizedProfile = {
+          isSchedulable: profile.isSchedulable,
+          preferredRoles: Array.isArray(profile.preferredRoles)
+            ? profile.preferredRoles.map((item) => String(item).trim()).filter(Boolean)
+            : [],
+          availabilitySlots: normalizeAvailabilitySlots(profile.availabilitySlots),
+        };
+
+        if (profile.personType === "staff" && profile.staffUserId) {
+          staffProfileByUserId.set(profile.staffUserId, normalizedProfile);
+        }
+        if (profile.personType === "contact" && profile.contactId) {
+          volunteerProfileByContactId.set(profile.contactId, normalizedProfile);
+        }
+      }
+
       const usedVolunteerIds = new Set(
         assignmentRows.filter((row) => row.volunteerId).map((row) => row.volunteerId as string)
       );
@@ -520,6 +611,7 @@ export const graceServiceAutostaff = inngest.createFunction(
         assignmentId: string;
         volunteerId: string | null;
         staffUserId: string | null;
+        notes: string;
       }> = [];
 
       for (const assignment of unassigned) {
@@ -527,53 +619,87 @@ export const graceServiceAutostaff = inngest.createFunction(
           type: "volunteer" | "staff";
           id: string;
           score: number;
+          available: boolean;
+          reasons: string[];
+          recentLoad: number;
         }> = [];
 
         if (assignment.assignmentType !== "paid_staff") {
           for (const volunteer of volunteerPool) {
-            if (blockedVolunteerIds.has(volunteer.volunteerId)) {
-              continue;
-            }
-            const score =
-              40 +
-              roleMatchScore(assignment.roleName, volunteer.role) +
-              Math.min(12, Math.floor(Number(volunteer.totalHours ?? 0) / 20));
+            const profile = volunteerProfileByContactId.get(volunteer.contactId);
+            const conflictReason = blockedVolunteerIds.has(volunteer.volunteerId)
+              ? "Conflicts with an existing commitment"
+              : undefined;
+            const recentLoad = volunteerLoadCountById.get(volunteer.volunteerId) ?? 0;
+            const scored = scoreVolunteerCandidate({
+              roleName: assignment.roleName,
+              volunteerRole: volunteer.role,
+              totalHours: volunteer.totalHours,
+              preferredRoles: profile?.preferredRoles,
+              recentLoad,
+              isSchedulable: profile?.isSchedulable ?? true,
+              isAvailabilityMatch: profile
+                ? isAvailabilityMatch(parsedServiceAt, profile.availabilitySlots)
+                : true,
+              conflictReason,
+            });
+
             candidates.push({
               type: "volunteer",
               id: volunteer.volunteerId,
-              score,
+              score: scored.score,
+              available: scored.available,
+              reasons: scored.reasons,
+              recentLoad,
             });
           }
         }
 
         if (assignment.assignmentType !== "volunteer") {
           for (const staff of staffPool) {
-            if (blockedStaffIds.has(staff.userId)) {
-              continue;
-            }
-            const leadershipBoost =
-              normalizeRoleText(assignment.roleName).includes("leader") &&
-              (staff.membershipRole === "admin" || staff.membershipRole === "owner")
-                ? 12
-                : 0;
-            const score =
-              45 + roleMatchScore(assignment.roleName, staff.membershipRole) + leadershipBoost;
+            const profile = staffProfileByUserId.get(staff.userId);
+            const conflictReason = blockedStaffIds.has(staff.userId)
+              ? "Conflicts with an existing commitment"
+              : undefined;
+            const recentLoad = staffLoadCountById.get(staff.userId) ?? 0;
+            const scored = scoreStaffCandidate({
+              roleName: assignment.roleName,
+              membershipRole: staff.membershipRole,
+              preferredRoles: profile?.preferredRoles,
+              recentLoad,
+              isSchedulable: profile?.isSchedulable ?? true,
+              isAvailabilityMatch: profile
+                ? isAvailabilityMatch(parsedServiceAt, profile.availabilitySlots)
+                : true,
+              conflictReason,
+            });
+
             candidates.push({
               type: "staff",
               id: staff.userId,
-              score,
+              score: scored.score,
+              available: scored.available,
+              reasons: scored.reasons,
+              recentLoad,
             });
           }
         }
 
-        candidates.sort((a, b) => b.score - a.score);
+        candidates.sort((a, b) => {
+          if (a.available !== b.available) return a.available ? -1 : 1;
+          if (a.score !== b.score) return b.score - a.score;
+          if (a.recentLoad !== b.recentLoad) return a.recentLoad - b.recentLoad;
+          return 0;
+        });
+
+        const availableCandidates = candidates.filter((candidate) => candidate.available);
 
         const candidate =
-          candidates.find(
+          availableCandidates.find(
             (row) =>
               (row.type === "volunteer" && !usedVolunteerIds.has(row.id)) ||
               (row.type === "staff" && !usedStaffIds.has(row.id))
-          ) ?? candidates[0];
+          ) ?? availableCandidates[0];
 
         if (!candidate) {
           continue;
@@ -585,6 +711,7 @@ export const graceServiceAutostaff = inngest.createFunction(
             assignmentId: assignment.id,
             volunteerId: candidate.id,
             staffUserId: null,
+            notes: `Auto-assigned by Grace (${candidate.reasons.slice(0, 2).join(" · ")})`,
           });
         } else {
           usedStaffIds.add(candidate.id);
@@ -592,6 +719,7 @@ export const graceServiceAutostaff = inngest.createFunction(
             assignmentId: assignment.id,
             volunteerId: null,
             staffUserId: candidate.id,
+            notes: `Auto-assigned by Grace (${candidate.reasons.slice(0, 2).join(" · ")})`,
           });
         }
       }
@@ -603,7 +731,7 @@ export const graceServiceAutostaff = inngest.createFunction(
             volunteerId: update.volunteerId,
             staffUserId: update.staffUserId,
             status: "proposed",
-            notes: "Auto-assigned by Grace candidate matching",
+            notes: update.notes,
             updatedAt: new Date(),
           })
           .where(eq(serviceAssignments.id, update.assignmentId));

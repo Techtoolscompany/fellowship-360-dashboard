@@ -1,6 +1,5 @@
 import withOrganizationAuthRequired from "@/lib/auth/withOrganizationAuthRequired";
 import stripe from "@/lib/stripe";
-import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 import { OrganizationRole } from "@/db/schema/organization";
 import client from "@/lib/dodopayments/client";
@@ -23,7 +22,7 @@ export const GET = withOrganizationAuthRequired(async (req, context) => {
     const customerPortalSession = await client.customers.customerPortal.create(
       dodoCustomerId
     );
-    return redirect(customerPortalSession.link);
+    return NextResponse.redirect(customerPortalSession.link);
   }
 
   const stripeCustomerId = organization.stripeCustomerId;
@@ -34,7 +33,7 @@ export const GET = withOrganizationAuthRequired(async (req, context) => {
       customer: stripeCustomerId,
       return_url: `${process.env.NEXT_PUBLIC_APP_URL}/app`,
     });
-    return redirect(portalSession.url);
+    return NextResponse.redirect(portalSession.url);
   }
 
   const lemonSqueezyCustomerId = organization.lemonSqueezyCustomerId;
@@ -54,7 +53,9 @@ export const GET = withOrganizationAuthRequired(async (req, context) => {
     .from(paypalContext)
     .where(eq(paypalContext.organizationId, organization.id));
   if (paypalContexts.length > 0) {
-    return redirect(`${process.env.NEXT_PUBLIC_APP_URL}/app/billing/paypal`);
+    return NextResponse.redirect(
+      `${process.env.NEXT_PUBLIC_APP_URL}/app/billing/paypal`
+    );
   }
 
   return NextResponse.json(

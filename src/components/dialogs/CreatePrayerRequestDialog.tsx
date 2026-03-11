@@ -43,6 +43,7 @@ const formSchema = z.object({
   contactName: z.string().optional(),
   content: z.string().min(1, "Request details are required"),
   urgency: z.enum(["normal", "urgent", "critical"]).default("normal"),
+  assignedTeam: z.string().default("auto"),
   isAnonymous: z.boolean().default(false),
 });
 
@@ -68,6 +69,7 @@ export function CreatePrayerRequestDialog({
     defaultValues: {
       content: "",
       urgency: "normal",
+      assignedTeam: "auto",
       isAnonymous: false,
     },
   });
@@ -89,6 +91,7 @@ export function CreatePrayerRequestDialog({
         contactName: values.isAnonymous ? "Anonymous" : values.contactName,
         content: values.content,
         urgency: values.urgency,
+        assignedTeam: values.assignedTeam === "auto" ? undefined : values.assignedTeam,
         isAnonymous: values.isAnonymous,
         organizationId: organization.id,
       });
@@ -209,6 +212,34 @@ export function CreatePrayerRequestDialog({
                       <SelectItem value="normal">Normal</SelectItem>
                       <SelectItem value="urgent">Urgent</SelectItem>
                       <SelectItem value="critical">Critical</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="assignedTeam"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Assigned Team</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    defaultValue={field.value}
+                    value={field.value}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Auto-route by urgency" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto-route by urgency</SelectItem>
+                      <SelectItem value="Prayer Team">Prayer Team</SelectItem>
+                      <SelectItem value="Care Team">Care Team</SelectItem>
+                      <SelectItem value="Pastoral Team">Pastoral Team</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />

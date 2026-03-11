@@ -42,9 +42,23 @@ describe("evaluatePolicy — static channel rules", () => {
   });
 
   it("allows non-high-risk staff tool without approval", () => {
-    const result = evaluatePolicy(baseCtx(), "tasks.create");
+    const result = evaluatePolicy(baseCtx(), "tasks.update");
     expect(result.allowed).toBe(true);
     expect(result.requiresApproval).toBe(false);
+  });
+
+  it("allows finance.weeklyReport for staff without approval", () => {
+    const result = evaluatePolicy(baseCtx(), "finance.weeklyReport");
+    expect(result.allowed).toBe(true);
+    expect(result.requiresApproval).toBe(false);
+  });
+
+  it("blocks finance.weeklyReport for public channels", () => {
+    const result = evaluatePolicy(
+      baseCtx({ channel: "web_public", actorType: "public" }),
+      "finance.weeklyReport"
+    );
+    expect(result.allowed).toBe(false);
   });
 });
 

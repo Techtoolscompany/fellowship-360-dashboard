@@ -16,8 +16,9 @@ import {
   users,
   graceGoals,
   graceGoalSteps,
+  tasks,
 } from "@/db/schema";
-import { eq, desc, and, gte, lte, ne, inArray, or } from "drizzle-orm";
+import { eq, desc, and, gte, lte, ne, inArray, or, sql } from "drizzle-orm";
 import { requireOrgMembership, auditAction } from "./utils";
 import * as z from "zod";
 import { resolveSmsProvider } from "@/lib/grace/providers/resolver";
@@ -26,7 +27,15 @@ import { inngest } from "@/lib/inngest/client";
 import {
   INNGEST_EVENTS,
   buildGraceServiceAutostaffIdempotencyKey,
+  buildServiceAssignmentReplacementIdempotencyKey,
 } from "@/lib/inngest/events";
+import {
+  APPOINTMENT_LIFECYCLE_STATUSES,
+  assertAppointmentStatusTransition,
+  canRescheduleAppointment,
+  getRescheduledAppointmentStatus,
+  type AppointmentLifecycleStatus,
+} from "@/lib/operations/appointments-lifecycle";
 
 function getConflictWindow(dateTime: Date) {
   return {
@@ -462,7 +471,7 @@ export async function updateAppointment(
     contactId: string | null;
     staffId: string | null;
     title: string;
-    status: string;
+    status: AppointmentLifecycleStatus;
     dateTime: Date;
     duration: number;
     type: string | null;
@@ -473,7 +482,7 @@ export async function updateAppointment(
     contactId: z.string().nullable().optional(),
     staffId: z.string().nullable().optional(),
     title: z.string().optional(),
-    status: z.enum(["scheduled", "confirmed", "completed", "cancelled", "no_show"]).optional(),
+    status: z.enum(APPOINTMENT_LIFECYCLE_STATUSES).optional(),
     dateTime: z.coerce.date().optional(),
     duration: z.coerce.number().optional(),
     type: z.string().nullable().optional(),
@@ -483,8 +492,16 @@ export async function updateAppointment(
   const [existing] = await db.select().from(appointments).where(eq(appointments.id, id));
   if (!existing) throw new Error("Appointment not found");
   const session = await requireOrgMembership(existing.organizationId);
+  const currentStatus = existing.status as AppointmentLifecycleStatus;
+
+  if (parsed.status) {
+    assertAppointmentStatusTransition(currentStatus, parsed.status);
+  }
 
   if (parsed.dateTime) {
+    if (!canRescheduleAppointment(currentStatus)) {
+      throw new Error("Completed appointments cannot be rescheduled.");
+    }
     const conflict = await findAppointmentConflict({
       organizationId: existing.organizationId,
       dateTime: parsed.dateTime,
@@ -515,13 +532,160 @@ export async function updateAppointment(
     actionType: "update",
     entityName: "appointment",
     entityId: appointment.id,
-    details: { updatedFields: Object.keys(data) }
+    details: {
+      updatedFields: Object.keys(data),
+      fromStatus: existing.status,
+      toStatus: appointment.status,
+      fromDateTime: existing.dateTime?.toISOString?.() ?? null,
+      toDateTime: appointment.dateTime?.toISOString?.() ?? null,
+    }
   });
 
   return appointment;
 }
 
+export async function rescheduleAppointment(data: {
+  appointmentId: string;
+  dateTime: Date;
+  duration?: number;
+  notes?: string | null;
+  resetStatus?: boolean;
+}) {
+  const parsed = z
+    .object({
+      appointmentId: z.string().min(1),
+      dateTime: z.coerce.date(),
+      duration: z.coerce.number().optional(),
+      notes: z.string().nullable().optional(),
+      resetStatus: z.boolean().optional().default(true),
+    })
+    .parse(data);
+
+  const [existing] = await db
+    .select()
+    .from(appointments)
+    .where(eq(appointments.id, parsed.appointmentId))
+    .limit(1);
+  if (!existing) throw new Error("Appointment not found");
+
+  const session = await requireOrgMembership(existing.organizationId);
+  const currentStatus = existing.status as AppointmentLifecycleStatus;
+  if (!canRescheduleAppointment(currentStatus)) {
+    throw new Error("Completed appointments cannot be rescheduled.");
+  }
+
+  const conflict = await findAppointmentConflict({
+    organizationId: existing.organizationId,
+    dateTime: parsed.dateTime,
+    excludeId: parsed.appointmentId,
+  });
+  if (conflict) {
+    throw new Error("Appointment slot conflict. Please choose another time.");
+  }
+
+  const patch: {
+    dateTime: Date;
+    duration?: number;
+    notes?: string | null;
+    status?: AppointmentLifecycleStatus;
+  } = {
+    dateTime: parsed.dateTime,
+  };
+  if (parsed.duration !== undefined) patch.duration = parsed.duration;
+  if (parsed.notes !== undefined) patch.notes = parsed.notes;
+  if (parsed.resetStatus) {
+    patch.status = getRescheduledAppointmentStatus(currentStatus);
+  }
+
+  let appointment;
+  try {
+    [appointment] = await db
+      .update(appointments)
+      .set(patch as any)
+      .where(eq(appointments.id, parsed.appointmentId))
+      .returning();
+  } catch (error) {
+    if (isAppointmentConflictError(error)) {
+      throw new Error("Appointment slot conflict. Please choose another time.");
+    }
+    throw error;
+  }
+
+  await auditAction({
+    organizationId: existing.organizationId,
+    userId: session.userId,
+    actionType: "update",
+    entityName: "appointment",
+    entityId: appointment.id,
+    details: {
+      operation: "reschedule",
+      fromDateTime: existing.dateTime?.toISOString?.() ?? null,
+      toDateTime: appointment.dateTime?.toISOString?.() ?? null,
+      fromStatus: existing.status,
+      toStatus: appointment.status,
+      duration: appointment.duration,
+    },
+  });
+
+  return appointment;
+}
+
+export async function deleteAppointment(appointmentId: string) {
+  const parsed = z.string().min(1).parse(appointmentId);
+
+  const [existing] = await db
+    .select()
+    .from(appointments)
+    .where(eq(appointments.id, parsed))
+    .limit(1);
+  if (!existing) throw new Error("Appointment not found");
+
+  const session = await requireOrgMembership(existing.organizationId, "admin");
+  const [deleted] = await db
+    .delete(appointments)
+    .where(eq(appointments.id, parsed))
+    .returning({ id: appointments.id });
+
+  await auditAction({
+    organizationId: existing.organizationId,
+    userId: session.userId,
+    actionType: "delete",
+    entityName: "appointment",
+    entityId: deleted.id,
+    details: {
+      status: existing.status,
+      dateTime: existing.dateTime?.toISOString?.() ?? null,
+      contactId: existing.contactId,
+      staffId: existing.staffId,
+    },
+  });
+
+  return { id: deleted.id };
+}
+
 // ── Volunteers ──
+const volunteerStatusSchema = z.enum(["active", "inactive", "pending"]);
+type VolunteerStatus = z.infer<typeof volunteerStatusSchema>;
+
+const VOLUNTEER_STATUS_TRANSITIONS: Record<VolunteerStatus, VolunteerStatus[]> = {
+  active: ["inactive", "pending"],
+  inactive: ["active", "pending"],
+  pending: ["active", "inactive"],
+};
+
+function assertVolunteerStatusTransition(
+  currentStatus: VolunteerStatus,
+  nextStatus: VolunteerStatus
+) {
+  if (currentStatus === nextStatus) return;
+  const allowed = VOLUNTEER_STATUS_TRANSITIONS[currentStatus];
+  if (!allowed.includes(nextStatus)) {
+    throw new Error(
+      `Cannot transition volunteer from "${currentStatus}" to "${nextStatus}"`
+    );
+  }
+}
+
 export async function getVolunteers(orgId: string) {
   await requireOrgMembership(orgId);
   return await db
@@ -541,31 +705,258 @@ export async function createVolunteer(data: {
   const parsed = z.object({
     contactId: z.string().min(1),
     role: z.string().optional(),
-    status: z.enum(["active", "inactive", "pending"]).optional(),
+    status: volunteerStatusSchema.optional(),
     organizationId: z.string().min(1),
   }).parse(data);
 
   const session = await requireOrgMembership(parsed.organizationId);
-  const [volunteer] = await db
-    .insert(volunteers)
-    .values({
-      contactId: parsed.contactId,
-      role: parsed.role ?? null,
-      status: parsed.status ?? "active",
-      organizationId: parsed.organizationId,
-    })
-    .returning();
+  const [contact] = await db
+    .select({ id: churchContacts.id })
+    .from(churchContacts)
+    .where(
+      and(
+        eq(churchContacts.id, parsed.contactId),
+        eq(churchContacts.organizationId, parsed.organizationId)
+      )
+    )
+    .limit(1);
+
+  if (!contact) {
+    throw new Error("Contact not found in this organization");
+  }
+
+  const [existing] = await db
+    .select()
+    .from(volunteers)
+    .where(
+      and(
+        eq(volunteers.organizationId, parsed.organizationId),
+        eq(volunteers.contactId, parsed.contactId)
+      )
+    )
+    .limit(1);
+
+  let volunteer;
+  if (existing) {
+    const patch: {
+      role?: string | null;
+      status?: VolunteerStatus;
+    } = {};
+
+    if (parsed.role !== undefined && parsed.role !== existing.role) {
+      patch.role = parsed.role || null;
+    }
+    if (parsed.status && parsed.status !== existing.status) {
+      assertVolunteerStatusTransition(existing.status as VolunteerStatus, parsed.status);
+      patch.status = parsed.status;
+    }
+
+    if (Object.keys(patch).length > 0) {
+      [volunteer] = await db
+        .update(volunteers)
+        .set(patch)
+        .where(eq(volunteers.id, existing.id))
+        .returning();
+    } else {
+      volunteer = existing;
+    }
+  } else {
+    [volunteer] = await db
+      .insert(volunteers)
+      .values({
+        contactId: parsed.contactId,
+        role: parsed.role ?? null,
+        status: parsed.status ?? "active",
+        organizationId: parsed.organizationId,
+      })
+      .returning();
+  }
 
   await auditAction({
     organizationId: parsed.organizationId,
     userId: session.userId,
-    actionType: "create",
+    actionType: existing ? "update" : "create",
     entityName: "volunteer",
     entityId: volunteer.id,
-    details: { contactId: parsed.contactId, role: parsed.role, status: parsed.status ?? "active" }
+    details: {
+      contactId: parsed.contactId,
+      role: parsed.role,
+      status: parsed.status ?? volunteer.status,
+      mode: existing ? "upsert_existing" : "created",
+    }
   });
 
   return volunteer;
+}
+
+export async function updateVolunteer(
+  volunteerId: string,
+  data: Partial<{
+    role: string | null;
+    status: VolunteerStatus;
+    contactId: string;
+  }>
+) {
+  const parsed = z
+    .object({
+      role: z.string().nullable().optional(),
+      status: volunteerStatusSchema.optional(),
+      contactId: z.string().min(1).optional(),
+    })
+    .parse(data);
+
+  const [existing] = await db
+    .select()
+    .from(volunteers)
+    .where(eq(volunteers.id, volunteerId))
+    .limit(1);
+  if (!existing) {
+    throw new Error("Volunteer not found");
+  }
+
+  const session = await requireOrgMembership(existing.organizationId, "admin");
+
+  if (parsed.contactId) {
+    const [contact] = await db
+      .select({ id: churchContacts.id })
+      .from(churchContacts)
+      .where(
+        and(
+          eq(churchContacts.id, parsed.contactId),
+          eq(churchContacts.organizationId, existing.organizationId)
+        )
+      )
+      .limit(1);
+
+    if (!contact) {
+      throw new Error("Contact not found in this organization");
+    }
+
+    const [duplicate] = await db
+      .select({ id: volunteers.id })
+      .from(volunteers)
+      .where(
+        and(
+          eq(volunteers.organizationId, existing.organizationId),
+          eq(volunteers.contactId, parsed.contactId),
+          ne(volunteers.id, existing.id)
+        )
+      )
+      .limit(1);
+
+    if (duplicate) {
+      throw new Error("That contact already has a volunteer record");
+    }
+  }
+
+  if (parsed.status) {
+    assertVolunteerStatusTransition(
+      existing.status as VolunteerStatus,
+      parsed.status
+    );
+  }
+
+  const patch: {
+    role?: string | null;
+    status?: VolunteerStatus;
+    contactId?: string;
+  } = {};
+
+  if (parsed.role !== undefined) patch.role = parsed.role;
+  if (parsed.status !== undefined) patch.status = parsed.status;
+  if (parsed.contactId !== undefined) patch.contactId = parsed.contactId;
+
+  if (Object.keys(patch).length === 0) {
+    return existing;
+  }
+
+  const [updated] = await db
+    .update(volunteers)
+    .set(patch)
+    .where(eq(volunteers.id, volunteerId))
+    .returning();
+
+  await auditAction({
+    organizationId: existing.organizationId,
+    userId: session.userId,
+    actionType: "update",
+    entityName: "volunteer",
+    entityId: updated.id,
+    details: {
+      role: updated.role,
+      status: updated.status,
+      contactId: updated.contactId,
+    },
+  });
+
+  return updated;
+}
+
+export async function deleteVolunteer(volunteerId: string) {
+  const [existing] = await db
+    .select()
+    .from(volunteers)
+    .where(eq(volunteers.id, volunteerId))
+    .limit(1);
+  if (!existing) {
+    throw new Error("Volunteer not found");
+  }
+
+  const session = await requireOrgMembership(existing.organizationId, "admin");
+
+  const [activeAssignmentCountRow] = await db
+    .select({
+      count: sql<number>`count(*)::int`,
+    })
+    .from(serviceAssignments)
+    .where(
+      and(
+        eq(serviceAssignments.organizationId, existing.organizationId),
+        eq(serviceAssignments.volunteerId, existing.id),
+        inArray(serviceAssignments.status, [
+          "proposed",
+          "offered",
+          "confirmed",
+          "needs_replacement",
+          "checked_in",
+        ])
+      )
+    );
+
+  if ((activeAssignmentCountRow?.count ?? 0) > 0) {
+    throw new Error(
+      "Volunteer has active service assignments. Reassign those seats before deleting."
+    );
+  }
+
+  const [shiftCountRow] = await db
+    .select({
+      count: sql<number>`count(*)::int`,
+    })
+    .from(volunteerShifts)
+    .where(eq(volunteerShifts.volunteerId, existing.id));
+
+  const [deleted] = await db
+    .delete(volunteers)
+    .where(eq(volunteers.id, existing.id))
+    .returning({ id: volunteers.id });
+
+  await auditAction({
+    organizationId: existing.organizationId,
+    userId: session.userId,
+    actionType: "delete",
+    entityName: "volunteer",
+    entityId: deleted.id,
+    details: {
+      contactId: existing.contactId,
+      deletedShiftCount: shiftCountRow?.count ?? 0,
+    },
+  });
+
+  return {
+    id: deleted.id,
+    deletedShiftCount: shiftCountRow?.count ?? 0,
+  };
 }
 
 export async function logVolunteerShift(data: {
@@ -608,6 +999,157 @@ export async function logVolunteerShift(data: {
   });
 
   return shift;
+}
+
+export async function getVolunteerShifts(data: {
+  organizationId: string;
+  volunteerId?: string;
+  fromDate?: Date;
+  toDate?: Date;
+}) {
+  const parsed = z
+    .object({
+      organizationId: z.string().min(1),
+      volunteerId: z.string().min(1).optional(),
+      fromDate: z.coerce.date().optional(),
+      toDate: z.coerce.date().optional(),
+    })
+    .parse(data);
+
+  await requireOrgMembership(parsed.organizationId);
+
+  const clauses = [eq(volunteers.organizationId, parsed.organizationId)];
+  if (parsed.volunteerId) {
+    clauses.push(eq(volunteerShifts.volunteerId, parsed.volunteerId));
+  }
+  if (parsed.fromDate) {
+    clauses.push(gte(volunteerShifts.date, parsed.fromDate));
+  }
+  if (parsed.toDate) {
+    clauses.push(lte(volunteerShifts.date, parsed.toDate));
+  }
+
+  return db
+    .select({
+      shift: volunteerShifts,
+      volunteer: volunteers,
+      contact: churchContacts,
+    })
+    .from(volunteerShifts)
+    .innerJoin(volunteers, eq(volunteerShifts.volunteerId, volunteers.id))
+    .leftJoin(churchContacts, eq(volunteers.contactId, churchContacts.id))
+    .where(and(...clauses))
+    .orderBy(desc(volunteerShifts.date));
+}
+
+export async function updateVolunteerShift(
+  shiftId: string,
+  data: Partial<{
+    eventId: string | null;
+    date: Date;
+    hours: number;
+    notes: string | null;
+  }>
+) {
+  const parsed = z
+    .object({
+      eventId: z.string().nullable().optional(),
+      date: z.coerce.date().optional(),
+      hours: z.coerce.number().positive().optional(),
+      notes: z.string().nullable().optional(),
+    })
+    .parse(data);
+
+  const [existing] = await db
+    .select({
+      shiftId: volunteerShifts.id,
+      organizationId: volunteers.organizationId,
+    })
+    .from(volunteerShifts)
+    .innerJoin(volunteers, eq(volunteerShifts.volunteerId, volunteers.id))
+    .where(eq(volunteerShifts.id, shiftId))
+    .limit(1);
+  if (!existing) {
+    throw new Error("Volunteer shift not found");
+  }
+
+  const session = await requireOrgMembership(existing.organizationId, "admin");
+
+  const patch: {
+    eventId?: string | null;
+    date?: Date;
+    hours?: number;
+    notes?: string | null;
+  } = {};
+  if (parsed.eventId !== undefined) patch.eventId = parsed.eventId;
+  if (parsed.date !== undefined) patch.date = parsed.date;
+  if (parsed.hours !== undefined) patch.hours = parsed.hours;
+  if (parsed.notes !== undefined) patch.notes = parsed.notes;
+
+  if (Object.keys(patch).length === 0) {
+    const [unchanged] = await db
+      .select()
+      .from(volunteerShifts)
+      .where(eq(volunteerShifts.id, shiftId))
+      .limit(1);
+    return unchanged;
+  }
+
+  const [updated] = await db
+    .update(volunteerShifts)
+    .set(patch)
+    .where(eq(volunteerShifts.id, shiftId))
+    .returning();
+
+  await auditAction({
+    organizationId: existing.organizationId,
+    userId: session.userId,
+    actionType: "update",
+    entityName: "volunteer_shift",
+    entityId: updated.id,
+    details: {
+      hours: updated.hours,
+      date: updated.date.toISOString(),
+      eventId: updated.eventId,
+    },
+  });
+
+  return updated;
+}
+
+export async function deleteVolunteerShift(shiftId: string) {
+  const [existing] = await db
+    .select({
+      shiftId: volunteerShifts.id,
+      organizationId: volunteers.organizationId,
+      volunteerId: volunteerShifts.volunteerId,
+    })
+    .from(volunteerShifts)
+    .innerJoin(volunteers, eq(volunteerShifts.volunteerId, volunteers.id))
+    .where(eq(volunteerShifts.id, shiftId))
+    .limit(1);
+  if (!existing) {
+    throw new Error("Volunteer shift not found");
+  }
+
+  const session = await requireOrgMembership(existing.organizationId, "admin");
+  const [deleted] = await db
+    .delete(volunteerShifts)
+    .where(eq(volunteerShifts.id, shiftId))
+    .returning({ id: volunteerShifts.id });
+
+  await auditAction({
+    organizationId: existing.organizationId,
+    userId: session.userId,
+    actionType: "delete",
+    entityName: "volunteer_shift",
+    entityId: deleted.id,
+    details: {
+      volunteerId: existing.volunteerId,
+    },
+  });
+
+  return { id: deleted.id };
 }
 
 type ServiceSchedulingMatrixPersonRow = {
@@ -2229,6 +2771,27 @@ export async function processServiceAssignmentSmsReply(data: {
     .where(eq(serviceAssignments.id, matched.assignment.id))
     .returning();
 
+  if (response.nextStatus === "needs_replacement") {
+    await ensureReplacementCoverageTask({
+      organizationId: parsed.organizationId,
+      serviceRunId: matched.run.id,
+      serviceRunName: matched.run.name,
+      serviceAt: matched.run.serviceAt,
+      roleName: updated.roleName,
+      roleSlotId: updated.roleSlotId,
+      reasonStatus: "needs_replacement",
+      assignmentId: updated.id,
+    });
+
+    await enqueueServiceAssignmentReplacementFlow({
+      organizationId: parsed.organizationId,
+      serviceRunId: matched.run.id,
+      assignmentId: updated.id,
+      reasonStatus: "needs_replacement",
+      occurredAt: new Date(),
+    });
+  }
+
   const smsProvider = await resolveSmsProvider(parsed.organizationId);
   let replyMessage = "";
   if (response.nextStatus === "confirmed") {
@@ -3016,6 +3579,110 @@ const serviceAssignmentStatusSchema = z.enum([
   "cancelled",
 ]);
 
+const TASK_OPEN_STATUSES = ["todo", "in_progress"] as const;
+
+async function ensureReplacementCoverageTask(params: {
+  organizationId: string;
+  serviceRunId: string;
+  serviceRunName: string;
+  serviceAt: Date;
+  roleName: string;
+  roleSlotId: string | null;
+  reasonStatus: "needs_replacement" | "no_show";
+  assignmentId: string;
+}) {
+  let isRequired = true;
+  if (params.roleSlotId) {
+    const [slot] = await db
+      .select({ isRequired: serviceTemplateRoleSlots.isRequired })
+      .from(serviceTemplateRoleSlots)
+      .where(eq(serviceTemplateRoleSlots.id, params.roleSlotId))
+      .limit(1);
+    if (slot) {
+      isRequired = slot.isRequired;
+    }
+  }
+
+  const taskTitle = `URGENT ${params.reasonStatus.replaceAll("_", " ")} replacement · ${params.roleName} (${params.serviceRunId})`;
+  const [existingTask] = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.organizationId, params.organizationId),
+        eq(tasks.title, taskTitle),
+        inArray(tasks.status, [...TASK_OPEN_STATUSES])
+      )
+    )
+    .limit(1);
+
+  if (existingTask) {
+    return { taskId: existingTask.id, created: false };
+  }
+
+  const taskDescription = [
+    `Grace flagged this seat as ${params.reasonStatus.replaceAll("_", " ")}.`,
+    `Service: ${params.serviceRunName} at ${formatShortDateTime(params.serviceAt)}.`,
+    `Role: ${params.roleName}.`,
+    `Assignment ID: ${params.assignmentId}.`,
+    "Action: assign replacement coverage and resend confirmation immediately.",
+  ].join(" ");
+
+  const [createdTask] = await db
+    .insert(tasks)
+    .values({
+      organizationId: params.organizationId,
+      title: taskTitle,
+      description: taskDescription,
+      dueDate: params.serviceAt,
+      priority: params.reasonStatus === "no_show" || isRequired ? "urgent" : "high",
+      status: "todo",
+    })
+    .returning({ id: tasks.id });
+
+  return { taskId: createdTask.id, created: true };
+}
+
+async function enqueueServiceAssignmentReplacementFlow(params: {
+  organizationId: string;
+  serviceRunId: string;
+  assignmentId: string;
+  reasonStatus: "needs_replacement" | "no_show";
+  occurredAt: Date;
+}) {
+  try {
+    const occurredAtIso = params.occurredAt.toISOString();
+    const idempotencyKey = buildServiceAssignmentReplacementIdempotencyKey({
+      organizationId: params.organizationId,
+      serviceRunId: params.serviceRunId,
+      assignmentId: params.assignmentId,
+      reasonStatus: params.reasonStatus,
+      occurredAt: occurredAtIso,
+    });
+
+    await inngest.send({
+      id: idempotencyKey,
+      name: INNGEST_EVENTS.GRACE_SERVICE_ASSIGNMENT_REPLACEMENT_REQUESTED,
+      data: {
+        organizationId: params.organizationId,
+        serviceRunId: params.serviceRunId,
+        assignmentId: params.assignmentId,
+        reasonStatus: params.reasonStatus,
+        occurredAt: occurredAtIso,
+        idempotencyKey,
+      },
+    });
+  } catch (error) {
+    console.error("[Operations] Failed to enqueue service assignment replacement workflow", {
+      organizationId: params.organizationId,
+      serviceRunId: params.serviceRunId,
+      assignmentId: params.assignmentId,
+      reasonStatus: params.reasonStatus,
+      error,
+    });
+  }
+}
+
 export async function updateServiceAssignmentStatus(data: {
   assignmentId: string;
   status: z.infer<typeof serviceAssignmentStatusSchema>;
@@ -3034,6 +3701,7 @@ export async function updateServiceAssignmentStatus(data: {
     .parse(data);
 
   const assignment = await requireServiceAssignmentAccess(parsed.assignmentId, "admin");
+  const serviceRun = await requireServiceRunAccess(assignment.serviceRunId, "admin");
   const hasAssignee = Boolean(assignment.volunteerId || assignment.staffUserId);
 
   const assignedStatuses = new Set([
@@ -3109,6 +3777,28 @@ export async function updateServiceAssignmentStatus(data: {
     .where(eq(serviceAssignments.id, assignment.id))
     .returning();
 
+  let replacementTask: { taskId: string; created: boolean } | null = null;
+  if (parsed.status === "needs_replacement" || parsed.status === "no_show") {
+    replacementTask = await ensureReplacementCoverageTask({
+      organizationId: assignment.organizationId,
+      serviceRunId: serviceRun.id,
+      serviceRunName: serviceRun.name,
+      serviceAt: serviceRun.serviceAt,
+      roleName: updated.roleName,
+      roleSlotId: updated.roleSlotId,
+      reasonStatus: parsed.status,
+      assignmentId: updated.id,
+    });
+
+    await enqueueServiceAssignmentReplacementFlow({
+      organizationId: assignment.organizationId,
+      serviceRunId: serviceRun.id,
+      assignmentId: updated.id,
+      reasonStatus: parsed.status,
+      occurredAt: now,
+    });
+  }
+
   await auditAction({
     organizationId: assignment.organizationId,
     userId: assignment.session.userId,
@@ -3120,6 +3810,8 @@ export async function updateServiceAssignmentStatus(data: {
       toStatus: updated.status,
       volunteerId: updated.volunteerId,
       staffUserId: updated.staffUserId,
+      replacementTaskId: replacementTask?.taskId ?? null,
+      replacementTaskCreated: replacementTask?.created ?? false,
     },
   });
 

@@ -12,7 +12,11 @@ import {
 } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getGeminiClient } from "@/lib/ai/gemini-client";
-import { INNGEST_EVENTS } from "../events";
+import { isFirstTimeGuestStageName } from "@/lib/pipeline/first-time-guest";
+import {
+  INNGEST_EVENTS,
+  buildFirstTimeGuestAppointmentIdempotencyKey,
+} from "../events";
 import { INNGEST_RETRY_PROFILES } from "../policy";
 
 /**
@@ -135,12 +139,43 @@ You must return ONLY a raw JSON object with the exact following schema:
       }
 
       if (actualStageId && contact) {
-        await db.insert(pipelineItems).values({
+        const [pipelineItem] = await db.insert(pipelineItems).values({
           organizationId,
           contactId: contact.id,
           stageId: actualStageId,
           notes: `Auto-categorized by AI as: ${intentAnalysis.category}`
-        });
+        }).returning({ id: pipelineItems.id, createdAt: pipelineItems.createdAt });
+
+        const actualStageName = (stage?.id === actualStageId ? stage.name : undefined)
+          ?? intentAnalysis.suggestedPipelineStage
+          ?? "";
+
+        if (isFirstTimeGuestStageName(actualStageName)) {
+          const occurredAt = (pipelineItem?.createdAt ?? new Date()).toISOString();
+          const idempotencyKey = buildFirstTimeGuestAppointmentIdempotencyKey({
+            organizationId,
+            pipelineItemId: pipelineItem.id,
+            contactId: contact.id,
+            stageId: actualStageId,
+            trigger: "ai_categorized",
+            occurredAt,
+          });
+
+          await inngest.send({
+            id: idempotencyKey,
+            name: INNGEST_EVENTS.GRACE_FIRST_TIME_GUEST_APPOINTMENT_REQUESTED,
+            data: {
+              organizationId,
+              pipelineItemId: pipelineItem.id,
+              contactId: contact.id,
+              stageId: actualStageId,
+              stageName: actualStageName,
+              trigger: "ai_categorized",
+              occurredAt,
+              idempotencyKey,
+            },
+          });
+        }
       }
 
       return { conversationId: conversation.id, contactId: contact.id };

@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 interface Plan {
   id: string;
@@ -56,9 +57,10 @@ export default function PlansPage() {
   const router = useRouter();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
   const limit = 10;
 
-  const { data, error, isLoading } = useSWR<{
+  const { data, error, isLoading, mutate } = useSWR<{
     plans: Plan[];
     pagination: PaginationInfo;
   }>(`/api/super-admin/plans?page=${page}&limit=${limit}&search=${search}`);
@@ -77,6 +79,33 @@ export default function PlansPage() {
 
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString();
+  };
+
+  const handleDeletePlan = async (planId: string) => {
+    const confirmed = window.confirm("Are you sure you want to delete this plan?");
+    if (!confirmed) return;
+
+    setDeletingPlanId(planId);
+    try {
+      const response = await fetch(`/api/super-admin/plans?id=${planId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(payload.error || "Failed to delete plan");
+      }
+
+      toast.success("Plan deleted");
+      await mutate();
+    } catch (error) {
+      console.error("Error deleting plan:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete plan");
+    } finally {
+      setDeletingPlanId(null);
+    }
   };
 
   return (
@@ -180,12 +209,11 @@ export default function PlansPage() {
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           className="text-red-600"
-                          onClick={() => {
-                            // TODO: Add delete confirmation
-                          }}
+                          disabled={deletingPlanId === plan.id}
+                          onClick={() => handleDeletePlan(plan.id)}
                         >
                           <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
+                          {deletingPlanId === plan.id ? "Deleting..." : "Delete"}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

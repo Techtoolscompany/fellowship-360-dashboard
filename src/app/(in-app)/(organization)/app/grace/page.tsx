@@ -46,7 +46,10 @@ import {
   getConversationStats,
   getConversationMessages,
   addMessage,
-  updateConversationStatus,
+  markConversationWaiting,
+  resolveConversation,
+  archiveConversation,
+  reopenConversation,
   getPhoneCalls,
 } from "@/app/actions/communications";
 import { getAppointments, updateAppointment } from "@/app/actions/operations";
@@ -105,12 +108,31 @@ type MessageRow = Awaited<ReturnType<typeof getConversationMessages>>[number];
 type SessionRow = Awaited<ReturnType<typeof getGraceSessions>>[number];
 type GraceCallRow = Awaited<ReturnType<typeof getGraceCalls>>[number];
 type ApprovalRow = Awaited<ReturnType<typeof getGraceApprovals>>[number];
+type ExecuteApprovalPayload = {
+  error?: string;
+  failed?: Array<{ error?: string }>;
+  mfaRequired?: boolean;
+  maskedDestination?: string;
+  expiresAt?: string;
+};
+type ApprovalMfaChallenge = {
+  approvalId: string;
+  sessionId: string;
+  toolName: string;
+  maskedDestination?: string;
+  expiresAt?: string;
+};
 type FollowupProposalRow = Awaited<ReturnType<typeof getGraceFollowupProposals>>[number];
 type ToolAuditRow = Awaited<ReturnType<typeof getGraceToolAudit>>[number];
 type KnowledgeRow = Awaited<ReturnType<typeof getGraceKnowledge>>[number];
 type ProviderConfigRow = Awaited<ReturnType<typeof getGraceProviderConfigs>>[number];
 type GraceSettingsRow = Awaited<ReturnType<typeof getGraceSettings>>;
 type GraceDailyBriefingRow = Exclude<Awaited<ReturnType<typeof getGraceDailyBriefing>>, null>;
+type WorkspaceTopMetric = {
+  label: string;
+  value: number | string;
+  icon: string;
+};
 
 type ServiceTemplateType = "sunday_am" | "midweek" | "special_event" | "custom";
 type RoleAssignmentType = "paid_staff" | "volunteer" | "either";
@@ -468,6 +490,9 @@ const TAB_ORDER: GraceTab[] = [
   "operations",
 ];
 
+const APPROVAL_QUEUE_SLA_MINUTES = 30;
+const RUNTIME_FAILURE_ALERT_THRESHOLD_PERCENT = 10;
+
 function normalizeTab(value: string | null): GraceTab {
   if (!value) return "command";
   if (value === "appointments") return "command";
@@ -672,6 +697,7 @@ export default function GraceWorkspacePage() {
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [composerText, setComposerText] = useState("");
   const [sending, setSending] = useState(false);
+  const [conversationStatusSaving, setConversationStatusSaving] = useState(false);
 
   const [kbTitle, setKbTitle] = useState("");
   const [kbContent, setKbContent] = useState("");
@@ -729,6 +755,12 @@ export default function GraceWorkspacePage() {
   const [assignmentStatusSavingId, setAssignmentStatusSavingId] = useState<string | null>(null);
   const [runBoardNowMs, setRunBoardNowMs] = useState(() => Date.now());
   const [proposalDecisionId, setProposalDecisionId] = useState<string | null>(null);
+  const [approvalActionId, setApprovalActionId] = useState<string | null>(null);
+  const [approvalMfaChallenge, setApprovalMfaChallenge] =
+    useState<ApprovalMfaChallenge | null>(null);
+  const [approvalMfaOpen, setApprovalMfaOpen] = useState(false);
+  const [approvalMfaCode, setApprovalMfaCode] = useState("");
+  const [approvalMfaSubmitting, setApprovalMfaSubmitting] = useState(false);
 
   // Grace Command Bar state
   const [graceCommandInput, setGraceCommandInput] = useState("");
@@ -798,9 +830,12 @@ export default function GraceWorkspacePage() {
       setPipelineItems(pipelineData.items);
       setCalendarEvents(eventRows);
 
-      if (!selectedConversationId && convRows[0]?.conversation?.id) {
-        setSelectedConversationId(convRows[0].conversation.id);
-      }
+      setSelectedConversationId((current) => {
+        if (current && convRows.some((row) => row.conversation.id === current)) {
+          return current;
+        }
+        return convRows[0]?.conversation?.id ?? null;
+      });
     } catch (error) {
       console.error("Failed to load Grace workspace:", error);
       toast.error("Failed to load Grace workspace");
@@ -818,11 +853,36 @@ export default function GraceWorkspacePage() {
   }, [searchParams]);
 
   useEffect(() => {
+    const voiceParam = searchParams.get("voice");
+    if (voiceParam !== "1" && voiceParam !== "true") {
+      return;
+    }
+
+    setVoiceOpen(true);
+
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("voice");
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }, [pathname, router, searchParams]);
+
+  useEffect(() => {
+    const requestedConversationId = searchParams.get("conversationId");
+    if (requestedConversationId) {
+      setSelectedConversationId(requestedConversationId);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (activeTab !== "operations" || !selectedServiceRunId) {
+      return;
+    }
+    setRunBoardNowMs(Date.now());
     const timer = window.setInterval(() => {
       setRunBoardNowMs(Date.now());
-    }, 30_000);
+    }, 1_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [activeTab, selectedServiceRunId]);
 
   const switchTab = useCallback(
     (tab: GraceTab) => {
@@ -1217,6 +1277,9 @@ export default function GraceWorkspacePage() {
     () => conversations.find((row) => row.conversation.id === selectedConversationId) ?? null,
     [conversations, selectedConversationId]
   );
+  const activeConversationStatus = activeConversation?.conversation.status ?? null;
+  const canReplyToActiveConversation =
+    activeConversationStatus === "open" || activeConversationStatus === "waiting";
 
   const nowMs = Date.now();
   const fortyEightHoursMs = nowMs + 48 * 60 * 60 * 1000;
@@ -1536,6 +1599,100 @@ export default function GraceWorkspacePage() {
       .slice(0, 30);
   }, [approvals, toolAuditRows]);
 
+  const approvalQueueHealth = useMemo(() => {
+    const now = Date.now();
+    const pending = approvals.filter((approval) => approval.status === "pending");
+    const pendingAgeMinutes = pending.map((approval) =>
+      Math.max(
+        0,
+        Math.round((now - new Date(approval.createdAt).getTime()) / 60_000)
+      )
+    );
+    const overduePendingCount = pendingAgeMinutes.filter(
+      (minutes) => minutes > APPROVAL_QUEUE_SLA_MINUTES
+    ).length;
+
+    const decidedInLast7Days = approvals.filter((approval) => {
+      if (!approval.decidedAt || approval.status === "pending") return false;
+      const decidedAtMs = new Date(approval.decidedAt).getTime();
+      return decidedAtMs >= now - 7 * 24 * 60 * 60 * 1000;
+    });
+
+    const decisionDurations = decidedInLast7Days
+      .map((approval) => {
+        if (!approval.decidedAt) return null;
+        const createdAtMs = new Date(approval.createdAt).getTime();
+        const decidedAtMs = new Date(approval.decidedAt).getTime();
+        if (Number.isNaN(createdAtMs) || Number.isNaN(decidedAtMs) || decidedAtMs < createdAtMs) {
+          return null;
+        }
+        return Math.round((decidedAtMs - createdAtMs) / 60_000);
+      })
+      .filter((value): value is number => value !== null);
+
+    return {
+      pendingCount: pending.length,
+      overduePendingCount,
+      avgPendingAgeMinutes:
+        pendingAgeMinutes.length > 0
+          ? Math.round(
+              pendingAgeMinutes.reduce((total, minutes) => total + minutes, 0) /
+                pendingAgeMinutes.length
+            )
+          : 0,
+      oldestPendingAgeMinutes:
+        pendingAgeMinutes.length > 0 ? Math.max(...pendingAgeMinutes) : 0,
+      decidedLast7Days: decidedInLast7Days.length,
+      avgDecisionMinutes:
+        decisionDurations.length > 0
+          ? Math.round(
+              decisionDurations.reduce((total, minutes) => total + minutes, 0) /
+                decisionDurations.length
+            )
+          : 0,
+      hasSlaBreach: overduePendingCount > 0,
+    };
+  }, [approvals]);
+
+  const runtimeHealth = useMemo(() => {
+    const now = Date.now();
+    const windowStart = now - 24 * 60 * 60 * 1000;
+    const recentRows = toolAuditRows.filter(
+      (row) => new Date(row.createdAt).getTime() >= windowStart
+    );
+    const failures = recentRows.filter((row) => row.status === "error");
+    const successes = recentRows.length - failures.length;
+    const failureRatePercent =
+      recentRows.length > 0
+        ? Number(((failures.length / recentRows.length) * 100).toFixed(1))
+        : 0;
+
+    const failureByChannel = new Map<string, number>();
+    for (const row of failures) {
+      failureByChannel.set(row.channel, (failureByChannel.get(row.channel) ?? 0) + 1);
+    }
+
+    const failureByTool = new Map<string, number>();
+    for (const row of failures) {
+      failureByTool.set(row.toolName, (failureByTool.get(row.toolName) ?? 0) + 1);
+    }
+
+    return {
+      last24hRuns: recentRows.length,
+      last24hFailures: failures.length,
+      last24hSuccesses: successes,
+      failureRatePercent,
+      alerting: failureRatePercent >= RUNTIME_FAILURE_ALERT_THRESHOLD_PERCENT,
+      failureByChannel: Array.from(failureByChannel.entries())
+        .map(([channel, count]) => ({ channel, count }))
+        .sort((a, b) => b.count - a.count),
+      topFailedTools: Array.from(failureByTool.entries())
+        .map(([tool, count]) => ({ tool, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5),
+    };
+  }, [toolAuditRows]);
+
   const sequenceRuns = useMemo(() => {
     return followupProposals.slice(0, 30).map((proposal) => {
       const metadata =
@@ -1801,6 +1958,39 @@ export default function GraceWorkspacePage() {
       ? runOfServiceTimelineWithState[runOfServiceTimelineWithState.length - 1]
       : null);
 
+  const followingRunStep = useMemo(() => {
+    if (!spotlightRunStep) return null;
+    const spotlightIndex = runOfServiceTimelineWithState.findIndex(
+      (step) => step.id === spotlightRunStep.id
+    );
+    if (spotlightIndex < 0) return null;
+    return runOfServiceTimelineWithState[spotlightIndex + 1] ?? null;
+  }, [runOfServiceTimelineWithState, spotlightRunStep]);
+
+  const runOfServiceProgress = useMemo(() => {
+    if (runOfServiceTimelineWithState.length === 0) return null;
+    const firstStep = runOfServiceTimelineWithState[0];
+    const lastStep = runOfServiceTimelineWithState[runOfServiceTimelineWithState.length - 1];
+    const totalMs = Math.max(1, lastStep.endMs - firstStep.startMs);
+    const elapsedMs = Math.min(Math.max(runBoardNowMs - firstStep.startMs, 0), totalMs);
+    const progressPercent = Math.round((elapsedMs / totalMs) * 100);
+    return {
+      startMs: firstStep.startMs,
+      endMs: lastStep.endMs,
+      progressPercent,
+    };
+  }, [runBoardNowMs, runOfServiceTimelineWithState]);
+
+  const activeRunStepProgressPercent = useMemo(() => {
+    if (!activeRunStep) return null;
+    const totalMs = Math.max(1, activeRunStep.endMs - activeRunStep.startMs);
+    const elapsedMs = Math.min(
+      Math.max(runBoardNowMs - activeRunStep.startMs, 0),
+      totalMs
+    );
+    return Math.round((elapsedMs / totalMs) * 100);
+  }, [activeRunStep, runBoardNowMs]);
+
   const runBoardCountdownLabel = useMemo(() => {
     if (!spotlightRunStep) return "No run steps available";
     if (activeRunStep) {
@@ -2043,6 +2233,200 @@ export default function GraceWorkspacePage() {
     ]
   );
 
+  const tabTopMetrics = useMemo<WorkspaceTopMetric[]>(() => {
+    if (activeTab === "center") {
+      const queuedOutcomes = executionOutcomes.filter(
+        (outcome) => outcome.status === "queued"
+      ).length;
+
+      return [
+        {
+          label: "Pending Approvals",
+          value: pendingApprovals,
+          icon: "shield_person",
+        },
+        {
+          label: `Over SLA (${APPROVAL_QUEUE_SLA_MINUTES}m)`,
+          value: approvalQueueHealth.overduePendingCount,
+          icon: "timer_off",
+        },
+        {
+          label: "Queued Actions",
+          value: queuedOutcomes,
+          icon: "schedule",
+        },
+        {
+          label: "Failure Rate (24h)",
+          value: `${runtimeHealth.failureRatePercent.toFixed(1)}%`,
+          icon: "query_stats",
+        },
+      ];
+    }
+
+    if (activeTab === "inbox") {
+      return [
+        {
+          label: "Waiting Threads",
+          value: waitingConversations,
+          icon: "forum",
+        },
+        {
+          label: "Call Items",
+          value: phoneCalls.length,
+          icon: "phone_in_talk",
+        },
+        {
+          label: "Grace Proposals",
+          value: followupProposals.length,
+          icon: "inbox",
+        },
+        {
+          label: "Escalations",
+          value: sessions.filter((session) => session.status === "escalated").length,
+          icon: "admin_panel_settings",
+        },
+      ];
+    }
+
+    if (activeTab === "visitors") {
+      return [
+        {
+          label: "Visitors In Pipeline",
+          value: pipelineItems.length,
+          icon: "groups",
+        },
+        {
+          label: "First-Time Guests",
+          value: firstTimeVisitorCount,
+          icon: "person_add",
+        },
+        {
+          label: "Pipeline Stages",
+          value: pipelineStages.length,
+          icon: "view_column",
+        },
+        {
+          label: "Follow-Up Suggestions",
+          value: pendingProposalQueue.length,
+          icon: "mark_chat_unread",
+        },
+      ];
+    }
+
+    if (activeTab === "calendar") {
+      return [
+        {
+          label: "Total Scheduled Items",
+          value: calendarSurfaceItems.length,
+          icon: "event",
+        },
+        {
+          label: "Next 7 Days",
+          value: calendarEventsNext7Days,
+          icon: "calendar_month",
+        },
+        {
+          label: "Next Event",
+          value: upcomingCalendarEvents[0]
+            ? fmtDurationFromNow(upcomingCalendarEvents[0].startDate)
+            : "none",
+          icon: "schedule",
+        },
+        {
+          label: "Pastoral Appointments",
+          value: upcomingPastoralAppointments.length,
+          icon: "event_upcoming",
+        },
+      ];
+    }
+
+    if (activeTab === "operations") {
+      return [
+        {
+          label: "Coverage",
+          value: selectedServiceRun
+            ? `${serviceRunCoverageSummary.coveragePercent}%`
+            : commandCoverageLabel,
+          icon: "fact_check",
+        },
+        {
+          label: "Seats Needed",
+          value: selectedServiceRun
+            ? serviceRunCoverageSummary.seatsNeeded
+            : commandServiceCoverageSummary.seatsNeeded,
+          icon: "groups",
+        },
+        {
+          label: "Open Positions",
+          value: selectedServiceRun
+            ? serviceRunCoverageSummary.seatsOpen
+            : commandServiceCoverageSummary.seatsOpen,
+          icon: "person_off",
+        },
+        {
+          label: "At Risk",
+          value: selectedServiceRun
+            ? serviceRunCoverageSummary.seatsAtRisk
+            : commandServiceCoverageSummary.seatsAtRisk,
+          icon: "warning",
+        },
+      ];
+    }
+
+    return [
+      {
+        label: "Next Service",
+        value: commandNextServiceLabel,
+        icon: "event_upcoming",
+      },
+      {
+        label: "Staffing Coverage",
+        value: commandCoverageLabel,
+        icon: "fact_check",
+      },
+      {
+        label: "Open Positions",
+        value: commandServiceRun ? commandServiceCoverageSummary.seatsOpen : "--",
+        icon: "groups",
+      },
+      {
+        label: "Aging Follow-ups",
+        value: staleFollowups.length,
+        icon: "mark_chat_unread",
+      },
+    ];
+  }, [
+    activeTab,
+    approvalQueueHealth.overduePendingCount,
+    calendarEventsNext7Days,
+    calendarSurfaceItems.length,
+    commandCoverageLabel,
+    commandNextServiceLabel,
+    commandServiceCoverageSummary.seatsAtRisk,
+    commandServiceCoverageSummary.seatsNeeded,
+    commandServiceCoverageSummary.seatsOpen,
+    commandServiceRun,
+    executionOutcomes,
+    firstTimeVisitorCount,
+    followupProposals.length,
+    pendingApprovals,
+    pendingProposalQueue.length,
+    phoneCalls.length,
+    pipelineItems.length,
+    pipelineStages.length,
+    selectedServiceRun,
+    serviceRunCoverageSummary.coveragePercent,
+    serviceRunCoverageSummary.seatsAtRisk,
+    serviceRunCoverageSummary.seatsNeeded,
+    serviceRunCoverageSummary.seatsOpen,
+    sessions,
+    staleFollowups.length,
+    runtimeHealth.failureRatePercent,
+    upcomingCalendarEvents,
+    upcomingPastoralAppointments.length,
+    waitingConversations,
+  ]);
+
   const handleSend = async () => {
     if (!selectedConversationId || !composerText.trim()) return;
     const content = composerText.trim();
@@ -2069,14 +2453,33 @@ export default function GraceWorkspacePage() {
     }
   };
 
-  const handleResolveConversation = async (id: string) => {
+  const handleSetConversationStatus = async (
+    id: string,
+    nextStatus: "waiting" | "resolved" | "archived" | "open"
+  ) => {
+    setConversationStatusSaving(true);
     try {
-      await updateConversationStatus(id, "resolved");
+      if (nextStatus === "waiting") {
+        await markConversationWaiting(id);
+      } else if (nextStatus === "resolved") {
+        await resolveConversation(id);
+      } else if (nextStatus === "archived") {
+        await archiveConversation(id);
+      } else {
+        await reopenConversation(id);
+      }
       await fetchWorkspace();
-      toast.success("Conversation resolved");
+      if (nextStatus === "waiting") toast.success("Conversation marked waiting");
+      if (nextStatus === "resolved") toast.success("Conversation resolved");
+      if (nextStatus === "archived") toast.success("Conversation archived");
+      if (nextStatus === "open") toast.success("Conversation reopened");
     } catch (error) {
-      console.error("Failed to resolve conversation:", error);
-      toast.error("Failed to resolve conversation");
+      console.error("Failed to update conversation status:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to update conversation status"
+      );
+    } finally {
+      setConversationStatusSaving(false);
     }
   };
 
@@ -2224,36 +2627,146 @@ export default function GraceWorkspacePage() {
     [switchTab, triggerGraceFromContext]
   );
 
-  const handleApproveAndExecute = async (approval: ApprovalRow) => {
-    try {
+  const executeApprovalAction = useCallback(
+    async (approval: ApprovalRow, mfaCode?: string) => {
       const response = await fetch("/api/grace/actions/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: approval.sessionId,
           actionIds: [approval.id],
+          ...(mfaCode ? { mfaCode } : {}),
         }),
       });
-      const payload = (await response.json()) as {
-        error?: string;
-        failed?: Array<{ error?: string }>;
-      };
-      if (!response.ok) throw new Error(payload.error || "Failed to execute approval");
 
+      const payload = (await response.json()) as ExecuteApprovalPayload;
+      return { ok: response.ok, payload };
+    },
+    []
+  );
+
+  const handleApprovalExecutionOutcome = useCallback(
+    async (payload: ExecuteApprovalPayload) => {
       const failedMessages = payload.failed
         ?.map((item) => item.error)
         .filter((value): value is string => Boolean(value));
+
       if (failedMessages && failedMessages.length > 0) {
         toast.error(`Approved, but execution failed: ${failedMessages.join("; ")}`);
       } else {
         toast.success("Action approved and executed");
       }
+
       await fetchWorkspace();
-    } catch (error) {
-      console.error("Failed to approve action:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to approve action");
+    },
+    [fetchWorkspace]
+  );
+
+  const closeApprovalMfaDialog = useCallback(() => {
+    setApprovalMfaOpen(false);
+    setApprovalMfaChallenge(null);
+    setApprovalMfaCode("");
+    setApprovalMfaSubmitting(false);
+  }, []);
+
+  const handleApproveAndExecute = useCallback(
+    async (approval: ApprovalRow) => {
+      if (approvalActionId === approval.id || approvalMfaSubmitting) return;
+
+      setApprovalActionId(approval.id);
+      try {
+        const { ok, payload } = await executeApprovalAction(approval);
+
+        if (ok) {
+          await handleApprovalExecutionOutcome(payload);
+          return;
+        }
+
+        if (!payload.mfaRequired) {
+          throw new Error(payload.error || "Failed to execute approval");
+        }
+
+        const action = (approval.proposedAction ?? {}) as Record<string, unknown>;
+        const toolName = typeof action.tool === "string" ? action.tool : "requested action";
+
+        setApprovalMfaChallenge({
+          approvalId: approval.id,
+          sessionId: approval.sessionId,
+          toolName,
+          maskedDestination: payload.maskedDestination,
+          expiresAt: payload.expiresAt,
+        });
+        setApprovalMfaCode("");
+        setApprovalMfaOpen(true);
+        toast.info("Verification required before this action can run.");
+      } catch (error) {
+        console.error("Failed to approve action:", error);
+        toast.error(error instanceof Error ? error.message : "Failed to approve action");
+      } finally {
+        setApprovalActionId(null);
+      }
+    },
+    [
+      approvalActionId,
+      approvalMfaSubmitting,
+      executeApprovalAction,
+      handleApprovalExecutionOutcome,
+    ]
+  );
+
+  const handleSubmitApprovalMfa = useCallback(async () => {
+    if (!approvalMfaChallenge) return;
+    if (!approvalMfaCode.trim()) {
+      toast.error("Verification code is required.");
+      return;
     }
-  };
+
+    const approval = approvals.find((row) => row.id === approvalMfaChallenge.approvalId);
+    if (!approval) {
+      toast.error("Approval item no longer available.");
+      closeApprovalMfaDialog();
+      return;
+    }
+
+    setApprovalMfaSubmitting(true);
+    try {
+      const { ok, payload } = await executeApprovalAction(approval, approvalMfaCode.trim());
+
+      if (!ok) {
+        if (payload.mfaRequired) {
+          setApprovalMfaChallenge((current) =>
+            current
+              ? {
+                  ...current,
+                  maskedDestination:
+                    payload.maskedDestination ?? current.maskedDestination,
+                  expiresAt: payload.expiresAt ?? current.expiresAt,
+                }
+              : current
+          );
+          toast.error(payload.error || "Invalid or expired verification code.");
+          return;
+        }
+
+        throw new Error(payload.error || "Failed to execute approval");
+      }
+
+      closeApprovalMfaDialog();
+      await handleApprovalExecutionOutcome(payload);
+    } catch (error) {
+      console.error("Failed to verify approval code:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to verify code");
+    } finally {
+      setApprovalMfaSubmitting(false);
+    }
+  }, [
+    approvalMfaChallenge,
+    approvalMfaCode,
+    approvals,
+    closeApprovalMfaDialog,
+    executeApprovalAction,
+    handleApprovalExecutionOutcome,
+  ]);
 
   const handleRejectApproval = async (approval: ApprovalRow) => {
     if (!orgId) return;
@@ -2963,14 +3476,14 @@ export default function GraceWorkspacePage() {
           </div>
 
           <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <TopMetric label="Next Service" value={commandNextServiceLabel} icon="event_upcoming" />
-            <TopMetric label="Staffing Coverage" value={commandCoverageLabel} icon="fact_check" />
-            <TopMetric
-              label="Open Positions"
-              value={commandServiceRun ? commandServiceCoverageSummary.seatsOpen : "--"}
-              icon="groups"
-            />
-            <TopMetric label="Aging Follow-ups" value={staleFollowups.length} icon="mark_chat_unread" />
+            {tabTopMetrics.map((metric) => (
+              <TopMetric
+                key={`${activeTab}-${metric.label}`}
+                label={metric.label}
+                value={metric.value}
+                icon={metric.icon}
+              />
+            ))}
           </div>
         </section>
 
@@ -3426,6 +3939,110 @@ export default function GraceWorkspacePage() {
           <div className="bg-white dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden">
             <div className="p-6 border-b border-slate-200 dark:border-slate-800 md:flex md:items-center justify-between">
               <div>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                  Approval SLA & Runtime Health
+                </h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  QA launch monitors for approval queue latency and tool runtime failures.
+                </p>
+              </div>
+              <Badge
+                className={
+                  approvalQueueHealth.hasSlaBreach || runtimeHealth.alerting
+                    ? "mt-4 md:mt-0 border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
+                    : "mt-4 md:mt-0 border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                }
+              >
+                {approvalQueueHealth.hasSlaBreach || runtimeHealth.alerting ? "Action Needed" : "Healthy"}
+              </Badge>
+            </div>
+            <div className="p-6 space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <MinistryBriefItem
+                  title="Pending Approvals"
+                  value={approvalQueueHealth.pendingCount}
+                  detail={`${approvalQueueHealth.avgPendingAgeMinutes}m avg age`}
+                  icon="shield_person"
+                />
+                <MinistryBriefItem
+                  title={`Over SLA (${APPROVAL_QUEUE_SLA_MINUTES}m)`}
+                  value={approvalQueueHealth.overduePendingCount}
+                  detail={`${approvalQueueHealth.oldestPendingAgeMinutes}m oldest`}
+                  icon="timer_off"
+                />
+                <MinistryBriefItem
+                  title="Decisions (7d)"
+                  value={approvalQueueHealth.decidedLast7Days}
+                  detail={`${approvalQueueHealth.avgDecisionMinutes}m avg decision`}
+                  icon="done_all"
+                />
+                <MinistryBriefItem
+                  title="Runtime Failure Rate (24h)"
+                  value={`${runtimeHealth.failureRatePercent.toFixed(1)}%`}
+                  detail={`${runtimeHealth.last24hFailures}/${runtimeHealth.last24hRuns} failed`}
+                  icon="monitor_heart"
+                />
+              </div>
+
+              {(approvalQueueHealth.hasSlaBreach || runtimeHealth.alerting) && (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-4 dark:border-rose-800 dark:bg-rose-950/20">
+                  <p className="text-xs font-black uppercase tracking-wider text-rose-700 dark:text-rose-300">
+                    Launch Alert
+                  </p>
+                  <p className="mt-1 text-sm text-rose-700 dark:text-rose-200">
+                    {approvalQueueHealth.hasSlaBreach
+                      ? `${approvalQueueHealth.overduePendingCount} approval${approvalQueueHealth.overduePendingCount === 1 ? "" : "s"} exceeded the ${APPROVAL_QUEUE_SLA_MINUTES} minute SLA. `
+                      : ""}
+                    {runtimeHealth.alerting
+                      ? `Runtime failure rate is ${runtimeHealth.failureRatePercent.toFixed(1)}% in the last 24 hours.`
+                      : ""}
+                  </p>
+                </div>
+              )}
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+                  <p className="text-sm font-bold text-slate-900 dark:text-white">Top Failed Tools (24h)</p>
+                  {runtimeHealth.topFailedTools.length === 0 ? (
+                    <p className="mt-2 text-xs text-slate-500">No failed tool runs in the last 24 hours.</p>
+                  ) : (
+                    <div className="mt-2 space-y-1.5">
+                      {runtimeHealth.topFailedTools.map((row) => (
+                        <div key={row.tool} className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-slate-600 dark:text-slate-300">
+                            {row.tool}
+                          </span>
+                          <span className="font-bold text-slate-900 dark:text-white">{row.count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+                  <p className="text-sm font-bold text-slate-900 dark:text-white">Failure By Channel (24h)</p>
+                  {runtimeHealth.failureByChannel.length === 0 ? (
+                    <p className="mt-2 text-xs text-slate-500">No channel failures in the last 24 hours.</p>
+                  ) : (
+                    <div className="mt-2 space-y-1.5">
+                      {runtimeHealth.failureByChannel.map((row) => (
+                        <div key={row.channel} className="flex items-center justify-between text-xs">
+                          <span className="font-semibold uppercase text-slate-600 dark:text-slate-300">
+                            {row.channel}
+                          </span>
+                          <span className="font-bold text-slate-900 dark:text-white">{row.count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <div className="p-6 border-b border-slate-200 dark:border-slate-800 md:flex md:items-center justify-between">
+              <div>
                 <h3 className="text-xl font-black text-slate-900 dark:text-white">Grace Suggests Queue</h3>
                 <p className="text-sm text-slate-500 mt-1">
                   Proposed follow-ups waiting for staff review.
@@ -3516,6 +4133,10 @@ export default function GraceWorkspacePage() {
                 const reasonText =
                   typeof action.reason === "string" ? action.reason : "No reason provided";
                 const payloadPreview = formatJsonPreview(action.input, 220);
+                const isApprovalProcessing =
+                  approvalActionId === approval.id ||
+                  (approvalMfaSubmitting &&
+                    approvalMfaChallenge?.approvalId === approval.id);
 
                 return (
                   <div key={approval.id} className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 transition-all hover:border-[#84cc16]/50">
@@ -3541,16 +4162,29 @@ export default function GraceWorkspacePage() {
                       </div>
                       {approval.status === "pending" && (
                         <div className="flex sm:flex-col gap-2 shrink-0">
-                          <button 
+                          <Button
+                            type="button"
                             className="bg-[#84cc16] hover:bg-[#65a30d] text-slate-950 font-bold px-4 py-2 rounded-xl transition-all shadow-sm text-sm flex items-center justify-center gap-1"
-                            onClick={() => handleApproveAndExecute(approval)}>
-                            <span className="material-symbols-outlined text-[16px]">check</span> Approve
-                          </button>
-                          <button 
+                            disabled={isApprovalProcessing}
+                            onClick={() => void handleApproveAndExecute(approval)}
+                          >
+                            {isApprovalProcessing ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <span className="material-symbols-outlined text-[16px]">check</span>
+                            )}
+                            Approve
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
                             className="bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 font-bold px-4 py-2 rounded-xl transition-all text-sm flex items-center justify-center gap-1"
-                            onClick={() => handleRejectApproval(approval)}>
-                            <span className="material-symbols-outlined text-[16px]">close</span> Reject
-                          </button>
+                            disabled={isApprovalProcessing}
+                            onClick={() => handleRejectApproval(approval)}
+                          >
+                            <span className="material-symbols-outlined text-[16px]">close</span>
+                            Reject
+                          </Button>
                         </div>
                       )}
                     </div>
@@ -3692,23 +4326,72 @@ export default function GraceWorkspacePage() {
               )}
               {graceCalls.length > 0 && (
                 <div className="space-y-3">
-                  {graceCalls.map((call) => (
-                    <div key={call.id} className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 flex flex-col md:flex-row justify-between items-start gap-4">
-                      <div className="flex items-center gap-3">
-                         <div className="bg-white dark:bg-slate-950 p-2 rounded-full border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-center">
-                           <span className="material-symbols-outlined text-slate-400">call</span>
-                         </div>
-                         <div>
-                           <p className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                             {call.fromNumber || "Unknown"}
-                             <span className="material-symbols-outlined text-[14px] text-slate-300">arrow_forward</span>
-                             {call.toNumber || "Unknown"}
-                           </p>
-                           <p className="text-sm text-slate-500 mt-1 font-medium">{call.summaryText || call.transcriptText || "No transcript yet"}</p>
-                         </div>
+                  {graceCalls.map((row) => {
+                    const call = row.call;
+                    const contactName = row.contact
+                      ? `${row.contact.firstName} ${row.contact.lastName}`.trim()
+                      : "Unknown caller";
+                    const escalationOpen =
+                      row.latestHandoffStatus === "open" ||
+                      (row.latestHandoffStatus == null && row.session?.status === "escalated");
+
+                    return (
+                      <div
+                        key={call.id}
+                        className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 flex flex-col md:flex-row justify-between items-start gap-4"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="bg-white dark:bg-slate-950 p-2 rounded-full border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-center">
+                            <span className="material-symbols-outlined text-slate-400">call</span>
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                              {call.fromNumber || "Unknown"}
+                              <span className="material-symbols-outlined text-[14px] text-slate-300">arrow_forward</span>
+                              {call.toNumber || "Unknown"}
+                            </p>
+                            <p className="text-xs text-slate-500 mt-0.5 font-semibold">
+                              {contactName}
+                            </p>
+                            <p className="text-sm text-slate-500 mt-1 font-medium">
+                              {call.summaryText || call.transcriptText || "No transcript yet"}
+                            </p>
+                            <p className="text-[11px] text-slate-400 mt-2 font-semibold uppercase tracking-wide">
+                              {fmtDateTime(call.createdAt)}
+                              {typeof call.durationSec === "number" ? ` · ${call.durationSec}s` : ""}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {call.outcome && (
+                            <Badge variant="outline" className="border-slate-300 text-slate-700 dark:border-slate-700 dark:text-slate-300">
+                              {call.outcome.replace(/_/g, " ")}
+                            </Badge>
+                          )}
+                          {escalationOpen && (
+                            <Badge
+                              variant="outline"
+                              className="border-rose-300 text-rose-700 dark:border-rose-700 dark:text-rose-300"
+                            >
+                              Escalated
+                            </Badge>
+                          )}
+                          {row.linkedConversationId && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedConversationId(row.linkedConversationId);
+                                switchTab("inbox");
+                              }}
+                            >
+                              Open Thread
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -3763,33 +4446,6 @@ export default function GraceWorkspacePage() {
         </TabsContent>
 
         <TabsContent value="inbox" className="space-y-8 max-w-7xl mx-auto w-full p-8 pt-0">
-          <div className="grid gap-4 md:grid-cols-4">
-            <MinistryBriefItem
-              title="Waiting Threads"
-              value={waitingConversations}
-              detail="SMS + Email requiring response"
-              icon="forum"
-            />
-            <MinistryBriefItem
-              title="Call Items"
-              value={phoneCalls.length}
-              detail="Voice interactions in queue"
-              icon="phone_in_talk"
-            />
-            <MinistryBriefItem
-              title="Grace Proposals"
-              value={followupProposals.length}
-              detail="AI suggested follow-up sequences"
-              icon="inbox"
-            />
-            <MinistryBriefItem
-              title="Escalations"
-              value={sessions.filter((s) => s.status === "escalated").length}
-              detail="Requires staff intervention"
-              icon="admin_panel_settings"
-            />
-          </div>
-
           <div className="grid gap-8 lg:grid-cols-5">
             <div className="lg:col-span-2 bg-white dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col h-full">
               <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
@@ -3847,12 +4503,62 @@ export default function GraceWorkspacePage() {
                 <h3 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
                   <span className="material-symbols-outlined text-slate-400">chat</span> Thread
                 </h3>
-                {activeConversation && activeConversation.conversation.status !== "resolved" && (
-                  <button 
-                    className="bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 font-bold px-4 py-2 rounded-xl transition-all shadow-sm text-sm flex items-center gap-1"
-                    onClick={() => handleResolveConversation(activeConversation.conversation.id)}>
-                    <span className="material-symbols-outlined text-[18px] text-[#84cc16]">check_circle</span> Mark Resolved
-                  </button>
+                {activeConversation && (
+                  <div className="flex items-center gap-2">
+                    {activeConversation.conversation.status === "open" && (
+                      <button
+                        className="bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 font-bold px-3 py-2 rounded-xl transition-all shadow-sm text-xs"
+                        onClick={() =>
+                          handleSetConversationStatus(
+                            activeConversation.conversation.id,
+                            "waiting"
+                          )
+                        }
+                        disabled={conversationStatusSaving}
+                      >
+                        Mark Waiting
+                      </button>
+                    )}
+                    {(activeConversation.conversation.status === "open" ||
+                      activeConversation.conversation.status === "waiting") && (
+                      <button
+                        className="bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 font-bold px-3 py-2 rounded-xl transition-all shadow-sm text-xs"
+                        onClick={() =>
+                          handleSetConversationStatus(
+                            activeConversation.conversation.id,
+                            "resolved"
+                          )
+                        }
+                        disabled={conversationStatusSaving}
+                      >
+                        Resolve
+                      </button>
+                    )}
+                    {activeConversation.conversation.status !== "archived" ? (
+                      <button
+                        className="bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 font-bold px-3 py-2 rounded-xl transition-all shadow-sm text-xs"
+                        onClick={() =>
+                          handleSetConversationStatus(
+                            activeConversation.conversation.id,
+                            "archived"
+                          )
+                        }
+                        disabled={conversationStatusSaving}
+                      >
+                        Archive
+                      </button>
+                    ) : (
+                      <button
+                        className="bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 font-bold px-3 py-2 rounded-xl transition-all shadow-sm text-xs"
+                        onClick={() =>
+                          handleSetConversationStatus(activeConversation.conversation.id, "open")
+                        }
+                        disabled={conversationStatusSaving}
+                      >
+                        Reopen
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
               <div className="p-6 flex-1 flex flex-col">
@@ -3860,7 +4566,8 @@ export default function GraceWorkspacePage() {
                   <strong className="text-slate-900 dark:text-white uppercase tracking-wider font-bold">Conversation stats:</strong>{" "}
                   <span className="ml-2">Open <span className="font-bold text-slate-900 dark:text-white">{Number(conversationStats?.open ?? 0)}</span></span><span className="mx-2">|</span>
                   <span>Waiting <span className="font-bold text-slate-900 dark:text-white">{Number(conversationStats?.waiting ?? 0)}</span></span><span className="mx-2">|</span>
-                  <span>Resolved <span className="font-bold text-slate-900 dark:text-white">{Number(conversationStats?.resolved ?? 0)}</span></span>
+                  <span>Resolved <span className="font-bold text-slate-900 dark:text-white">{Number(conversationStats?.resolved ?? 0)}</span></span><span className="mx-2">|</span>
+                  <span>Archived <span className="font-bold text-slate-900 dark:text-white">{Number(conversationStats?.archived ?? 0)}</span></span>
                 </div>
 
                 <ScrollArea className="flex-1 min-h-[320px] rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/30 mb-4">
@@ -3895,7 +4602,12 @@ export default function GraceWorkspacePage() {
                     className="bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 rounded-xl h-12"
                     value={composerText}
                     onChange={(e) => setComposerText(e.target.value)}
-                    placeholder="Reply as Grace operator..."
+                    placeholder={
+                      canReplyToActiveConversation
+                        ? "Reply as Grace operator..."
+                        : "Reopen the conversation to send a reply"
+                    }
+                    disabled={!canReplyToActiveConversation}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
@@ -3905,7 +4617,9 @@ export default function GraceWorkspacePage() {
                   />
                   <button 
                     className="bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 rounded-xl transition-all shadow-sm flex items-center justify-center shrink-0 w-12 h-12 disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={handleSend} disabled={sending || !composerText.trim()}>
+                    onClick={handleSend}
+                    disabled={sending || !composerText.trim() || !canReplyToActiveConversation}
+                  >
                     {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <span className="material-symbols-outlined text-[20px]">send</span>}
                   </button>
                 </div>
@@ -4008,7 +4722,7 @@ export default function GraceWorkspacePage() {
                 <Badge variant="secondary">
                   {pipelineItems.length} visitors in pipeline
                 </Badge>
-                <Button variant="outline" onClick={() => router.push("/app/pipeline")}>
+                <Button variant="outline" onClick={() => switchTab("visitors")}>
                   Open Full Pipeline
                 </Button>
               </div>
@@ -4060,24 +4774,6 @@ export default function GraceWorkspacePage() {
         </TabsContent>
 
         <TabsContent value="calendar" className="space-y-8 max-w-7xl mx-auto w-full p-8 pt-0">
-          <div className="grid gap-4 md:grid-cols-3">
-            <TopMetric
-              label="Total Scheduled Items"
-              value={calendarSurfaceItems.length}
-              icon="event"
-            />
-            <TopMetric
-              label="Next 7 Days"
-              value={calendarEventsNext7Days}
-              icon="calendar_month"
-            />
-            <TopMetric
-              label="Next Event"
-              value={upcomingCalendarEvents[0] ? fmtDurationFromNow(upcomingCalendarEvents[0].startDate) : "none"}
-              icon="schedule"
-            />
-          </div>
-
           <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white/90 shadow-[0_20px_60px_-30px_rgba(15,23,42,0.45)] dark:border-slate-800 dark:bg-slate-900/60">
             <div className="flex flex-col gap-4 border-b border-slate-200 p-6 dark:border-slate-800 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -4088,7 +4784,7 @@ export default function GraceWorkspacePage() {
                   Schedule events and let Grace orchestrate reminders, comms, and staffing prompts.
                 </p>
               </div>
-              <Button variant="outline" onClick={() => router.push("/app/calendar")}>
+              <Button variant="outline" onClick={() => switchTab("calendar")}>
                 Open Full Calendar
               </Button>
             </div>
@@ -4296,6 +4992,226 @@ export default function GraceWorkspacePage() {
               <p className="mt-1">{servicePlanningSetupRequired}</p>
             </div>
           )}
+
+          {/* Step 0: Preview assignment coverage and conflicts */}
+          <div className="bg-white dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                  Assignment Preview & Conflict Radar
+                </h3>
+                <p className="text-sm text-slate-500">
+                  Score candidates by role fit, availability, and schedule conflicts before offers.
+                </p>
+              </div>
+              {selectedServiceRun ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setAssignmentServiceAt(
+                      formatDateTimeLocalInput(new Date(selectedServiceRun.run.serviceAt))
+                    );
+                    setAssignmentDurationMinutes(
+                      String(selectedServiceRun.run.durationMinutes)
+                    );
+                  }}
+                >
+                  Use Selected Service Time
+                </Button>
+              ) : null}
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Input
+                  type="datetime-local"
+                  value={assignmentServiceAt}
+                  onChange={(event) => setAssignmentServiceAt(event.target.value)}
+                  disabled={assignmentLoading}
+                />
+                <Input
+                  type="number"
+                  min={30}
+                  step={15}
+                  placeholder="Duration (minutes)"
+                  value={assignmentDurationMinutes}
+                  onChange={(event) => setAssignmentDurationMinutes(event.target.value)}
+                  disabled={assignmentLoading}
+                />
+                <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 dark:border-slate-800 dark:bg-slate-950/40">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                      Include unavailable
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Show blocked candidates and conflict reasons
+                    </p>
+                  </div>
+                  <Switch
+                    checked={includeUnavailableCandidates}
+                    onCheckedChange={setIncludeUnavailableCandidates}
+                    disabled={assignmentLoading}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  onClick={handleRunAssignmentPreview}
+                  disabled={assignmentLoading || !selectedServiceTemplate}
+                >
+                  {assignmentLoading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="mr-2 h-4 w-4" />
+                  )}
+                  Run Preview
+                </Button>
+              </div>
+
+              {!selectedServiceTemplate ? (
+                <p className="text-sm text-slate-500">
+                  Select a roles template in &ldquo;Schedule a Service&rdquo; to run preview.
+                </p>
+              ) : null}
+
+              {assignmentPreview ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Coverage
+                      </p>
+                      <p className="mt-1 text-xl font-black text-slate-900 dark:text-white">
+                        {assignmentPreview.summary.recommendedSeats}/{assignmentPreview.summary.totalSeats}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Unfilled Required
+                      </p>
+                      <p className="mt-1 text-xl font-black text-slate-900 dark:text-white">
+                        {assignmentPreview.summary.unfilledRequiredSeats}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Required Roles At Risk
+                      </p>
+                      <p className="mt-1 text-xl font-black text-slate-900 dark:text-white">
+                        {assignmentPreview.summary.requiredRolesWithoutCoverage}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Generated
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">
+                        {fmtDateTime(assignmentPreview.generatedAt)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {assignmentPreview.roleRecommendations.map((recommendation) => {
+                      const conflictCandidates = recommendation.suggestions
+                        .filter((candidate) => !candidate.available && candidate.conflictReason)
+                        .slice(0, 3);
+
+                      return (
+                        <div
+                          key={recommendation.roleSlot.id}
+                          className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/40"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                {recommendation.roleSlot.roleName}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {ROLE_ASSIGNMENT_LABELS[recommendation.roleSlot.assignmentType]} ·{" "}
+                                {recommendation.requiredCount} required
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge
+                                variant="outline"
+                                className={
+                                  recommendation.unfilledSeats > 0
+                                    ? "border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300"
+                                    : "border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-300"
+                                }
+                              >
+                                {recommendation.unfilledSeats > 0
+                                  ? `${recommendation.unfilledSeats} unfilled`
+                                  : "covered"}
+                              </Badge>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 grid gap-2 lg:grid-cols-2">
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                Recommended
+                              </p>
+                              {recommendation.recommended.length === 0 ? (
+                                <p className="mt-1 text-xs text-slate-500">
+                                  No available candidates for this seat.
+                                </p>
+                              ) : (
+                                <div className="mt-1 space-y-1">
+                                  {recommendation.recommended.map((candidate) => (
+                                    <div
+                                      key={`${recommendation.roleSlot.id}-${candidate.assigneeType}-${candidate.assigneeId}`}
+                                      className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs dark:border-slate-800 dark:bg-slate-900/70"
+                                    >
+                                      <span className="truncate text-slate-700 dark:text-slate-200">
+                                        {candidate.displayName}
+                                      </span>
+                                      <span className="font-semibold text-slate-500">
+                                        {candidate.score}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                Conflicts
+                              </p>
+                              {conflictCandidates.length === 0 ? (
+                                <p className="mt-1 text-xs text-slate-500">
+                                  No scheduling conflicts detected in the top candidates.
+                                </p>
+                              ) : (
+                                <div className="mt-1 space-y-1">
+                                  {conflictCandidates.map((candidate) => (
+                                    <div
+                                      key={`${recommendation.roleSlot.id}-${candidate.assigneeType}-${candidate.assigneeId}-conflict`}
+                                      className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300"
+                                    >
+                                      <p className="font-semibold">{candidate.displayName}</p>
+                                      <p>{candidate.conflictReason}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-slate-500">
+                  Run preview to inspect coverage gaps and scheduling conflicts before offers.
+                </p>
+              )}
+            </div>
+          </div>
 
           {/* Step 1: Schedule a service */}
           <div className="bg-white dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden">
@@ -4509,6 +5425,19 @@ export default function GraceWorkspacePage() {
                           <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">
                             {runBoardCountdownLabel}
                           </p>
+                          {runOfServiceProgress ? (
+                            <div className="mt-3 space-y-1.5">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                Run Progress · {runOfServiceProgress.progressPercent}%
+                              </p>
+                              <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                                <div
+                                  className="h-full rounded-full bg-emerald-500 transition-all"
+                                  style={{ width: `${runOfServiceProgress.progressPercent}%` }}
+                                />
+                              </div>
+                            </div>
+                          ) : null}
                           {spotlightRunStep ? (
                             <>
                               <p className="mt-3 text-sm font-semibold text-slate-900 dark:text-white">
@@ -4527,6 +5456,28 @@ export default function GraceWorkspacePage() {
                               <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
                                 {spotlightRunStep.detail}
                               </p>
+                              {activeRunStepProgressPercent !== null ? (
+                                <div className="mt-3 space-y-1.5">
+                                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Current Step · {activeRunStepProgressPercent}%
+                                  </p>
+                                  <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                                    <div
+                                      className="h-full rounded-full bg-blue-500 transition-all"
+                                      style={{ width: `${activeRunStepProgressPercent}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              ) : null}
+                              {followingRunStep ? (
+                                <p className="mt-3 text-xs text-slate-500">
+                                  Next step:{" "}
+                                  <span className="font-semibold text-slate-700 dark:text-slate-200">
+                                    {followingRunStep.title}
+                                  </span>{" "}
+                                  · {fmtDateTime(followingRunStep.startAt)}
+                                </p>
+                              ) : null}
                             </>
                           ) : null}
                         </div>
@@ -4796,6 +5747,79 @@ export default function GraceWorkspacePage() {
         </TabsContent>
       </Tabs>
       </div>
+
+      <Dialog
+        open={approvalMfaOpen}
+        onOpenChange={(open) => {
+          if (!open && !approvalMfaSubmitting) {
+            closeApprovalMfaDialog();
+            return;
+          }
+          setApprovalMfaOpen(open);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Approval Verification Required</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Enter the code sent by SMS to complete approval for{" "}
+              <span className="font-semibold">
+                {approvalMfaChallenge?.toolName ?? "this action"}
+              </span>
+              .
+            </p>
+            {approvalMfaChallenge?.maskedDestination ? (
+              <p className="text-xs text-slate-500">
+                Destination: {approvalMfaChallenge.maskedDestination}
+              </p>
+            ) : null}
+            {approvalMfaChallenge?.expiresAt ? (
+              <p className="text-xs text-slate-500">
+                Expires: {fmtDateTime(approvalMfaChallenge.expiresAt)}
+              </p>
+            ) : null}
+            <Input
+              autoFocus
+              value={approvalMfaCode}
+              onChange={(event) => setApprovalMfaCode(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleSubmitApprovalMfa();
+                }
+              }}
+              placeholder="Enter verification code"
+              disabled={approvalMfaSubmitting}
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={approvalMfaSubmitting}
+                onClick={closeApprovalMfaDialog}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={approvalMfaSubmitting || !approvalMfaCode.trim()}
+                onClick={() => void handleSubmitApprovalMfa()}
+              >
+                {approvalMfaSubmitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Verifying
+                  </>
+                ) : (
+                  "Verify & Approve"
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={voiceOpen} onOpenChange={setVoiceOpen}>
         <DialogContent className="max-w-2xl p-0">

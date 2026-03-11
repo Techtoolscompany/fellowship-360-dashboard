@@ -7,6 +7,7 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import useSWR from "swr";
 import type { PlanFormValues } from "@/lib/validations/plan.schema";
+import { toast } from "sonner";
 
 export default function EditPlanPage() {
   const { id } = useParams();
@@ -26,13 +27,17 @@ export default function EditPlanPage() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to update plan");
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(payload.error || "Failed to update plan");
       }
 
+      toast.success("Plan updated");
       router.push("/super-admin/plans");
     } catch (error) {
       console.error("Error updating plan:", error);
-      // TODO: Add error toast
+      toast.error(error instanceof Error ? error.message : "Failed to update plan");
     }
   };
 

@@ -5,7 +5,13 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Loader2, XCircle } from "lucide-react";
 import useSWR from "swr";
-import { getContactProfile, updateContact, deleteContact } from "@/app/actions/contacts";
+import {
+  getContactProfile,
+  updateContact,
+  deleteContact,
+  archiveContact,
+  restoreContact,
+} from "@/app/actions/contacts";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { toast } from "sonner";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -80,6 +86,7 @@ export default function ContactProfilePage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [statusSaving, setStatusSaving] = useState(false);
 
   useEffect(() => {
     if (profile?.contact) {
@@ -127,8 +134,41 @@ export default function ContactProfilePage() {
 
   const handleDelete = async () => {
     if (!confirm("Delete this contact? This cannot be undone.")) return;
-    await deleteContact(contactId);
-    router.push("/app/contacts");
+    try {
+      await deleteContact(contactId);
+      toast.success("Contact deleted");
+      router.push("/app/contacts");
+    } catch (error) {
+      console.error("Failed to delete contact:", error);
+      toast.error("Failed to delete contact");
+    }
+  };
+
+  const handleArchiveToggle = async () => {
+    const currentlyInactive = profile?.contact?.memberStatus === "inactive";
+    const confirmed = confirm(
+      currentlyInactive
+        ? "Restore this contact to active status?"
+        : "Archive this contact? You can restore it later."
+    );
+    if (!confirmed) return;
+
+    setStatusSaving(true);
+    try {
+      if (currentlyInactive) {
+        await restoreContact(contactId, "visitor");
+        toast.success("Contact restored");
+      } else {
+        await archiveContact(contactId);
+        toast.success("Contact archived");
+      }
+      await mutate();
+    } catch (error) {
+      console.error("Failed to update contact status:", error);
+      toast.error("Failed to update contact status");
+    } finally {
+      setStatusSaving(false);
+    }
   };
 
   if (loading) {
@@ -194,9 +234,19 @@ export default function ContactProfilePage() {
                >
                  Edit Profile
               </button>
-              <button className="px-5 py-2.5 rounded-lg bg-[#84cc16] text-white font-semibold text-sm hover:bg-[#84cc16]/90 transition-colors shadow-sm flex items-center gap-2">
-                <span className="material-symbols-outlined text-sm">mail</span>
-                Message
+              <button
+                onClick={handleArchiveToggle}
+                disabled={statusSaving}
+                className="px-5 py-2.5 rounded-lg bg-[#84cc16] text-white font-semibold text-sm hover:bg-[#84cc16]/90 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {statusSaving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <span className="material-symbols-outlined text-sm">
+                    {contact.memberStatus === "inactive" ? "unarchive" : "archive"}
+                  </span>
+                )}
+                {contact.memberStatus === "inactive" ? "Restore" : "Archive"}
               </button>
             </div>
           </div>
@@ -565,10 +615,17 @@ export default function ContactProfilePage() {
             </div>
           </div>
           
-          <div className="p-6 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 sticky bottom-0 flex gap-3">
-            <Button variant="outline" className="flex-1 font-bold shadow-sm" onClick={() => setEditOpen(false)}>Cancel</Button>
-            <Button className="flex-1 bg-[#84cc16] text-white hover:bg-[#84cc16]/90 font-bold shadow-sm" onClick={handleSave} disabled={saving}>
-              {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Save Profile
+          <div className="p-6 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 sticky bottom-0 grid grid-cols-3 gap-3">
+            <Button
+              variant="destructive"
+              className="font-bold shadow-sm"
+              onClick={handleDelete}
+            >
+              Delete
+            </Button>
+            <Button variant="outline" className="font-bold shadow-sm" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button className="bg-[#84cc16] text-white hover:bg-[#84cc16]/90 font-bold shadow-sm" onClick={handleSave} disabled={saving}>
+              {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Save
             </Button>
           </div>
         </SheetContent>
