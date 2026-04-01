@@ -13,9 +13,8 @@ import {
   tasks,
 } from "@/db/schema";
 import sendMail from "@/lib/email/sendMail";
-import { sendTextBeeSMS } from "@/lib/grace/channels/sms/textbee";
-import { resolveSmsProvider } from "@/lib/grace/providers/resolver";
 import { getOrCreateGraceSession } from "@/lib/grace/runtime";
+import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 import {
   buildPrayerEscalationTaskMarker,
   buildPrayerEscalationTaskTitle,
@@ -259,21 +258,16 @@ export const prayerRequestFollowupSequence = inngest.createFunction(
       let deliveryError: string | null = null;
 
       if (run.channel === "sms" && run.recipientPhone) {
-        const smsProvider = await resolveSmsProvider(run.organizationId);
-        if (!smsProvider) {
-          deliveryError = "SMS provider not configured";
+        const result = await sendOrganizationSms({
+          organizationId: run.organizationId,
+          to: run.recipientPhone,
+          message: ackMessageText,
+          idempotencyKey: ackMessageKey,
+        });
+        if (result.success) {
+          deliveryStatus = "sent";
         } else {
-          const result = await sendTextBeeSMS({
-            to: run.recipientPhone,
-            message: ackMessageText,
-            idempotencyKey: ackMessageKey,
-            config: smsProvider,
-          });
-          if (result.success) {
-            deliveryStatus = "sent";
-          } else {
-            deliveryError = result.error;
-          }
+          deliveryError = result.error;
         }
       } else if (run.channel === "email" && run.recipientEmail) {
         try {

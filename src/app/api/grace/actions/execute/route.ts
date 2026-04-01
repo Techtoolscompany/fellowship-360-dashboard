@@ -7,9 +7,8 @@ import { OrganizationRole } from "@/db/schema/organization";
 import { db } from "@/db";
 import { churchContacts, graceApprovals, graceSessions } from "@/db/schema";
 import { executePlannedActions } from "@/lib/grace/router/executor";
+import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 import type { ProposedAction } from "@/lib/grace/types";
-import { resolveSmsProvider } from "@/lib/grace/providers/resolver";
-import { sendTextBeeSMS } from "@/lib/grace/channels/sms/textbee";
 
 const payloadSchema = z.object({
   sessionId: z.string(),
@@ -191,14 +190,6 @@ export const POST = withOrganizationAuthRequired(async (req, context) => {
               );
             }
 
-            const smsProvider = await resolveSmsProvider(org.id);
-            if (!smsProvider) {
-              return NextResponse.json(
-                { error: "SMS provider is not configured for MFA approvals." },
-                { status: 412 }
-              );
-            }
-
             const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
             const sentAtIso = new Date(nowMs).toISOString();
             const expiresAtIso = new Date(nowMs + MFA_TTL_MS).toISOString();
@@ -222,11 +213,11 @@ export const POST = withOrganizationAuthRequired(async (req, context) => {
               "If you did not request this, ignore this message.",
             ].join("\n");
 
-            const smsResult = await sendTextBeeSMS({
+            const smsResult = await sendOrganizationSms({
+              organizationId: org.id,
               to: approverPhone,
               message,
               idempotencyKey: `grace-mfa:${org.id}:${session.id}:${sentAtIso}`,
-              config: smsProvider,
             });
 
             if (!smsResult.success) {

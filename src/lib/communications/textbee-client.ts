@@ -1,16 +1,44 @@
-import { appConfig } from "@/lib/config";
+import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 
 interface SendSmsParams {
+  organizationId?: string;
   receivers: string[];
   smsBody: string;
   sender?: string;
+  idempotencyKey?: string;
 }
 
 /**
  * Sends an SMS using the TextBee API
  * TextBee uses a linked Android device as an SMS Gateway.
  */
-export async function sendTextBeeSms({ receivers, smsBody, sender }: SendSmsParams) {
+export async function sendTextBeeSms({
+  organizationId,
+  receivers,
+  smsBody,
+  sender,
+  idempotencyKey,
+}: SendSmsParams) {
+  if (sender) {
+    void sender;
+  }
+
+  if (organizationId) {
+    const result = await sendOrganizationSms({
+      organizationId,
+      to: receivers,
+      message: smsBody,
+      idempotencyKey,
+      metadataJson: { source: "legacy_textbee_client" },
+    });
+
+    if (!result.success) {
+      throw new Error(result.error ?? "SMS gateway send failed");
+    }
+
+    return { success: true, data: result };
+  }
+
   const apiKey = process.env.TEXTBEE_API_KEY;
   const deviceId = process.env.TEXTBEE_DEVICE_ID;
 

@@ -1,4 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { getClientIp } from "@/lib/security/request";
+import {
+  hasDistributedRateLimitConfig,
+  isLocalOrPrivateAppOrigin,
+  isProductionEnvironment,
+} from "@/lib/security/production-readiness";
 
 interface RateLimitConfig {
   maxRequests: number;
@@ -82,6 +88,15 @@ async function checkUpstashRateLimit(
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
   if (!url || !token) {
+    if (
+      isProductionEnvironment() &&
+      !hasDistributedRateLimitConfig() &&
+      !isLocalOrPrivateAppOrigin()
+    ) {
+      throw new Error(
+        "Distributed rate limiting requires UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in production."
+      );
+    }
     return checkLocalRateLimit(key, config);
   }
 
@@ -121,17 +136,17 @@ async function checkUpstashRateLimit(
       resetAt,
     };
   } catch (error) {
+    if (isProductionEnvironment()) {
+      console.error("[MiddlewareRateLimit] Upstash Redis unavailable in production:", error);
+      throw error;
+    }
     console.error("[MiddlewareRateLimit] Upstash unavailable, falling back to local map:", error);
     return checkLocalRateLimit(key, config);
   }
 }
 
 function getClientIdentifier(request: NextRequest): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown"
-  );
+  return getClientIp(request);
 }
 
 function findRouteConfig(pathname: string): RateLimitConfig {
@@ -157,7 +172,22 @@ export async function applyRateLimit(request: NextRequest): Promise<NextResponse
 
   const config = findRouteConfig(pathname);
   const key = buildRequestRateKey(request);
-  const { limited, remaining, resetAt } = await checkUpstashRateLimit(key, config);
+  let limited: boolean;
+  let remaining: number;
+  let resetAt: number;
+
+  try {
+    ({ limited, remaining, resetAt } = await checkUpstashRateLimit(key, config));
+  } catch (error) {
+    console.error("[MiddlewareRateLimit] Rejecting request because rate limiting is unavailable:", {
+      pathname,
+      error,
+    });
+    return NextResponse.json(
+      { error: "Rate limiting is unavailable. Fix Upstash Redis configuration before production use." },
+      { status: 503 }
+    );
+  }
 
   headerSnapshot.set(key, {
     count: config.maxRequests - remaining,

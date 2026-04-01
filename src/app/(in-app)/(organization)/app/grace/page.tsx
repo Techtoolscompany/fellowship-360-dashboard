@@ -57,17 +57,20 @@ import { getPipelineData, updateItemStage } from "@/app/actions/pipeline";
 import { createEvent, getEvents } from "@/app/actions/calendar";
 import {
   createGraceKnowledge,
+  deleteGraceKnowledge,
   getGraceApprovals,
   getGraceCalls,
   getGraceDailyBriefing,
   getGraceFollowupProposals,
   getGraceKnowledge,
+  getGraceKnowledgeVersions,
   getGraceProviderConfigs,
   getGraceSessions,
   getGraceToolAudit,
   sendCopilotMessage,
   updateGraceApproval,
   updateGraceFollowupProposalStatus,
+  updateGraceKnowledge,
 } from "@/app/actions/grace";
 import { getGraceSettings } from "@/app/actions/grace-settings";
 import type { GraceActionOutcome } from "@/lib/grace/types";
@@ -78,6 +81,12 @@ import {
   getPreferredServiceRunId,
   summarizeRoleMatrix,
 } from "@/lib/grace/service-planning";
+import {
+  APPROVAL_QUEUE_SLA_MINUTES,
+  RUNTIME_FAILURE_ALERT_THRESHOLD_PERCENT,
+  computeApprovalQueueHealth,
+  computeRuntimeHealth,
+} from "@/lib/grace/ops-health";
 
 type GraceTab =
   | "command"
@@ -125,6 +134,7 @@ type ApprovalMfaChallenge = {
 type FollowupProposalRow = Awaited<ReturnType<typeof getGraceFollowupProposals>>[number];
 type ToolAuditRow = Awaited<ReturnType<typeof getGraceToolAudit>>[number];
 type KnowledgeRow = Awaited<ReturnType<typeof getGraceKnowledge>>[number];
+type KnowledgeVersionRow = Awaited<ReturnType<typeof getGraceKnowledgeVersions>>[number];
 type ProviderConfigRow = Awaited<ReturnType<typeof getGraceProviderConfigs>>[number];
 type GraceSettingsRow = Awaited<ReturnType<typeof getGraceSettings>>;
 type GraceDailyBriefingRow = Exclude<Awaited<ReturnType<typeof getGraceDailyBriefing>>, null>;
@@ -490,9 +500,6 @@ const TAB_ORDER: GraceTab[] = [
   "operations",
 ];
 
-const APPROVAL_QUEUE_SLA_MINUTES = 30;
-const RUNTIME_FAILURE_ALERT_THRESHOLD_PERCENT = 10;
-
 function normalizeTab(value: string | null): GraceTab {
   if (!value) return "command";
   if (value === "appointments") return "command";
@@ -701,6 +708,17 @@ export default function GraceWorkspacePage() {
 
   const [kbTitle, setKbTitle] = useState("");
   const [kbContent, setKbContent] = useState("");
+  const [kbVisibility, setKbVisibility] = useState<"public" | "internal">("internal");
+  const [kbUseForGrace, setKbUseForGrace] = useState(true);
+  const [editingKnowledgeId, setEditingKnowledgeId] = useState<string | null>(null);
+  const [knowledgeMutatingId, setKnowledgeMutatingId] = useState<string | null>(null);
+  const [knowledgeHistoryOpenId, setKnowledgeHistoryOpenId] = useState<string | null>(null);
+  const [knowledgeHistoryLoadingId, setKnowledgeHistoryLoadingId] = useState<string | null>(
+    null
+  );
+  const [knowledgeVersionsByEntryId, setKnowledgeVersionsByEntryId] = useState<
+    Record<string, KnowledgeVersionRow[]>
+  >({});
   const [voiceOpen, setVoiceOpen] = useState(false);
 
   const [serviceTemplates, setServiceTemplates] = useState<ServiceTemplateBundle[]>([]);
@@ -751,6 +769,20 @@ export default function GraceWorkspacePage() {
   const [serviceRunCreating, setServiceRunCreating] = useState(false);
   const [serviceRunGenerateSaving, setServiceRunGenerateSaving] = useState(false);
   const [serviceRunOffersSending, setServiceRunOffersSending] = useState(false);
+  const [serviceRunPayrollExporting, setServiceRunPayrollExporting] = useState(false);
+  const [serviceRunRecapGenerating, setServiceRunRecapGenerating] = useState(false);
+  const [serviceRunRecapLoading, setServiceRunRecapLoading] = useState(false);
+  const [serviceRunRecapsByRunId, setServiceRunRecapsByRunId] = useState<
+    Record<
+      string,
+      {
+        id: string;
+        summary: string;
+        details: string | null;
+        createdAt: string | Date;
+      } | null
+    >
+  >({});
   const [serviceGoalStarting, setServiceGoalStarting] = useState(false);
   const [assignmentStatusSavingId, setAssignmentStatusSavingId] = useState<string | null>(null);
   const [runBoardNowMs, setRunBoardNowMs] = useState(() => Date.now());
@@ -1049,6 +1081,54 @@ export default function GraceWorkspacePage() {
     [selectedServiceRunId]
   );
 
+  const fetchServiceRunRecap = useCallback(
+    async (serviceRunId: string, options?: { silent?: boolean }) => {
+      const silent = Boolean(options?.silent);
+      if (!silent) {
+        setServiceRunRecapLoading(true);
+      }
+
+      try {
+        const response = await fetch(
+          `/api/app/organizations/current/service-runs/${serviceRunId}/recap?limit=1`,
+          { cache: "no-store" }
+        );
+        const payload = (await response.json().catch(() => ({}))) as {
+          success?: boolean;
+          message?: string;
+          recaps?: Array<{
+            id: string;
+            summary: string;
+            details: string | null;
+            createdAt: string | Date;
+          }>;
+        };
+
+        if (!response.ok || payload.success === false) {
+          throw new Error(payload.message || "Failed to load service recap");
+        }
+
+        const latestRecap = payload.recaps?.[0] ?? null;
+        setServiceRunRecapsByRunId((current) => ({
+          ...current,
+          [serviceRunId]: latestRecap,
+        }));
+      } catch (error) {
+        if (!silent) {
+          console.error("Failed to load service recap:", error);
+          toast.error(
+            error instanceof Error ? error.message : "Failed to load service recap"
+          );
+        }
+      } finally {
+        if (!silent) {
+          setServiceRunRecapLoading(false);
+        }
+      }
+    },
+    []
+  );
+
   const fetchServiceStaffingGoals = useCallback(async () => {
     if (!orgId) return;
     setServiceGoalsLoading(true);
@@ -1106,6 +1186,14 @@ export default function GraceWorkspacePage() {
 
   useEffect(() => {
     if (!selectedServiceRunId) return;
+    if (Object.prototype.hasOwnProperty.call(serviceRunRecapsByRunId, selectedServiceRunId)) {
+      return;
+    }
+    fetchServiceRunRecap(selectedServiceRunId);
+  }, [fetchServiceRunRecap, selectedServiceRunId, serviceRunRecapsByRunId]);
+
+  useEffect(() => {
+    if (!selectedServiceRunId) return;
 
     const intervalId = window.setInterval(() => {
       fetchServiceRunAssignments(selectedServiceRunId, { silent: true });
@@ -1123,6 +1211,11 @@ export default function GraceWorkspacePage() {
     () => serviceRuns.find((item) => item.run.id === selectedServiceRunId) ?? null,
     [serviceRuns, selectedServiceRunId]
   );
+
+  const selectedServiceRunRecap = useMemo(() => {
+    if (!selectedServiceRunId) return null;
+    return serviceRunRecapsByRunId[selectedServiceRunId] ?? null;
+  }, [selectedServiceRunId, serviceRunRecapsByRunId]);
 
   const selectedServiceRunTemplate = useMemo(() => {
     if (!selectedServiceRun?.run.templateId) return null;
@@ -1599,99 +1692,15 @@ export default function GraceWorkspacePage() {
       .slice(0, 30);
   }, [approvals, toolAuditRows]);
 
-  const approvalQueueHealth = useMemo(() => {
-    const now = Date.now();
-    const pending = approvals.filter((approval) => approval.status === "pending");
-    const pendingAgeMinutes = pending.map((approval) =>
-      Math.max(
-        0,
-        Math.round((now - new Date(approval.createdAt).getTime()) / 60_000)
-      )
-    );
-    const overduePendingCount = pendingAgeMinutes.filter(
-      (minutes) => minutes > APPROVAL_QUEUE_SLA_MINUTES
-    ).length;
+  const approvalQueueHealth = useMemo(
+    () => computeApprovalQueueHealth(approvals),
+    [approvals]
+  );
 
-    const decidedInLast7Days = approvals.filter((approval) => {
-      if (!approval.decidedAt || approval.status === "pending") return false;
-      const decidedAtMs = new Date(approval.decidedAt).getTime();
-      return decidedAtMs >= now - 7 * 24 * 60 * 60 * 1000;
-    });
-
-    const decisionDurations = decidedInLast7Days
-      .map((approval) => {
-        if (!approval.decidedAt) return null;
-        const createdAtMs = new Date(approval.createdAt).getTime();
-        const decidedAtMs = new Date(approval.decidedAt).getTime();
-        if (Number.isNaN(createdAtMs) || Number.isNaN(decidedAtMs) || decidedAtMs < createdAtMs) {
-          return null;
-        }
-        return Math.round((decidedAtMs - createdAtMs) / 60_000);
-      })
-      .filter((value): value is number => value !== null);
-
-    return {
-      pendingCount: pending.length,
-      overduePendingCount,
-      avgPendingAgeMinutes:
-        pendingAgeMinutes.length > 0
-          ? Math.round(
-              pendingAgeMinutes.reduce((total, minutes) => total + minutes, 0) /
-                pendingAgeMinutes.length
-            )
-          : 0,
-      oldestPendingAgeMinutes:
-        pendingAgeMinutes.length > 0 ? Math.max(...pendingAgeMinutes) : 0,
-      decidedLast7Days: decidedInLast7Days.length,
-      avgDecisionMinutes:
-        decisionDurations.length > 0
-          ? Math.round(
-              decisionDurations.reduce((total, minutes) => total + minutes, 0) /
-                decisionDurations.length
-            )
-          : 0,
-      hasSlaBreach: overduePendingCount > 0,
-    };
-  }, [approvals]);
-
-  const runtimeHealth = useMemo(() => {
-    const now = Date.now();
-    const windowStart = now - 24 * 60 * 60 * 1000;
-    const recentRows = toolAuditRows.filter(
-      (row) => new Date(row.createdAt).getTime() >= windowStart
-    );
-    const failures = recentRows.filter((row) => row.status === "error");
-    const successes = recentRows.length - failures.length;
-    const failureRatePercent =
-      recentRows.length > 0
-        ? Number(((failures.length / recentRows.length) * 100).toFixed(1))
-        : 0;
-
-    const failureByChannel = new Map<string, number>();
-    for (const row of failures) {
-      failureByChannel.set(row.channel, (failureByChannel.get(row.channel) ?? 0) + 1);
-    }
-
-    const failureByTool = new Map<string, number>();
-    for (const row of failures) {
-      failureByTool.set(row.toolName, (failureByTool.get(row.toolName) ?? 0) + 1);
-    }
-
-    return {
-      last24hRuns: recentRows.length,
-      last24hFailures: failures.length,
-      last24hSuccesses: successes,
-      failureRatePercent,
-      alerting: failureRatePercent >= RUNTIME_FAILURE_ALERT_THRESHOLD_PERCENT,
-      failureByChannel: Array.from(failureByChannel.entries())
-        .map(([channel, count]) => ({ channel, count }))
-        .sort((a, b) => b.count - a.count),
-      topFailedTools: Array.from(failureByTool.entries())
-        .map(([tool, count]) => ({ tool, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5),
-    };
-  }, [toolAuditRows]);
+  const runtimeHealth = useMemo(
+    () => computeRuntimeHealth(toolAuditRows),
+    [toolAuditRows]
+  );
 
   const sequenceRuns = useMemo(() => {
     return followupProposals.slice(0, 30).map((proposal) => {
@@ -2807,21 +2816,114 @@ export default function GraceWorkspacePage() {
     [fetchWorkspace, orgId]
   );
 
-  const handleAddKnowledge = async () => {
+  const resetKnowledgeComposer = () => {
+    setKbTitle("");
+    setKbContent("");
+    setKbVisibility("internal");
+    setKbUseForGrace(true);
+    setEditingKnowledgeId(null);
+  };
+
+  const handleSubmitKnowledge = async () => {
     if (!orgId || !kbTitle.trim() || !kbContent.trim()) return;
     try {
-      await createGraceKnowledge({
-        organizationId: orgId,
-        title: kbTitle.trim(),
-        content: kbContent.trim(),
-      });
-      setKbTitle("");
-      setKbContent("");
-      toast.success("Knowledge entry added");
+      setKnowledgeMutatingId(editingKnowledgeId ?? "new");
+      if (editingKnowledgeId) {
+        await updateGraceKnowledge({
+          organizationId: orgId,
+          knowledgeId: editingKnowledgeId,
+          title: kbTitle.trim(),
+          content: kbContent.trim(),
+          visibility: kbVisibility,
+          useForGrace: kbUseForGrace,
+        });
+        toast.success("Knowledge entry updated");
+      } else {
+        await createGraceKnowledge({
+          organizationId: orgId,
+          title: kbTitle.trim(),
+          content: kbContent.trim(),
+          visibility: kbVisibility,
+          useForGrace: kbUseForGrace,
+        });
+        toast.success("Knowledge entry added");
+      }
+
+      resetKnowledgeComposer();
       await fetchWorkspace();
     } catch (error) {
-      console.error("Failed to add knowledge:", error);
-      toast.error("Failed to add knowledge entry");
+      console.error("Failed to save knowledge:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save knowledge entry");
+    } finally {
+      setKnowledgeMutatingId(null);
+    }
+  };
+
+  const handleEditKnowledge = (entry: KnowledgeRow) => {
+    setEditingKnowledgeId(entry.id);
+    setKbTitle(entry.title);
+    setKbContent(entry.content);
+    setKbVisibility(entry.visibility ?? "internal");
+    setKbUseForGrace(Boolean(entry.useForGrace));
+  };
+
+  const handleDeleteKnowledge = async (entry: KnowledgeRow) => {
+    if (!orgId) return;
+    const confirmed = window.confirm(
+      `Delete knowledge entry "${entry.title}"? Version history will be retained.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setKnowledgeMutatingId(entry.id);
+      await deleteGraceKnowledge({
+        organizationId: orgId,
+        knowledgeId: entry.id,
+      });
+      toast.success("Knowledge entry deleted");
+      if (editingKnowledgeId === entry.id) {
+        resetKnowledgeComposer();
+      }
+      if (knowledgeHistoryOpenId === entry.id) {
+        setKnowledgeHistoryOpenId(null);
+      }
+      await fetchWorkspace();
+    } catch (error) {
+      console.error("Failed to delete knowledge:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete knowledge entry");
+    } finally {
+      setKnowledgeMutatingId(null);
+    }
+  };
+
+  const handleToggleKnowledgeHistory = async (entryId: string) => {
+    if (!orgId) return;
+    if (knowledgeHistoryOpenId === entryId) {
+      setKnowledgeHistoryOpenId(null);
+      return;
+    }
+
+    setKnowledgeHistoryOpenId(entryId);
+    if (knowledgeVersionsByEntryId[entryId]) {
+      return;
+    }
+
+    try {
+      setKnowledgeHistoryLoadingId(entryId);
+      const versions = await getGraceKnowledgeVersions({
+        organizationId: orgId,
+        knowledgeId: entryId,
+        limit: 12,
+      });
+      setKnowledgeVersionsByEntryId((current) => ({
+        ...current,
+        [entryId]: versions,
+      }));
+    } catch (error) {
+      console.error("Failed to load knowledge versions:", error);
+      toast.error("Failed to load knowledge version history");
+    } finally {
+      setKnowledgeHistoryLoadingId(null);
     }
   };
 
@@ -3295,6 +3397,106 @@ export default function GraceWorkspacePage() {
       toast.error(error instanceof Error ? error.message : "Failed to send staffing offers");
     } finally {
       setServiceRunOffersSending(false);
+    }
+  };
+
+  const handleExportServiceRunPayroll = async () => {
+    if (!selectedServiceRunId) {
+      toast.error("Select a service run first");
+      return;
+    }
+
+    setServiceRunPayrollExporting(true);
+    try {
+      const response = await fetch(
+        `/api/app/organizations/current/service-runs/payroll-ledger/export?serviceRunId=${encodeURIComponent(
+          selectedServiceRunId
+        )}&includeOpen=false&markExported=true`,
+        {
+          method: "GET",
+        }
+      );
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as {
+          message?: string;
+        };
+        throw new Error(payload.message || "Failed to export payroll ledger");
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const fileNameMatch = disposition.match(/filename="([^"]+)"/i);
+      const fileName = fileNameMatch?.[1] || "payroll-ledger.csv";
+      const exportedCount = Number(response.headers.get("X-Exported-Count") ?? "0");
+
+      const anchor = document.createElement("a");
+      anchor.href = downloadUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(downloadUrl);
+
+      toast.success(`Payroll ledger exported (${exportedCount} rows)`);
+      await fetchServiceRunAssignments(selectedServiceRunId, { silent: true });
+    } catch (error) {
+      console.error("Failed to export payroll ledger:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to export payroll ledger");
+    } finally {
+      setServiceRunPayrollExporting(false);
+    }
+  };
+
+  const handleGenerateServiceRunRecap = async () => {
+    if (!selectedServiceRunId) {
+      toast.error("Select a service run first");
+      return;
+    }
+
+    setServiceRunRecapGenerating(true);
+    try {
+      const response = await fetch(
+        `/api/app/organizations/current/service-runs/${selectedServiceRunId}/recap`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        }
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        success?: boolean;
+        message?: string;
+        result?: {
+          generated: boolean;
+          recap: {
+            id: string;
+            summary: string;
+            details: string | null;
+            createdAt: string | Date;
+          };
+        };
+      };
+
+      if (!response.ok || payload.success === false || !payload.result?.recap) {
+        throw new Error(payload.message || "Failed to generate service recap");
+      }
+
+      setServiceRunRecapsByRunId((current) => ({
+        ...current,
+        [selectedServiceRunId]: payload.result?.recap ?? null,
+      }));
+      toast.success(
+        payload.result.generated
+          ? "Service recap generated"
+          : "Service recap already available"
+      );
+    } catch (error) {
+      console.error("Failed to generate service recap:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to generate service recap");
+    } finally {
+      setServiceRunRecapGenerating(false);
     }
   };
 
@@ -4407,7 +4609,9 @@ export default function GraceWorkspacePage() {
             </div>
             <div className="p-6 lg:flex items-start gap-8">
               <div className="lg:w-1/3 bg-slate-50 dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shrink-0">
-                <h4 className="font-bold text-slate-900 dark:text-white mb-4">Add Knowledge</h4>
+                <h4 className="font-bold text-slate-900 dark:text-white mb-4">
+                  {editingKnowledgeId ? "Edit Knowledge" : "Add Knowledge"}
+                </h4>
                 <div className="space-y-4">
                   <div>
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Entry Title</label>
@@ -4417,11 +4621,55 @@ export default function GraceWorkspacePage() {
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Content</label>
                     <Textarea className="bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 resize-none" placeholder="Details Grace will access..." rows={5} value={kbContent} onChange={(e) => setKbContent(e.target.value)} />
                   </div>
-                  <button 
-                    className="w-full bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-bold px-4 py-2.5 rounded-xl hover:bg-slate-800 dark:hover:bg-slate-100 transition-all text-sm flex justify-center items-center gap-2"
-                    onClick={handleAddKnowledge}>
-                    <span className="material-symbols-outlined text-[18px]">add</span> Add Entry
-                  </button>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">
+                      Visibility
+                    </label>
+                    <Select
+                      value={kbVisibility}
+                      onValueChange={(value) =>
+                        setKbVisibility(value === "public" ? "public" : "internal")
+                      }
+                    >
+                      <SelectTrigger className="bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800">
+                        <SelectValue placeholder="Select visibility" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="internal">Internal</SelectItem>
+                        <SelectItem value="public">Public</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 py-2.5">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                        Use for Grace
+                      </p>
+                      <p className="text-xs text-slate-500">Include in retrieval context</p>
+                    </div>
+                    <Switch checked={kbUseForGrace} onCheckedChange={setKbUseForGrace} />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      className="flex-1 bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-bold px-4 py-2.5 rounded-xl hover:bg-slate-800 dark:hover:bg-slate-100 transition-all text-sm flex justify-center items-center gap-2 disabled:opacity-60"
+                      onClick={handleSubmitKnowledge}
+                      disabled={Boolean(knowledgeMutatingId)}
+                    >
+                      <span className="material-symbols-outlined text-[18px]">
+                        {editingKnowledgeId ? "save" : "add"}
+                      </span>
+                      {editingKnowledgeId ? "Save Changes" : "Add Entry"}
+                    </button>
+                    {editingKnowledgeId ? (
+                      <button
+                        className="bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-bold px-4 py-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-900 transition-all text-sm"
+                        onClick={resetKnowledgeComposer}
+                        disabled={Boolean(knowledgeMutatingId)}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 
@@ -4431,15 +4679,93 @@ export default function GraceWorkspacePage() {
                      <p className="text-slate-600 dark:text-slate-400 text-sm font-medium">No knowledge entries configured.</p>
                    </div>
                 )}
-                {knowledge.map((entry) => (
-                  <div key={entry.id} className="bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 group hover:border-slate-300 transition-all">
-                    <div className="flex items-center gap-3 mb-2">
-                       <span className="material-symbols-outlined text-[#84cc16] text-[18px]">auto_stories</span>
-                       <h4 className="font-bold text-slate-900 dark:text-white">{entry.title}</h4>
+                {knowledge.map((entry) => {
+                  const historyOpen = knowledgeHistoryOpenId === entry.id;
+                  const historyLoading = knowledgeHistoryLoadingId === entry.id;
+                  const versions = knowledgeVersionsByEntryId[entry.id] ?? [];
+                  const mutating = knowledgeMutatingId === entry.id;
+
+                  return (
+                    <div key={entry.id} className="bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 group hover:border-slate-300 transition-all">
+                      <div className="flex items-start justify-between gap-3 mb-2">
+                        <div className="flex items-center gap-3">
+                          <span className="material-symbols-outlined text-[#84cc16] text-[18px]">auto_stories</span>
+                          <div>
+                            <h4 className="font-bold text-slate-900 dark:text-white">{entry.title}</h4>
+                            <div className="flex flex-wrap items-center gap-2 mt-1">
+                              <Badge variant="outline">{entry.visibility}</Badge>
+                              <Badge variant="outline">
+                                {entry.useForGrace ? "Grace enabled" : "Grace excluded"}
+                              </Badge>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEditKnowledge(entry)}
+                            disabled={Boolean(knowledgeMutatingId)}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void handleToggleKnowledgeHistory(entry.id)}
+                            disabled={historyLoading}
+                          >
+                            {historyLoading ? "Loading..." : historyOpen ? "Hide History" : "History"}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-rose-700 border-rose-200 hover:bg-rose-50 dark:text-rose-300 dark:border-rose-800"
+                            onClick={() => void handleDeleteKnowledge(entry)}
+                            disabled={mutating || Boolean(knowledgeMutatingId)}
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
+                      <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed pl-7">{entry.content}</p>
+                      <p className="text-[11px] text-slate-400 mt-2 pl-7 font-semibold uppercase tracking-wide">
+                        Updated {fmtDateTime(entry.updatedAt)}
+                      </p>
+                      {historyOpen ? (
+                        <div className="mt-3 ml-7 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 p-3">
+                          <p className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">
+                            Version History
+                          </p>
+                          {versions.length === 0 ? (
+                            <p className="text-xs text-slate-500">No versions recorded yet.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {versions.map((version) => (
+                                <div
+                                  key={version.id}
+                                  className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                                      v{version.versionNumber} · {version.changeType}
+                                    </p>
+                                    <p className="text-[11px] text-slate-400">
+                                      {fmtDateTime(version.createdAt)}
+                                    </p>
+                                  </div>
+                                  {version.changeSummary ? (
+                                    <p className="text-xs text-slate-500 mt-1">{version.changeSummary}</p>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
-                    <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed pl-7">{entry.content}</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -5566,6 +5892,80 @@ export default function GraceWorkspacePage() {
                       )}
                       Send SMS Offers
                     </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleGenerateServiceRunRecap}
+                      disabled={!selectedServiceRunId || serviceRunRecapGenerating}
+                      className="text-slate-500"
+                    >
+                      {serviceRunRecapGenerating ? (
+                        <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Sparkles className="mr-1 h-3.5 w-3.5" />
+                      )}
+                      Generate Recap
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleExportServiceRunPayroll}
+                      disabled={!selectedServiceRunId || serviceRunPayrollExporting}
+                      className="text-slate-500"
+                    >
+                      {serviceRunPayrollExporting ? (
+                        <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <span className="material-symbols-outlined mr-1 text-[14px]">download</span>
+                      )}
+                      Export Payroll CSV
+                    </Button>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Post-Service Recap
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          selectedServiceRunId
+                            ? fetchServiceRunRecap(selectedServiceRunId)
+                            : undefined
+                        }
+                        className="text-xs text-slate-400 hover:text-slate-600 disabled:opacity-40"
+                        disabled={!selectedServiceRunId || serviceRunRecapLoading}
+                      >
+                        {serviceRunRecapLoading ? "Refreshing..." : "Refresh"}
+                      </button>
+                    </div>
+                    {serviceRunRecapLoading ? (
+                      <div className="py-4">
+                        <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                      </div>
+                    ) : selectedServiceRunRecap ? (
+                      <div className="mt-2 space-y-2">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                          {selectedServiceRunRecap.summary}
+                        </p>
+                        {selectedServiceRunRecap.details ? (
+                          <p className="whitespace-pre-line text-xs text-slate-600 dark:text-slate-300">
+                            {selectedServiceRunRecap.details}
+                          </p>
+                        ) : null}
+                        <p className="text-[11px] uppercase tracking-wide text-slate-400">
+                          Generated {fmtDateTime(selectedServiceRunRecap.createdAt)}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-slate-500">
+                        No recap generated yet. Grace can auto-generate one after service end, or
+                        you can generate it now.
+                      </p>
+                    )}
                   </div>
 
                   {/* Assignment list */}

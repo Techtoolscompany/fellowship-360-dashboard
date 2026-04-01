@@ -3,11 +3,12 @@
 import { db } from "@/db";
 import { donations, pledges, churchContacts } from "@/db/schema";
 import { eq, desc, and, gte, lte, sql, count } from "drizzle-orm";
-import { requireOrgMembership, auditAction } from "./utils";
+import { auditAction } from "./utils";
 import * as z from "zod";
 import { organizations } from "@/db/schema/organization";
 import sendMail from "@/lib/email/sendMail";
-import { endOfWeek, startOfWeek, subWeeks } from "date-fns";
+import { computeWeeklyGivingReport } from "@/lib/finances/weekly-report";
+import { requireOrganizationSectionAccess } from "@/lib/access/section-guard";
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat("en-US", {
@@ -16,74 +17,6 @@ function formatCurrency(amount: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount);
-}
-
-const WEEKLY_SOURCE_ORDER = [
-  "cash",
-  "check",
-  "online",
-  "text",
-  "app",
-  "manual",
-] as const;
-
-type WeeklyGivingSource = (typeof WEEKLY_SOURCE_ORDER)[number];
-type WeeklyGivingCategory = "General" | "Missions" | "Building";
-
-function normalizeWeeklySource(
-  method: string | null | undefined,
-  memo: string | null | undefined
-): WeeklyGivingSource {
-  const normalizedMethod = (method ?? "other").toLowerCase();
-  const normalizedMemo = (memo ?? "").toLowerCase();
-
-  const memoHintsText = normalizedMemo.includes("text") || normalizedMemo.includes("sms");
-  const memoHintsApp =
-    normalizedMemo.includes("app") ||
-    normalizedMemo.includes("mobile") ||
-    normalizedMemo.includes("pushpay");
-
-  if (normalizedMethod === "cash") return "cash";
-  if (normalizedMethod === "check") return "check";
-
-  if (normalizedMethod === "online") {
-    if (memoHintsText) return "text";
-    if (memoHintsApp) return "app";
-    return "online";
-  }
-
-  if (normalizedMethod === "card") {
-    if (memoHintsText) return "text";
-    return "app";
-  }
-
-  if (normalizedMethod === "bank_transfer") return "online";
-  if (memoHintsText) return "text";
-  if (memoHintsApp) return "app";
-  return "manual";
-}
-
-function categorizeFund(fund: string): WeeklyGivingCategory {
-  const normalized = fund.toLowerCase();
-  if (normalized.includes("mission")) return "Missions";
-  if (normalized.includes("build") || normalized.includes("capital")) return "Building";
-  return "General";
-}
-
-function toPercent(numerator: number, denominator: number) {
-  if (denominator <= 0) return 0;
-  return Number(((numerator / denominator) * 100).toFixed(1));
-}
-
-function formatDateRangeLabel(start: Date, end: Date) {
-  return `${start.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  })} – ${end.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })}`;
 }
 
 async function deliverDonationReceipt(params: {
@@ -162,7 +95,10 @@ export async function getDonations(
   dateRange?: { start: Date; end: Date },
   page = 1
 ) {
-  await requireOrgMembership(orgId);
+  await requireOrganizationSectionAccess({
+    organizationId: orgId,
+    section: "finance",
+  });
   const offset = (page - 1) * DONATIONS_PAGE_SIZE;
   const conditions = dateRange
     ? and(
@@ -212,7 +148,11 @@ export async function createDonation(data: {
     organizationId: z.string().min(1),
   }).parse(data);
 
-  const session = await requireOrgMembership(parsed.organizationId, "admin");
+  const session = await requireOrganizationSectionAccess({
+    organizationId: parsed.organizationId,
+    section: "finance",
+    requiredRole: "admin",
+  });
   const [donation] = await db
     .insert(donations)
     .values({
@@ -257,7 +197,10 @@ export async function createDonation(data: {
 }
 
 export async function getDonationStats(orgId: string) {
-  await requireOrgMembership(orgId);
+  await requireOrganizationSectionAccess({
+    organizationId: orgId,
+    section: "finance",
+  });
   const [stats] = await db
     .select({
       totalAmount: sql<number>`coalesce(sum(${donations.amount}), 0)`,
@@ -283,200 +226,23 @@ export async function getWeeklyGivingReport(input: {
     })
     .parse(input);
 
-  await requireOrgMembership(parsed.organizationId);
-
-  const now = new Date();
-  const currentStart = parsed.startDate ?? startOfWeek(now, { weekStartsOn: 0 });
-  const currentEnd = parsed.endDate ?? endOfWeek(now, { weekStartsOn: 0 });
-
-  if (currentEnd.getTime() < currentStart.getTime()) {
-    throw new Error("endDate must be after startDate");
-  }
-
-  let previousStart: Date;
-  let previousEnd: Date;
-
-  if (parsed.startDate || parsed.endDate) {
-    const spanMs = currentEnd.getTime() - currentStart.getTime();
-    previousEnd = new Date(currentStart.getTime() - 1);
-    previousStart = new Date(previousEnd.getTime() - spanMs);
-  } else {
-    const previousWeek = subWeeks(now, 1);
-    previousStart = startOfWeek(previousWeek, { weekStartsOn: 0 });
-    previousEnd = endOfWeek(previousWeek, { weekStartsOn: 0 });
-  }
-
-  const [currentRows, [previousSummary]] = await Promise.all([
-    db
-      .select({
-        id: donations.id,
-        amount: donations.amount,
-        method: donations.method,
-        fund: donations.fund,
-        memo: donations.memo,
-      })
-      .from(donations)
-      .where(
-        and(
-          eq(donations.organizationId, parsed.organizationId),
-          gte(donations.date, currentStart),
-          lte(donations.date, currentEnd)
-        )
-      ),
-    db
-      .select({
-        total: sql<number>`coalesce(sum(${donations.amount}), 0)`,
-        count: sql<number>`count(*)`,
-      })
-      .from(donations)
-      .where(
-        and(
-          eq(donations.organizationId, parsed.organizationId),
-          gte(donations.date, previousStart),
-          lte(donations.date, previousEnd)
-        )
-      ),
-  ]);
-
-  const sourceTotals = new Map<WeeklyGivingSource, { total: number; count: number }>();
-  const fundTotals = new Map<string, { total: number; count: number; category: WeeklyGivingCategory }>();
-  const categoryTotals = new Map<WeeklyGivingCategory, { total: number; count: number }>();
-
-  for (const source of WEEKLY_SOURCE_ORDER) {
-    sourceTotals.set(source, { total: 0, count: 0 });
-  }
-  for (const category of ["General", "Missions", "Building"] as const) {
-    categoryTotals.set(category, { total: 0, count: 0 });
-  }
-
-  let currentTotal = 0;
-  let currentCount = 0;
-
-  for (const row of currentRows) {
-    const amount = Number(row.amount ?? 0);
-    const source = normalizeWeeklySource(row.method, row.memo);
-    const fund = (row.fund ?? "General").trim() || "General";
-    const category = categorizeFund(fund);
-
-    currentTotal += amount;
-    currentCount += 1;
-
-    const sourceBucket = sourceTotals.get(source) ?? { total: 0, count: 0 };
-    sourceBucket.total += amount;
-    sourceBucket.count += 1;
-    sourceTotals.set(source, sourceBucket);
-
-    const fundBucket = fundTotals.get(fund) ?? { total: 0, count: 0, category };
-    fundBucket.total += amount;
-    fundBucket.count += 1;
-    fundTotals.set(fund, fundBucket);
-
-    const categoryBucket = categoryTotals.get(category) ?? { total: 0, count: 0 };
-    categoryBucket.total += amount;
-    categoryBucket.count += 1;
-    categoryTotals.set(category, categoryBucket);
-  }
-
-  const previousTotal = Number(previousSummary?.total ?? 0);
-  const previousCount = Number(previousSummary?.count ?? 0);
-  const varianceAmount = Number((currentTotal - previousTotal).toFixed(2));
-  const variancePercent =
-    previousTotal <= 0
-      ? currentTotal > 0
-        ? 100
-        : 0
-      : Number((((currentTotal - previousTotal) / previousTotal) * 100).toFixed(1));
-
-  const trend: "up" | "down" | "flat" =
-    Math.abs(varianceAmount) < 0.01 ? "flat" : varianceAmount > 0 ? "up" : "down";
-
-  const breakdownBySource = WEEKLY_SOURCE_ORDER.map((source) => {
-    const bucket = sourceTotals.get(source) ?? { total: 0, count: 0 };
-    return {
-      source,
-      total: Number(bucket.total.toFixed(2)),
-      count: bucket.count,
-      sharePercent: toPercent(bucket.total, currentTotal),
-    };
+  await requireOrganizationSectionAccess({
+    organizationId: parsed.organizationId,
+    section: "finance",
   });
-
-  const breakdownByFund = Array.from(fundTotals.entries())
-    .map(([fund, bucket]) => ({
-      fund,
-      category: bucket.category,
-      total: Number(bucket.total.toFixed(2)),
-      count: bucket.count,
-      sharePercent: toPercent(bucket.total, currentTotal),
-    }))
-    .sort((a, b) => b.total - a.total);
-
-  const breakdownByCategory = (["General", "Missions", "Building"] as const).map(
-    (category) => {
-      const bucket = categoryTotals.get(category) ?? { total: 0, count: 0 };
-      return {
-        category,
-        total: Number(bucket.total.toFixed(2)),
-        count: bucket.count,
-        sharePercent: toPercent(bucket.total, currentTotal),
-      };
-    }
-  );
-
-  const topSource = breakdownBySource
-    .slice()
-    .sort((a, b) => b.total - a.total)
-    .find((row) => row.total > 0);
-  const topFund = breakdownByFund[0];
-
-  const summaryParts = [
-    `Weekly giving (${formatDateRangeLabel(currentStart, currentEnd)}) totaled ${formatCurrency(currentTotal)} across ${currentCount} donation${currentCount === 1 ? "" : "s"}.`,
-    trend === "flat"
-      ? "No week-over-week change compared with the prior week."
-      : `${trend === "up" ? "Up" : "Down"} ${Math.abs(variancePercent).toFixed(1)}% vs prior week (${formatCurrency(previousTotal)}).`,
-  ];
-
-  if (topSource) {
-    summaryParts.push(
-      `Top source: ${topSource.source} at ${formatCurrency(topSource.total)} (${topSource.sharePercent.toFixed(1)}%).`
-    );
-  }
-  if (topFund) {
-    summaryParts.push(
-      `Top fund: ${topFund.fund} [${topFund.category}] at ${formatCurrency(topFund.total)}.`
-    );
-  }
-
-  return {
-    period: {
-      start: currentStart.toISOString(),
-      end: currentEnd.toISOString(),
-      label: formatDateRangeLabel(currentStart, currentEnd),
-    },
-    previousPeriod: {
-      start: previousStart.toISOString(),
-      end: previousEnd.toISOString(),
-      label: formatDateRangeLabel(previousStart, previousEnd),
-    },
-    totals: {
-      current: Number(currentTotal.toFixed(2)),
-      previous: Number(previousTotal.toFixed(2)),
-      currentCount,
-      previousCount,
-      varianceAmount,
-      variancePercent,
-      trend,
-    },
-    breakdownBySource,
-    breakdownByFund,
-    breakdownByCategory,
-    summary: summaryParts.join(" "),
-    generatedAt: new Date().toISOString(),
-  };
+  return computeWeeklyGivingReport({
+    organizationId: parsed.organizationId,
+    startDate: parsed.startDate,
+    endDate: parsed.endDate,
+  });
 }
 
 // ── Pledges ──
 export async function getPledges(orgId: string) {
-  await requireOrgMembership(orgId);
+  await requireOrganizationSectionAccess({
+    organizationId: orgId,
+    section: "finance",
+  });
   return await db
     .select({ pledge: pledges, contact: churchContacts })
     .from(pledges)
@@ -506,7 +272,11 @@ export async function createPledge(data: {
     organizationId: z.string().min(1),
   }).parse(data);
 
-  const session = await requireOrgMembership(parsed.organizationId, "admin");
+  const session = await requireOrganizationSectionAccess({
+    organizationId: parsed.organizationId,
+    section: "finance",
+    requiredRole: "admin",
+  });
   const [pledge] = await db
     .insert(pledges)
     .values({
@@ -548,7 +318,11 @@ export async function updatePledge(
 ) {
   const [existing] = await db.select().from(pledges).where(eq(pledges.id, id));
   if (!existing) throw new Error("Pledge not found");
-  const session = await requireOrgMembership(existing.organizationId, "admin");
+  const session = await requireOrganizationSectionAccess({
+    organizationId: existing.organizationId,
+    section: "finance",
+    requiredRole: "admin",
+  });
 
   const [pledge] = await db
     .update(pledges)
@@ -569,7 +343,10 @@ export async function updatePledge(
 }
 
 export async function getDonorSummary(orgId: string) {
-  await requireOrgMembership(orgId);
+  await requireOrganizationSectionAccess({
+    organizationId: orgId,
+    section: "finance",
+  });
   const donors = await db
     .select({
       contactId: donations.contactId,
@@ -604,7 +381,11 @@ export async function resendDonationReceipt(donationId: string) {
     throw new Error("Donation not found");
   }
 
-  await requireOrgMembership(donation.organizationId, "admin");
+  await requireOrganizationSectionAccess({
+    organizationId: donation.organizationId,
+    section: "finance",
+    requiredRole: "admin",
+  });
 
   if (!donation.contactId) {
     throw new Error("Cannot send receipt for anonymous donation");
@@ -632,7 +413,11 @@ export async function sendYearEndGivingStatement(input: {
     year: z.number().int().gte(2000).lte(3000),
   }).parse(input);
 
-  await requireOrgMembership(parsed.organizationId, "admin");
+  await requireOrganizationSectionAccess({
+    organizationId: parsed.organizationId,
+    section: "finance",
+    requiredRole: "admin",
+  });
 
   const start = new Date(Date.UTC(parsed.year, 0, 1, 0, 0, 0));
   const end = new Date(Date.UTC(parsed.year + 1, 0, 1, 0, 0, 0));
@@ -734,5 +519,193 @@ export async function sendYearEndGivingStatement(input: {
     contactEmail: contact.email,
     donationCount: rows.length,
     totalAmount,
+  };
+}
+
+export async function sendDonorThankYou(input: {
+  organizationId: string;
+  contactId: string;
+}) {
+  const parsed = z
+    .object({
+      organizationId: z.string().min(1),
+      contactId: z.string().min(1),
+    })
+    .parse(input);
+
+  const session = await requireOrganizationSectionAccess({
+    organizationId: parsed.organizationId,
+    section: "finance",
+    requiredRole: "admin",
+  });
+
+  const [org, contact, donorTotals] = await Promise.all([
+    db
+      .select({ name: organizations.name })
+      .from(organizations)
+      .where(eq(organizations.id, parsed.organizationId))
+      .limit(1)
+      .then((rows) => rows[0]),
+    db
+      .select({
+        firstName: churchContacts.firstName,
+        lastName: churchContacts.lastName,
+        email: churchContacts.email,
+      })
+      .from(churchContacts)
+      .where(
+        and(
+          eq(churchContacts.id, parsed.contactId),
+          eq(churchContacts.organizationId, parsed.organizationId)
+        )
+      )
+      .limit(1)
+      .then((rows) => rows[0]),
+    db
+      .select({
+        totalGiven: sql<number>`coalesce(sum(${donations.amount}), 0)`,
+        donationCount: sql<number>`count(*)`,
+      })
+      .from(donations)
+      .where(
+        and(
+          eq(donations.organizationId, parsed.organizationId),
+          eq(donations.contactId, parsed.contactId)
+        )
+      )
+      .then((rows) => rows[0]),
+  ]);
+
+  if (!org) throw new Error("Organization not found");
+  if (!contact?.email) throw new Error("Contact email is required");
+
+  const donorName = `${contact.firstName} ${contact.lastName}`.trim() || "friend";
+  const totalGiven = Number(donorTotals?.totalGiven ?? 0);
+  const donationCount = Number(donorTotals?.donationCount ?? 0);
+  const subject = `${org.name} — Thank You for Your Generosity`;
+  const html = `
+    <p>Hi ${donorName},</p>
+    <p>Thank you for your faithful generosity to <strong>${org.name}</strong>.</p>
+    <p>Your giving helps us serve people well and sustain ministry every week.</p>
+    <p>
+      <strong>Giving summary:</strong><br/>
+      Total gifts on file: ${donationCount}<br/>
+      Total contributed: ${formatCurrency(totalGiven)}
+    </p>
+    <p>Grace and peace,<br/>${org.name}</p>
+  `.trim();
+
+  await sendMail(contact.email, subject, html);
+
+  await auditAction({
+    organizationId: parsed.organizationId,
+    userId: session.userId,
+    actionType: "create",
+    entityName: "donor_thank_you",
+    entityId: parsed.contactId,
+    details: {
+      recipientEmail: contact.email,
+      donationCount,
+      totalGiven,
+    },
+  });
+
+  return {
+    sent: true,
+    contactEmail: contact.email,
+    donationCount,
+    totalGiven,
+  };
+}
+
+export async function sendPledgeReminder(input: { pledgeId: string }) {
+  const parsed = z
+    .object({
+      pledgeId: z.string().min(1),
+    })
+    .parse(input);
+
+  const [pledge] = await db
+    .select()
+    .from(pledges)
+    .where(eq(pledges.id, parsed.pledgeId))
+    .limit(1);
+
+  if (!pledge) throw new Error("Pledge not found");
+
+  const session = await requireOrganizationSectionAccess({
+    organizationId: pledge.organizationId,
+    section: "finance",
+    requiredRole: "admin",
+  });
+
+  const [org, contact] = await Promise.all([
+    db
+      .select({ name: organizations.name })
+      .from(organizations)
+      .where(eq(organizations.id, pledge.organizationId))
+      .limit(1)
+      .then((rows) => rows[0]),
+    pledge.contactId
+      ? db
+          .select({
+            firstName: churchContacts.firstName,
+            lastName: churchContacts.lastName,
+            email: churchContacts.email,
+          })
+          .from(churchContacts)
+          .where(
+            and(
+              eq(churchContacts.id, pledge.contactId),
+              eq(churchContacts.organizationId, pledge.organizationId)
+            )
+          )
+          .limit(1)
+          .then((rows) => rows[0])
+      : Promise.resolve(null),
+  ]);
+
+  if (!org) throw new Error("Organization not found");
+  if (!contact?.email) throw new Error("Linked contact email is required");
+
+  const donorName = `${contact.firstName} ${contact.lastName}`.trim() || "friend";
+  const totalAmount = Number(pledge.totalAmount ?? 0);
+  const amountPaid = Number(pledge.amountPaid ?? 0);
+  const outstanding = Math.max(totalAmount - amountPaid, 0);
+  const subject = `${org.name} — Pledge Reminder`;
+  const html = `
+    <p>Hi ${donorName},</p>
+    <p>This is a friendly reminder about your pledge with <strong>${org.name}</strong>.</p>
+    <p>
+      <strong>Pledge details:</strong><br/>
+      Total pledge: ${formatCurrency(totalAmount)}<br/>
+      Amount received: ${formatCurrency(amountPaid)}<br/>
+      Remaining balance: ${formatCurrency(outstanding)}
+    </p>
+    <p>Thank you for supporting the mission and ministry.</p>
+    <p>Grace and peace,<br/>${org.name}</p>
+  `.trim();
+
+  await sendMail(contact.email, subject, html);
+
+  await auditAction({
+    organizationId: pledge.organizationId,
+    userId: session.userId,
+    actionType: "create",
+    entityName: "pledge_reminder",
+    entityId: pledge.id,
+    details: {
+      recipientEmail: contact.email,
+      totalAmount,
+      amountPaid,
+      outstanding,
+    },
+  });
+
+  return {
+    sent: true,
+    pledgeId: pledge.id,
+    contactEmail: contact.email,
+    outstanding,
   };
 }

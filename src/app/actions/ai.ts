@@ -11,14 +11,24 @@ import {
 import { db } from "@/db";
 import { eq } from "drizzle-orm";
 import { aiConfig, aiUsageLogs } from "@/db/schema";
+import * as z from "zod";
+
+const organizationIdSchema = z.string().trim().min(1);
+const conversationIdSchema = z.string().trim().min(1);
+const sendMessageSchema = z.object({
+  conversationId: conversationIdSchema,
+  userMessage: z.string().trim().min(1),
+  orgId: organizationIdSchema,
+});
 
 /**
  * Get or create an AI conversation for the current org.
  * We look for an existing open "web" conversation, or create a new one.
  */
 export async function getOrCreateAIConversation(orgId: string) {
+  const parsedOrgId = organizationIdSchema.parse(orgId);
   // Look for an existing open AI conversation
-  const existing = await getConversations(orgId, { status: "open" });
+  const existing = await getConversations(parsedOrgId, { status: "open" });
   const aiConvo = existing.find(
     (c: any) => c.conversation.channel === "web" && c.conversation.subject === "Grace AI Chat"
   );
@@ -31,7 +41,7 @@ export async function getOrCreateAIConversation(orgId: string) {
   const conversation = await createConversation({
     channel: "web",
     subject: "Grace AI Chat",
-    organizationId: orgId,
+    organizationId: parsedOrgId,
   });
 
   return conversation;
@@ -44,7 +54,8 @@ export async function getAIChatHistory(conversationId: string): Promise<{
   messages: Array<{ id: string; content: string; role: "user" | "model"; sentAt: Date }>;
   geminiHistory: ChatMessage[];
 }> {
-  const dbMessages = await getConversationMessages(conversationId);
+  const parsedConversationId = conversationIdSchema.parse(conversationId);
+  const dbMessages = await getConversationMessages(parsedConversationId);
 
   const messages = dbMessages.map((msg: any) => ({
     id: msg.id,
@@ -73,25 +84,26 @@ export async function sendMessageToGrace(
   userMsg: { id: string; content: string; role: "user"; sentAt: Date };
   aiMsg: { id: string; content: string; role: "model"; sentAt: Date };
 }> {
+  const parsed = sendMessageSchema.parse({ conversationId, userMessage, orgId });
   // 1. Save user message
   const savedUserMsg = await addMessage({
-    conversationId,
-    content: userMessage,
+    conversationId: parsed.conversationId,
+    content: parsed.userMessage,
     direction: "inbound",
     senderType: "human",
   });
 
   // 2. Get conversation history for context
-  const { geminiHistory } = await getAIChatHistory(conversationId);
+  const { geminiHistory } = await getAIChatHistory(parsed.conversationId);
   // Remove the last message (the one we just added) from history
   const historyWithoutCurrent = geminiHistory.slice(0, -1);
 
   // 3. Build church context
-  const contextData = await buildChurchContext(orgId);
+  const contextData = await buildChurchContext(parsed.orgId);
 
   // 4. Get org's AI config
   const aiSettings = await db.query.aiConfig.findFirst({
-    where: eq(aiConfig.organizationId, orgId),
+    where: eq(aiConfig.organizationId, parsed.orgId),
   });
 
   if (aiSettings && !aiSettings.graceEnabled) {
@@ -102,11 +114,16 @@ export async function sendMessageToGrace(
 
   // 5. Get AI response
   const client = getGeminiClient();
-  const aiResponse = await client.chat(userMessage, historyWithoutCurrent, contextData, systemPrompt);
+  const aiResponse = await client.chat(
+    parsed.userMessage,
+    historyWithoutCurrent,
+    contextData,
+    systemPrompt
+  );
 
   // 5. Save AI response
   const savedAiMsg = await addMessage({
-    conversationId,
+    conversationId: parsed.conversationId,
     content: aiResponse,
     direction: "outbound",
     senderType: "ai",
@@ -115,7 +132,7 @@ export async function sendMessageToGrace(
   // 6. Record usage
   // First, check if there's already a log for today (we'll simplify this by just recording one entry per message sent for now)
   await db.insert(aiUsageLogs).values({
-    organizationId: orgId,
+    organizationId: parsed.orgId,
     messagesCount: 1,
   });
 

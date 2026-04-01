@@ -35,6 +35,10 @@ import {
 } from "@/components/ui/select";
 import { createContact } from "@/app/actions/contacts";
 import useOrganization from "@/lib/organizations/useOrganization";
+import {
+  MEMBER_STATUS_VALUES,
+  getMemberStatusLabel,
+} from "@/lib/contacts/member-status";
 
 const formSchema = z.object({
   firstName: z.string().min(1, "First name is required"),
@@ -188,12 +192,11 @@ export function CreateContactDialog({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="visitor">Visitor</SelectItem>
-                      <SelectItem value="prospect">Prospect</SelectItem>
-                      <SelectItem value="regular_attendee">Regular Attendee</SelectItem>
-                      <SelectItem value="member">Member</SelectItem>
-                      <SelectItem value="leader">Leader</SelectItem>
-                      <SelectItem value="inactive">Inactive</SelectItem>
+                      {MEMBER_STATUS_VALUES.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {getMemberStatusLabel(status)}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <FormMessage />

@@ -1,6 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
+import { format } from "date-fns";
+import useSWR from "swr";
+import { Ticket, Search, MoreVertical, ExternalLink, AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,15 +28,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { AlertTriangle, MoreVertical, ExternalLink } from "lucide-react";
-import { format } from "date-fns";
-import useSWR from "swr";
-import { GenerateModal } from "./components/generate-modal";
 import { useDebounce } from "@/hooks/use-debounce";
-import { Pagination } from "@/components/pagination";
-import Link from "next/link";
+import { GenerateModal } from "./components/generate-modal";
 import { ExpireCouponsModal } from "./components/expire-coupons-modal";
 import { ExportCouponsModal } from "./components/export-coupons-modal";
+import {
+  SuperAdminPageHeader,
+  SuperAdminPagination,
+  SuperAdminTableShell,
+  SuperAdminToolbar,
+} from "@/components/super-admin/primitives";
 
 interface Coupon {
   id: string;
@@ -60,10 +65,12 @@ export default function CouponsPage() {
   const debouncedSearch = useDebounce(searchQuery, 500);
 
   const { data, isLoading, mutate } = useSWR<CouponsResponse>(
-    `/api/super-admin/coupons?page=${page}&search=${debouncedSearch}&status=${statusFilter}`,
+    `/api/super-admin/coupons?page=${page}&search=${debouncedSearch}&status=${statusFilter}`
   );
 
-  // Function to expire coupon
+  const coupons = data?.coupons ?? [];
+  const activeCount = coupons.filter((coupon) => coupon.expired === false && coupon.usedAt === null).length;
+
   const expireCoupon = async (id: string) => {
     try {
       const response = await fetch(`/api/super-admin/coupons/${id}`, {
@@ -72,13 +79,12 @@ export default function CouponsPage() {
 
       if (!response.ok) throw new Error("Failed to expire coupon");
 
-      mutate(); // Refresh the data
-    } catch (error) {
-      console.error("Error expiring coupon:", error);
+      mutate();
+    } catch (requestError) {
+      console.error("Error expiring coupon:", requestError);
     }
   };
 
-  // Function to delete coupon
   const deleteCoupon = async (id: string) => {
     try {
       const response = await fetch(`/api/super-admin/coupons/${id}`, {
@@ -87,88 +93,102 @@ export default function CouponsPage() {
 
       if (!response.ok) throw new Error("Failed to delete coupon");
 
-      mutate(); // Refresh the data
-    } catch (error) {
-      console.error("Error deleting coupon:", error);
+      mutate();
+    } catch (requestError) {
+      console.error("Error deleting coupon:", requestError);
     }
   };
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Lifetime Coupons</h1>
-        <p className="text-muted-foreground">
-          Helpful for running lifetime deals on platforms like Appsumo
-        </p>
-      </div>
+      <SuperAdminPageHeader
+        eyebrow="Offers"
+        eyebrowIcon={Ticket}
+        title="Lifetime Coupons"
+        description="Manage lifetime-deal coupons, expire bad codes, and export campaign slices without dropping into a separate tool."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <ExportCouponsModal currentFilter={statusFilter} searchQuery={debouncedSearch} />
+            <ExpireCouponsModal onSuccess={() => mutate()} />
+            <GenerateModal onSuccess={() => mutate()} />
+          </div>
+        }
+        stats={[
+          { label: "Total", value: data?.totalItems ?? 0, detail: "Across all coupons" },
+          { label: "Active", value: activeCount, detail: "Visible on this page" },
+          { label: "Filter", value: statusFilter, detail: debouncedSearch || "No search" },
+        ]}
+      />
 
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-4 flex-1">
-          <Input
-            placeholder="Search coupons..."
-            className="max-w-sm"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+      <SuperAdminToolbar>
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,320px)_180px] lg:items-center">
+          <div className="relative">
+            <Search className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
+            <Input
+              placeholder="Search coupons..."
+              className="pl-9 border-slate-200/80 bg-white/90 dark:border-slate-700 dark:bg-slate-900/80"
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+                setPage(1);
+              }}
+            />
+          </div>
           <Select
             value={statusFilter}
-            onValueChange={(value: StatusFilter) => setStatusFilter(value)}
+            onValueChange={(value: StatusFilter) => {
+              setStatusFilter(value);
+              setPage(1);
+            }}
           >
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="border-slate-200/80 bg-white/90 dark:border-slate-700 dark:bg-slate-900/80">
               <SelectValue placeholder="Filter by status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Coupons</SelectItem>
+              <SelectItem value="all">All coupons</SelectItem>
               <SelectItem value="used">Used</SelectItem>
               <SelectItem value="unused">Unused</SelectItem>
               <SelectItem value="expired">Expired</SelectItem>
             </SelectContent>
           </Select>
         </div>
-        <div className="flex gap-2">
-          <ExportCouponsModal currentFilter={statusFilter} searchQuery={debouncedSearch} />
-          <ExpireCouponsModal onSuccess={() => mutate()} />
-          <GenerateModal onSuccess={() => mutate()} />
-        </div>
-      </div>
+      </SuperAdminToolbar>
 
-      <div className="rounded-md border">
+      <SuperAdminTableShell>
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Code</TableHead>
-              <TableHead>Created At</TableHead>
+              <TableHead>Created</TableHead>
               <TableHead>Organization</TableHead>
               <TableHead>Used On</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="w-[70px]">Actions</TableHead>
+              <TableHead className="w-[72px] text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
-                  Loading...
+                <TableCell colSpan={6} className="h-24 text-center text-slate-500 dark:text-slate-400">
+                  Loading coupons...
                 </TableCell>
               </TableRow>
-            ) : data?.coupons.length === 0 ? (
+            ) : coupons.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
-                  No coupons found
+                <TableCell colSpan={6} className="h-24 text-center text-slate-500 dark:text-slate-400">
+                  No coupons found.
                 </TableCell>
               </TableRow>
             ) : (
-              data?.coupons.map((coupon) => (
-                <TableRow key={coupon.id}>
-                  <TableCell className="font-mono">{coupon.code}</TableCell>
-                  <TableCell>
-                    {format(new Date(coupon.createdAt), "PPP 'at' p")}
-                  </TableCell>
+              coupons.map((coupon) => (
+                <TableRow key={coupon.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-950/40">
+                  <TableCell className="font-mono font-semibold text-slate-900 dark:text-white">{coupon.code}</TableCell>
+                  <TableCell>{format(new Date(coupon.createdAt), "PPP 'at' p")}</TableCell>
                   <TableCell>
                     {coupon.organizationId ? (
-                      <Link 
+                      <Link
                         href={`/super-admin/organizations/${coupon.organizationId}`}
-                        className="flex items-center text-primary hover:underline"
+                        className="inline-flex items-center text-sm font-medium text-slate-700 hover:underline dark:text-slate-200"
                       >
                         {coupon.organizationId.substring(0, 8)}...
                         <ExternalLink className="ml-1 h-3 w-3" />
@@ -178,47 +198,39 @@ export default function CouponsPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    {coupon.usedAt
-                      ? format(new Date(coupon.usedAt), "PPP 'at' p")
-                      : "-"}
+                    {coupon.usedAt ? format(new Date(coupon.usedAt), "PPP 'at' p") : "-"}
                   </TableCell>
                   <TableCell>
                     {coupon.expired ? (
-                      <span className="text-destructive">Expired</span>
+                      <span className="text-sm font-semibold text-red-600 dark:text-red-400">Expired</span>
                     ) : coupon.usedAt ? (
-                      <span className="text-muted-foreground">Used</span>
+                      <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">Used</span>
                     ) : (
-                      <span className="text-primary">Active</span>
+                      <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">Active</span>
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          className="h-8 w-8 p-0"
-                        >
+                        <Button variant="ghost" className="h-9 w-9 p-0">
                           <span className="sr-only">Open menu</span>
                           <MoreVertical className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        {!coupon.expired && !coupon.usedAt && (
-                          <DropdownMenuItem
-                            onClick={() => expireCoupon(coupon.id)}
-                            className="text-destructive"
-                          >
+                        {coupon.expired === false && coupon.usedAt === null ? (
+                          <DropdownMenuItem onClick={() => void expireCoupon(coupon.id)} className="text-red-600">
                             <AlertTriangle className="mr-2 h-4 w-4" />
                             Expire
                           </DropdownMenuItem>
-                        )}
+                        ) : null}
                         <DropdownMenuItem
                           onClick={() => {
                             if (confirm("Are you sure you want to delete this coupon?")) {
-                              deleteCoupon(coupon.id);
+                              void deleteCoupon(coupon.id);
                             }
                           }}
-                          className="text-destructive"
+                          className="text-red-600"
                         >
                           Delete
                         </DropdownMenuItem>
@@ -230,16 +242,16 @@ export default function CouponsPage() {
             )}
           </TableBody>
         </Table>
-      </div>
+      </SuperAdminTableShell>
 
-      {data && (
-        <Pagination
+      {data ? (
+        <SuperAdminPagination
           page={page}
           pageSize={data.limit}
           total={data.totalItems}
           onPageChange={setPage}
         />
-      )}
+      ) : null}
     </div>
   );
-} 
+}

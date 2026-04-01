@@ -1,12 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft, Plus } from "lucide-react";
+import { toast } from "sonner";
 import { PlanForm } from "@/components/forms/plan-form";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft } from "lucide-react";
-import Link from "next/link";
+import {
+  SuperAdminPageHeader,
+  SuperAdminSurface,
+} from "@/components/super-admin/primitives";
 import type { PlanFormValues } from "@/lib/validations/plan.schema";
-import { toast } from "sonner";
 
 export default function CreatePlanPage() {
   const router = useRouter();
@@ -30,27 +34,40 @@ export default function CreatePlanPage() {
 
       toast.success("Plan created");
       router.push("/super-admin/plans");
-    } catch (error) {
-      console.error("Error creating plan:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to create plan");
+    } catch (requestError) {
+      console.error("Error creating plan:", requestError);
+      toast.error(requestError instanceof Error ? requestError.message : "Failed to create plan");
     }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" asChild>
-          <Link href="/super-admin/plans">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back
-          </Link>
-        </Button>
-        <h1 className="text-2xl font-bold">Create Plan</h1>
-      </div>
+      <SuperAdminPageHeader
+        backHref="/super-admin/plans"
+        backLabel="Plans"
+        eyebrow="Commercial Setup"
+        eyebrowIcon={Plus}
+        title="Create Plan"
+        description="Add a new commercial plan without leaving the super-admin operating shell."
+      />
 
-      <div className="border rounded-lg p-4">
+      <SuperAdminSurface className="p-6">
+        <div className="mb-6 flex items-center justify-between gap-4 border-b border-slate-200/80 pb-4 dark:border-slate-700">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Plan Definition</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Configure pricing, quotas, and the default plan behavior in one form.
+            </p>
+          </div>
+          <Button variant="outline" asChild>
+            <Link href="/super-admin/plans">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Cancel
+            </Link>
+          </Button>
+        </div>
         <PlanForm onSubmit={handleSubmit} submitLabel="Create Plan" />
-      </div>
+      </SuperAdminSurface>
     </div>
   );
-} 
+}

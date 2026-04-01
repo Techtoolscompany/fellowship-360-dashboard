@@ -2,9 +2,8 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { useRouter } from "next/navigation";
-import { Search, Filter, MoreHorizontal, Loader2 } from "lucide-react";
+import { Search, MoreHorizontal, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -13,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import useOrganization from "@/lib/organizations/useOrganization";
-import { getDonorSummary } from "@/app/actions/finances";
+import { getDonorSummary, sendDonorThankYou } from "@/app/actions/finances";
 
 export default function DonorsPage() {
   const router = useRouter();
@@ -22,6 +21,7 @@ export default function DonorsPage() {
   const [donorList, setDonorList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sendingThankYouId, setSendingThankYouId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     if (!orgId) return;
@@ -57,6 +57,22 @@ export default function DonorsPage() {
     return nameMatch || emailMatch;
   });
 
+  const handleSendThankYou = async (contactId: string | null | undefined) => {
+    if (!orgId || !contactId) {
+      toast.error("This donor does not have a linked contact record.");
+      return;
+    }
+    try {
+      setSendingThankYouId(contactId);
+      await sendDonorThankYou({ organizationId: orgId, contactId });
+      toast.success("Thank-you email sent");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to send thank-you email");
+    } finally {
+      setSendingThankYouId(null);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6 pb-8">
       {/* Header */}
@@ -71,10 +87,6 @@ export default function DonorsPage() {
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button disabled className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all font-semibold text-sm opacity-50 cursor-not-allowed" title="Advanced filtering coming soon">
-              <Filter className="w-4 h-4" />
-              <span className="hidden sm:inline">Filter</span>
-            </button>
           </div>
         </div>
       </section>
@@ -153,7 +165,12 @@ export default function DonorsPage() {
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => donor.contactId && router.push(`/app/contacts/${donor.contactId}`)}>View Profile</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => donor.contactId && router.push(`/app/contacts/${donor.contactId}?tab=giving`)}>View History</DropdownMenuItem>
-                            <DropdownMenuItem>Send Thank You</DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleSendThankYou(donor.contactId)}
+                              disabled={!donor.contactId || sendingThankYouId === donor.contactId}
+                            >
+                              Send Thank You
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </td>

@@ -10,9 +10,9 @@ import {
   messages,
   tasks,
 } from "@/db/schema";
-import { sendTextBeeSms } from "@/lib/communications/textbee-client";
 import sendMail from "@/lib/email/sendMail";
 import { getOrCreateGraceSession } from "@/lib/grace/runtime";
+import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 import { inngest } from "../client";
 import { INNGEST_EVENTS } from "../events";
 import { INNGEST_RETRY_PROFILES } from "../policy";
@@ -163,7 +163,15 @@ export const visitorFollowupSequence = inngest.createFunction(
 
         if (run.channel === "sms" && run.recipient) {
           try {
-            await sendTextBeeSms({ receivers: [run.recipient], smsBody: messageText });
+            const sendResult = await sendOrganizationSms({
+              organizationId: run.organizationId,
+              to: run.recipient,
+              message: messageText,
+              idempotencyKey: `visitor-followup:${run.sessionId}:${reason}`,
+            });
+            if (!sendResult.success) {
+              throw new Error(sendResult.error ?? "SMS delivery failed");
+            }
             deliveryStatus = "sent";
           } catch (error) {
             deliveryStatus = "pending";

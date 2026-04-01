@@ -14,14 +14,13 @@ import {
   tasks,
 } from "@/db/schema";
 import sendMail from "@/lib/email/sendMail";
-import { sendTextBeeSMS } from "@/lib/grace/channels/sms/textbee";
-import { resolveSmsProvider } from "@/lib/grace/providers/resolver";
 import { getOrCreateGraceSession } from "@/lib/grace/runtime";
 import {
   buildFirstTimeGuestTaskMarker,
   buildFirstTimeGuestTaskTitle,
   isFirstTimeGuestStageName,
 } from "@/lib/pipeline/first-time-guest";
+import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 import { inngest } from "../client";
 import { INNGEST_EVENTS } from "../events";
 import { INNGEST_RETRY_PROFILES } from "../policy";
@@ -276,21 +275,16 @@ export const firstTimeGuestAppointmentSequence = inngest.createFunction(
         let deliveryError: string | null = null;
 
         if (run.channel === "sms" && run.recipientPhone) {
-          const smsProvider = await resolveSmsProvider(run.organizationId);
-          if (!smsProvider) {
-            deliveryError = "SMS provider not configured";
+          const result = await sendOrganizationSms({
+            organizationId: run.organizationId,
+            to: run.recipientPhone,
+            message: params.messageText,
+            idempotencyKey: params.messageKey,
+          });
+          if (result.success) {
+            deliveryStatus = "sent";
           } else {
-            const result = await sendTextBeeSMS({
-              to: run.recipientPhone,
-              message: params.messageText,
-              idempotencyKey: params.messageKey,
-              config: smsProvider,
-            });
-            if (result.success) {
-              deliveryStatus = "sent";
-            } else {
-              deliveryError = result.error;
-            }
+            deliveryError = result.error;
           }
         } else if (run.channel === "email" && run.recipientEmail) {
           try {

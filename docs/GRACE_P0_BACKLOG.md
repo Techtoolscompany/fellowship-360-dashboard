@@ -1,9 +1,9 @@
 # GRACE P0 Backlog (Implementation Tickets)
 
-Last updated: March 7, 2026  
+Last updated: March 17, 2026  
 Scope: Immediate launch-critical build for AI-run ministry operations.
 
-Statuses: `Not Started`, `Scoping`, `In Progress`, `Blocked`, `Done`  
+Statuses: `Not Started`, `Scoping`, `In Progress`, `Blocked`, `Done`, `Deferred`  
 Default owner mapping: Platform, AI Platform, App Eng, Frontend, Workflow, Data, QA
 
 ## P0-001 Tenant-Safe Grace Sessions
@@ -129,7 +129,7 @@ Default owner mapping: Platform, AI Platform, App Eng, Frontend, Workflow, Data,
 ## P0-011 Sequence Builder MVP (Node Editor)
 - Priority: `P0`
 - Owner: `Frontend`
-- Status: `Not Started`
+- Status: `Done`
 - ETA: `Week 3`
 - Depends on: `P0-010`
 - Goal: In-app GHL-style builder for custom flows.
@@ -141,7 +141,7 @@ Default owner mapping: Platform, AI Platform, App Eng, Frontend, Workflow, Data,
 ## P0-012 Template Library + One-Click Install
 - Priority: `P0`
 - Owner: `Workflow`
-- Status: `Not Started`
+- Status: `Done`
 - ETA: `Week 3`
 - Depends on: `P0-011`
 - Goal: Users can install prebuilt sequences without building.
@@ -177,7 +177,7 @@ Default owner mapping: Platform, AI Platform, App Eng, Frontend, Workflow, Data,
 ## P0-015 Broadcast-Sequence Integration
 - Priority: `P0`
 - Owner: `App Eng`
-- Status: `Not Started`
+- Status: `Done`
 - ETA: `Week 3`
 - Depends on: `P0-010`, `P0-012`
 - Goal: Allow sequences to trigger segmented broadcasts.
@@ -189,10 +189,11 @@ Default owner mapping: Platform, AI Platform, App Eng, Frontend, Workflow, Data,
 ## P0-016 Weekly Financial Digest Pipeline
 - Priority: `P0`
 - Owner: `Data`
-- Status: `Not Started`
+- Status: `Done`
 - ETA: `Week 3`
 - Depends on: `P0-010`
 - Goal: Grace generates weekly financial accountability summary.
+- Launch Scope: Included in Grace launch branch (March 17, 2026). Track in `docs/GRACE_FINANCE_TRACK_PLAN.md`.
 - Acceptance Criteria:
   - Scheduled weekly job runs automatically.
   - Report includes totals by source and fund.
@@ -201,10 +202,11 @@ Default owner mapping: Platform, AI Platform, App Eng, Frontend, Workflow, Data,
 ## P0-017 Giving Source/Fund Normalization
 - Priority: `P0`
 - Owner: `Data`
-- Status: `Not Started`
+- Status: `Done`
 - ETA: `Week 3`
 - Depends on: `P0-016`
 - Goal: Ensure weekly report data is reliable.
+- Launch Scope: Included in Grace launch branch (March 17, 2026). Track in `docs/GRACE_FINANCE_TRACK_PLAN.md`.
 - Acceptance Criteria:
   - Canonical source taxonomy defined and mapped.
   - Fund attribution complete for all donation records.
@@ -213,12 +215,13 @@ Default owner mapping: Platform, AI Platform, App Eng, Frontend, Workflow, Data,
 ## P0-018 Launch Readiness QA Matrix
 - Priority: `P0`
 - Owner: `QA`
-- Status: `Not Started`
+- Status: `Done`
 - ETA: `Week 3`
 - Depends on: `P0-001`..`P0-017`
 - Goal: Verify launch-critical paths end-to-end.
+- Evidence: `docs/GRACE_QA_LAUNCH_MATRIX.md`
 - Acceptance Criteria:
-  - Test matrix covers security, policy, CRUD, workflows, finance digest.
+  - Test matrix covers security, policy, CRUD, workflows, and documents any explicitly deferred domains.
   - All P0 flows have pass/fail evidence.
   - Remaining known risks are documented with owner and date.
 

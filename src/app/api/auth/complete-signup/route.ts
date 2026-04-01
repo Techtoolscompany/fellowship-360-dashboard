@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { setPasswordSchema } from "@/lib/validations/auth.schema";
-import { decryptJson } from "@/lib/encryption/edge-jwt";
+import { decryptJson, TokenValidationError } from "@/lib/encryption/edge-jwt";
 import { hashPassword } from "@/lib/auth/password";
 import { db } from "@/db";
 import { users } from "@/db/schema/user";
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import onUserCreate from "@/lib/users/onUserCreate";
+import { rateLimitKeyed } from "@/lib/grace/channels/webhooks";
+import { getClientIp } from "@/lib/security/request";
+import { appConfig } from "@/lib/config";
 
 // Force Node.js runtime for argon2 support
 export const runtime = "nodejs";
@@ -13,11 +16,22 @@ export const runtime = "nodejs";
 interface SignUpToken {
   name: string;
   email: string;
-  expiry: string;
 }
 
 export async function POST(request: Request) {
   try {
+    if (!appConfig.auth?.enablePasswordAuth) {
+      return NextResponse.json(
+        { error: "Password authentication is disabled" },
+        { status: 403 }
+      );
+    }
+
+    const ip = getClientIp(request);
+    if (!(await rateLimitKeyed(`auth:complete-signup:${ip}`, 10, 15 * 60_000))) {
+      return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+    }
+
     const body = await request.json();
     const { token, password, confirmPassword } = body;
 
@@ -38,20 +52,16 @@ export async function POST(request: Request) {
     }
 
     // Decrypt and validate token
-    const signUpToken = await decryptJson<SignUpToken>(token);
-
-    if (new Date(signUpToken.expiry) < new Date()) {
-      return NextResponse.json(
-        { error: "Token has expired. Please request a new signup link." },
-        { status: 400 }
-      );
-    }
+    const signUpToken = await decryptJson<SignUpToken>(token, {
+      purpose: "signup",
+    });
+    const normalizedEmail = signUpToken.email.trim().toLowerCase();
 
     // Check if user already exists
     const existingUser = await db
       .select()
       .from(users)
-      .where(eq(users.email, signUpToken.email))
+      .where(sql`lower(${users.email}) = ${normalizedEmail}`)
       .limit(1)
       .then((users) => users[0]);
 
@@ -70,7 +80,7 @@ export async function POST(request: Request) {
       .insert(users)
       .values({
         name: signUpToken.name,
-        email: signUpToken.email,
+        email: normalizedEmail,
         password: hashedPassword,
         emailVerified: new Date(), // Email is verified through token
       })
@@ -85,6 +95,12 @@ export async function POST(request: Request) {
       message: "Account created successfully",
     });
   } catch (error) {
+    if (error instanceof TokenValidationError) {
+      return NextResponse.json(
+        { error: "Invalid or expired token" },
+        { status: 400 }
+      );
+    }
     console.error("Error completing signup:", error);
     return NextResponse.json(
       { error: "Failed to complete signup. Token may be invalid or expired." },
@@ -92,4 +108,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

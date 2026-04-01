@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
-import { AlertCircle, CheckCircle2, Loader2, Plug, RefreshCcw, Shield } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, Mail, Plug, RefreshCcw, Send, Shield } from "lucide-react";
 import { getGraceProviderConfigs, upsertGraceProviderConfig } from "@/app/actions/grace";
 import { getAssignedSmsDevice } from "@/app/actions/sms";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import useOrganization from "@/lib/organizations/useOrganization";
 
-type ProviderMode = "agency_managed" | "byo" | "disabled";
+type ProviderMode = "agency_managed" | "disabled";
 type ProviderConfigRow = Awaited<ReturnType<typeof getGraceProviderConfigs>>[number];
 
 type ProviderField = {
@@ -34,7 +35,6 @@ type ProviderDefinition = {
   fields: ProviderField[];
   modeDescription: {
     agency_managed: string;
-    byo: string;
     disabled: string;
   };
 };
@@ -62,7 +62,6 @@ const PROVIDERS: ProviderDefinition[] = [
     ],
     modeDescription: {
       agency_managed: "Use agency-managed Gemini credentials.",
-      byo: "Use your own Gemini credentials for this organization.",
       disabled: "Disable Grace AI model access for this channel.",
     },
   },
@@ -70,30 +69,29 @@ const PROVIDERS: ProviderDefinition[] = [
     key: "sms-textbee",
     channel: "sms",
     provider: "textbee",
-    title: "TextBee (SMS)",
-    summary: "Outbound broadcasts, assignment offers, and inbound member text workflows.",
+    title: "Fellowship 360 Gateway (SMS)",
+    summary: "Android gateway delivery for broadcasts, assignment offers, and inbound member text workflows.",
     fields: [
       {
         key: "apiKey",
-        label: "TextBee API Key",
+        label: "Gateway API Key",
         secret: true,
-        placeholder: "tb_...",
+        placeholder: "managed internally",
       },
       {
         key: "baseUrl",
-        label: "Base URL",
-        placeholder: "https://api.textbee.dev",
+        label: "Gateway Base URL",
+        placeholder: "https://your-gateway-host",
       },
       {
         key: "webhookSecret",
-        label: "Webhook Secret",
+        label: "Gateway Webhook Secret",
         secret: true,
         placeholder: "shared secret for inbound signature",
       },
     ],
     modeDescription: {
-      agency_managed: "Use agency-managed SMS gateway credentials.",
-      byo: "Use your own TextBee account and webhook secret.",
+      agency_managed: "Use agency-managed Fellowship 360 Gateway credentials.",
       disabled: "Disable SMS provider for this organization.",
     },
   },
@@ -113,7 +111,6 @@ const PROVIDERS: ProviderDefinition[] = [
     ],
     modeDescription: {
       agency_managed: "Use agency-managed voice synthesis credentials.",
-      byo: "Use your own ElevenLabs account for voice generation.",
       disabled: "Disable voice synthesis output.",
     },
   },
@@ -133,7 +130,6 @@ const PROVIDERS: ProviderDefinition[] = [
     ],
     modeDescription: {
       agency_managed: "Use agency-managed inbound call webhook secret.",
-      byo: "Use your own Retell webhook secret.",
       disabled: "Disable inbound voice webhook processing.",
     },
   },
@@ -158,7 +154,6 @@ const PROVIDERS: ProviderDefinition[] = [
     ],
     modeDescription: {
       agency_managed: "Use agency-managed email delivery.",
-      byo: "Use your own SendGrid account and from address.",
       disabled: "Disable email provider for this organization.",
     },
   },
@@ -183,7 +178,7 @@ function buildDraft(row: ProviderConfigRow | undefined, definition: ProviderDefi
   }
 
   return {
-    mode: row?.mode ?? "agency_managed",
+    mode: row?.mode === "disabled" ? "disabled" : "agency_managed",
     isActive: row?.isActive ?? true,
     values,
   };
@@ -342,6 +337,26 @@ export default function IntegrationsPage() {
   };
 
   const activeProviderCount = rows.filter((row) => row.isActive && row.mode !== "disabled").length;
+  const dittofeedRow = rows.find(
+    (row) => row.channel === "messaging" && row.provider === "dittofeed"
+  );
+  const dittofeedWorkspaceId =
+    typeof dittofeedRow?.configJson?.workspaceId === "string"
+      ? dittofeedRow.configJson.workspaceId
+      : null;
+  const dittofeedWorkspaceName =
+    typeof dittofeedRow?.configJson?.workspaceName === "string"
+      ? dittofeedRow.configJson.workspaceName
+      : null;
+  const dittofeedReady = Boolean(
+    dittofeedRow &&
+      dittofeedRow.mode !== "disabled" &&
+      dittofeedRow.isActive &&
+      dittofeedWorkspaceId
+  );
+  const dittofeedEmailReady = Boolean(dittofeedRow?.secretStatus?.resendApiKey);
+  const dittofeedSmsReady =
+    Boolean(smsDevice?.isActive) && Boolean(dittofeedRow?.secretStatus?.smsWebhookSecret);
 
   return (
     <div className="flex max-w-5xl flex-col gap-6">
@@ -350,7 +365,7 @@ export default function IntegrationsPage() {
           <p className="mb-1 text-base text-muted-foreground">Grace runtime provider controls</p>
           <h1 className="text-3xl font-bold text-foreground">Integrations</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Configure AI, SMS, voice, and email providers per organization. Secrets are encrypted at rest.
+            Review platform-managed provider status for this organization. Credentials are controlled by your platform team and encrypted at rest.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -378,7 +393,7 @@ export default function IntegrationsPage() {
             Webhook Endpoints
           </CardTitle>
           <CardDescription>
-            Use these URLs when configuring TextBee and Retell callbacks.
+            Use these URLs when configuring Fellowship 360 Gateway and Retell callbacks.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">
@@ -397,6 +412,88 @@ export default function IntegrationsPage() {
         </CardContent>
       </Card>
 
+      <Card className="overflow-hidden border-lime-500/20">
+        <CardHeader className="border-b border-border/60 bg-lime-500/5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Send className="h-4 w-4 text-lime-600" />
+                Messaging Studio
+              </CardTitle>
+              <CardDescription className="mt-1 max-w-2xl">
+                Dittofeed powers the staff-facing messaging workspace for journeys, templates,
+                broadcasts, and delivery history. SMS still sends through your managed gateway.
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={dittofeedReady ? "default" : "secondary"}>
+                {dittofeedReady ? "connected" : "not configured"}
+              </Badge>
+              {dittofeedWorkspaceId ? (
+                <Badge variant="outline">{dittofeedWorkspaceName ?? dittofeedWorkspaceId}</Badge>
+              ) : null}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-4 p-6 md:grid-cols-[1.1fr_0.9fr]">
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-border/60 bg-background/70 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <Mail className="h-4 w-4 text-lime-600" />
+                  Email
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {dittofeedEmailReady
+                    ? "Managed email is available for Dittofeed broadcasts and journeys."
+                    : "Managed Dittofeed email has not been configured yet."}
+                </p>
+              </div>
+              <div className="rounded-xl border border-border/60 bg-background/70 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <Send className="h-4 w-4 text-lime-600" />
+                  SMS
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {dittofeedSmsReady
+                    ? "Dittofeed can hand SMS sends to the church gateway webhook."
+                    : "SMS needs both an assigned gateway phone and Dittofeed webhook secret."}
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-dashed border-border/80 bg-muted/20 p-4 text-sm text-muted-foreground">
+              {dittofeedReady
+                ? "Open the Messaging Studio to manage journeys, templates, broadcasts, and deliveries for this organization."
+                : "Your platform team needs to provision Dittofeed before staff can use the Messaging Studio."}
+            </div>
+          </div>
+
+          <div className="flex flex-col justify-between rounded-2xl border border-border/60 bg-card p-5">
+            <div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                Workspace access
+              </p>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>Journeys, templates, broadcasts, and deliveries live in one embedded workspace.</p>
+                <p>
+                  Current route: <code className="rounded bg-muted px-2 py-1 text-xs">/app/broadcasts</code>
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              <Button asChild disabled={!dittofeedReady}>
+                <Link href="/app/broadcasts">Open Messaging Studio</Link>
+              </Button>
+              <Button asChild variant="outline" disabled={!dittofeedReady}>
+                <Link href="/app/templates">Open Templates</Link>
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {errorMessage ? (
         <Card className="border-destructive/40">
           <CardContent className="flex items-center gap-2 p-4 text-sm text-destructive">
@@ -411,7 +508,6 @@ export default function IntegrationsPage() {
           const row = findRow(rows, definition);
           const draft = drafts[definition.key] ?? buildDraft(row, definition);
           const isSaving = savingProviderKey === definition.key;
-          const isByo = draft.mode === "byo";
           const isDisabled = draft.mode === "disabled";
           const validation = row?.validation;
           const missing = validation?.missing ?? [];
@@ -447,7 +543,6 @@ export default function IntegrationsPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="agency_managed">Agency Managed</SelectItem>
-                        <SelectItem value="byo">Bring Your Own</SelectItem>
                         <SelectItem value="disabled">Disabled</SelectItem>
                       </SelectContent>
                     </Select>
@@ -470,7 +565,9 @@ export default function IntegrationsPage() {
                         <div className={`h-2 w-2 rounded-full ${smsDevice?.isActive ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                         <div>
                           <p className="text-sm font-medium text-slate-900 dark:text-white">
-                            {smsDevice ? "SMS Gateway Active" : "Waiting for Device Assignment"}
+                            {smsDevice
+                              ? "Fellowship 360 Gateway Active"
+                              : "Waiting for Device Assignment"}
                           </p>
                           <p className="text-xs text-slate-500">
                             {smsDevice 
@@ -500,7 +597,7 @@ export default function IntegrationsPage() {
                             onChange={(event) =>
                               handleFieldChange(definition.key, field.key, event.target.value)
                             }
-                            disabled={!isByo}
+                            disabled
                             autoComplete="off"
                           />
                           {field.description ? (
@@ -512,7 +609,7 @@ export default function IntegrationsPage() {
                   )}
                 </div>
 
-                {!validationOk && isByo && missing.length > 0 ? (
+                {!validationOk && missing.length > 0 ? (
                   <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
                     Missing required fields: {missing.join(", ")}
                   </div>

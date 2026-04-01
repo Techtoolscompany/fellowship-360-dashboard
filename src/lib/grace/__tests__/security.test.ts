@@ -58,7 +58,7 @@ describe("isEncryptedValue", () => {
 // ── normalizeAndEncryptProviderConfig ───────────────────────────────────────
 
 describe("normalizeAndEncryptProviderConfig", () => {
-  it("encrypts secret fields in BYO mode", () => {
+  it("encrypts secret fields when stored provider credentials are supplied", () => {
     const { configJson, validation } = normalizeAndEncryptProviderConfig({
       channel: "sms",
       provider: "textbee",

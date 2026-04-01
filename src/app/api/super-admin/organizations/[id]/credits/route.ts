@@ -120,4 +120,4 @@ export const POST = withSuperAdminAuthRequired(async (req, context) => {
       { status: 500 }
     );
   }
-});
+}, "manage_billing");

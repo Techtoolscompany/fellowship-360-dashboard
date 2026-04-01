@@ -111,4 +111,4 @@ export const DELETE = withSuperAdminAuthRequired(async (req, context) => {
       { status: 500 }
     );
   }
-}); 
+}, "manage_organizations");

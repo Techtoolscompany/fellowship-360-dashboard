@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Filter, TrendingUp, Target, Clock, DollarSign, MoreHorizontal, Loader2 } from "lucide-react";
+import { Plus, TrendingUp, Target, Clock, DollarSign, MoreHorizontal, Loader2 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import {
   DropdownMenu,
@@ -11,8 +11,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { toast } from "sonner";
 import useOrganization from "@/lib/organizations/useOrganization";
-import { getPledges } from "@/app/actions/finances";
+import { getPledges, sendPledgeReminder } from "@/app/actions/finances";
 import { CreatePledgeDialog } from "@/components/dialogs/CreatePledgeDialog";
 import { EditPledgeDialog } from "@/components/dialogs/EditPledgeDialog";
 
@@ -24,6 +25,7 @@ export default function PledgesPage() {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editPledgeState, setEditPledgeState] = useState<any>(null);
+  const [sendingReminderId, setSendingReminderId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     if (!orgId) return;
@@ -52,6 +54,18 @@ export default function PledgesPage() {
     { title: "Active Pledges", value: String(pledgeList.length), subtitle: "", icon: TrendingUp },
   ];
 
+  const handleSendReminder = async (pledgeId: string) => {
+    try {
+      setSendingReminderId(pledgeId);
+      await sendPledgeReminder({ pledgeId });
+      toast.success("Pledge reminder sent");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to send reminder");
+    } finally {
+      setSendingReminderId(null);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6 pb-8">
       {/* Header */}
@@ -66,10 +80,6 @@ export default function PledgesPage() {
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button disabled className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all font-semibold text-sm opacity-50 cursor-not-allowed" title="Advanced filtering coming soon">
-              <Filter className="w-4 h-4" />
-              <span className="hidden sm:inline">Filter</span>
-            </button>
             <CreatePledgeDialog open={showAddModal} onOpenChange={setShowAddModal} onSuccess={fetchData}>
               <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#84cc16] text-white font-bold text-sm hover:bg-[#65a30d] transition-colors shadow-sm ml-2">
                 <Plus className="w-4 h-4" />
@@ -160,7 +170,12 @@ export default function PledgesPage() {
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
                                 <DropdownMenuItem onClick={() => setEditPledgeState(row.pledge)}>Edit Pledge</DropdownMenuItem>
-                                <DropdownMenuItem>Send Reminder</DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => handleSendReminder(row.pledge.id)}
+                                  disabled={sendingReminderId === row.pledge.id}
+                                >
+                                  Send Reminder
+                                </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </td>

@@ -1,4 +1,9 @@
 import crypto from "crypto";
+import {
+  hasDistributedRateLimitConfig,
+  isLocalOrPrivateAppOrigin,
+  isProductionEnvironment,
+} from "@/lib/security/production-readiness";
 
 export function verifyWebhookSignature(payload: string, signature: string | null, secret?: string) {
   if (!secret) {
@@ -49,6 +54,16 @@ async function rateLimitUpstash(
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) {
+    if (
+      isProductionEnvironment() &&
+      !hasDistributedRateLimitConfig() &&
+      !isLocalOrPrivateAppOrigin()
+    ) {
+      console.error(
+        "[RateLimit] Distributed rate limiting requires UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in production."
+      );
+      return false;
+    }
     return rateLimitLocal(key, limit, windowMs);
   }
 
@@ -76,6 +91,10 @@ async function rateLimitUpstash(
     if (Number.isNaN(current)) return false;
     return current <= limit;
   } catch (error) {
+    if (isProductionEnvironment()) {
+      console.error("[RateLimit] Upstash Redis unavailable in production:", error);
+      return false;
+    }
     console.error("[RateLimit] Upstash unavailable, falling back to local map:", error);
     return rateLimitLocal(key, limit, windowMs);
   }

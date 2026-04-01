@@ -6,6 +6,7 @@ import { aiConfig } from "@/db/schema";
 import { organizationMemberships } from "@/db/schema/organization-membership";
 import { auth } from "@/auth";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
+import * as z from "zod";
 
 // Fields settable on update (all optional, never touch id/org/timestamps)
 type AiConfigUpdate = Partial<
@@ -14,6 +15,21 @@ type AiConfigUpdate = Partial<
 
 // Insert requires churchName; timestamps are handled by $defaultFn
 type AiConfigInsert = Omit<InferInsertModel<typeof aiConfig>, "id" | "createdAt" | "updatedAt">;
+
+const organizationIdSchema = z.string().trim().min(1);
+const aiConfigUpdateSchema = z.object({
+  customSystemPrompt: z.string().trim().nullable().optional(),
+  churchName: z.string().trim().min(1).optional(),
+  churchDenomination: z.string().trim().nullable().optional(),
+  churchCity: z.string().trim().nullable().optional(),
+  graceEnabled: z.boolean().optional(),
+  internalGraceEnabled: z.boolean().optional(),
+  publicGraceEnabled: z.boolean().optional(),
+  publicWidgetEnabled: z.boolean().optional(),
+  publicPhoneEnabled: z.boolean().optional(),
+  isDemoOrganization: z.boolean().optional(),
+  temperatureOverride: z.number().finite().nullable().optional(),
+});
 
 async function requireOrgMembership(organizationId: string) {
   const session = await auth();
@@ -35,33 +51,36 @@ async function requireOrgMembership(organizationId: string) {
 }
 
 export async function getGraceSettings(orgId: string) {
-  await requireOrgMembership(orgId);
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
 
   const settings = await db.query.aiConfig.findFirst({
-    where: eq(aiConfig.organizationId, orgId),
+    where: eq(aiConfig.organizationId, parsedOrgId),
   });
 
   return settings || null;
 }
 
 export async function updateGraceSettings(orgId: string, data: AiConfigUpdate) {
-  await requireOrgMembership(orgId);
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  const parsedData = aiConfigUpdateSchema.parse(data);
+  await requireOrgMembership(parsedOrgId);
 
   const existing = await db.query.aiConfig.findFirst({
-    where: eq(aiConfig.organizationId, orgId),
+    where: eq(aiConfig.organizationId, parsedOrgId),
   });
 
   if (existing) {
     await db
       .update(aiConfig)
-      .set(data)
-      .where(eq(aiConfig.organizationId, orgId));
+      .set(parsedData)
+      .where(eq(aiConfig.organizationId, parsedOrgId));
   } else {
-    if (!data.churchName) throw new Error("churchName is required when creating AI config");
+    if (!parsedData.churchName) throw new Error("churchName is required when creating AI config");
     const insertValues: AiConfigInsert = {
-      organizationId: orgId,
-      churchName: data.churchName,
-      ...data,
+      organizationId: parsedOrgId,
+      churchName: parsedData.churchName,
+      ...parsedData,
     };
     await db.insert(aiConfig).values(insertValues);
   }

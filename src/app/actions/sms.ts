@@ -5,8 +5,12 @@ import { smsDevices } from "@/db/schema/sms-gateway";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/auth";
 import { organizationMemberships } from "@/db/schema/organization-membership";
+import * as z from "zod";
+
+const organizationIdSchema = z.string().trim().min(1);
 
 async function requireOrgMembership(organizationId: string) {
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
@@ -16,7 +20,7 @@ async function requireOrgMembership(organizationId: string) {
     .where(
       and(
         eq(organizationMemberships.userId, session.user.id),
-        eq(organizationMemberships.organizationId, organizationId)
+        eq(organizationMemberships.organizationId, parsedOrganizationId)
       )
     )
     .limit(1);
@@ -26,7 +30,8 @@ async function requireOrgMembership(organizationId: string) {
 }
 
 export async function getAssignedSmsDevice(orgId: string) {
-  await requireOrgMembership(orgId);
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
 
   const [device] = await db
     .select({
@@ -37,7 +42,7 @@ export async function getAssignedSmsDevice(orgId: string) {
       lastSeenAt: smsDevices.lastSeenAt,
     })
     .from(smsDevices)
-    .where(eq(smsDevices.organizationId, orgId))
+    .where(eq(smsDevices.organizationId, parsedOrgId))
     .limit(1);
 
   return device || null;

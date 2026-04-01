@@ -11,9 +11,8 @@ import {
   tasks,
 } from "@/db/schema";
 import sendMail from "@/lib/email/sendMail";
-import { sendTextBeeSMS } from "@/lib/grace/channels/sms/textbee";
-import { resolveSmsProvider } from "@/lib/grace/providers/resolver";
 import { getOrCreateGraceSession } from "@/lib/grace/runtime";
+import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 import { inngest } from "../client";
 import { INNGEST_RETRY_PROFILES } from "../policy";
 
@@ -234,7 +233,6 @@ export const appointmentRemindersNoShowRecovery = inngest.createFunction(
         .filter((value): value is string => Boolean(value))
     );
 
-    const smsProviderByOrg = new Map<string, Awaited<ReturnType<typeof resolveSmsProvider>>>();
     const sessionByScope = new Map<string, string>();
     const conversationByScope = new Map<string, string | null>();
 
@@ -329,24 +327,16 @@ export const appointmentRemindersNoShowRecovery = inngest.createFunction(
       let deliveryError: string | null = null;
 
       if (row.channel === "sms" && row.recipientPhone) {
-        if (!smsProviderByOrg.has(row.organizationId)) {
-          smsProviderByOrg.set(row.organizationId, await resolveSmsProvider(row.organizationId));
-        }
-        const smsProvider = smsProviderByOrg.get(row.organizationId);
-        if (!smsProvider) {
-          deliveryError = "SMS provider not configured";
+        const sendResult = await sendOrganizationSms({
+          organizationId: row.organizationId,
+          to: row.recipientPhone,
+          message: messageText,
+          idempotencyKey: row.reminderKey,
+        });
+        if (sendResult.success) {
+          deliveryStatus = "sent";
         } else {
-          const sendResult = await sendTextBeeSMS({
-            to: row.recipientPhone,
-            message: messageText,
-            idempotencyKey: row.reminderKey,
-            config: smsProvider,
-          });
-          if (sendResult.success) {
-            deliveryStatus = "sent";
-          } else {
-            deliveryError = sendResult.error;
-          }
+          deliveryError = sendResult.error;
         }
       } else if (row.channel === "email" && row.recipientEmail) {
         try {
@@ -481,24 +471,16 @@ export const appointmentRemindersNoShowRecovery = inngest.createFunction(
       let deliveryError: string | null = null;
 
       if (channel === "sms" && phone) {
-        if (!smsProviderByOrg.has(row.organizationId)) {
-          smsProviderByOrg.set(row.organizationId, await resolveSmsProvider(row.organizationId));
-        }
-        const smsProvider = smsProviderByOrg.get(row.organizationId);
-        if (!smsProvider) {
-          deliveryError = "SMS provider not configured";
+        const sendResult = await sendOrganizationSms({
+          organizationId: row.organizationId,
+          to: phone,
+          message: messageText,
+          idempotencyKey: noShowKey,
+        });
+        if (sendResult.success) {
+          deliveryStatus = "sent";
         } else {
-          const sendResult = await sendTextBeeSMS({
-            to: phone,
-            message: messageText,
-            idempotencyKey: noShowKey,
-            config: smsProvider,
-          });
-          if (sendResult.success) {
-            deliveryStatus = "sent";
-          } else {
-            deliveryError = sendResult.error;
-          }
+          deliveryError = sendResult.error;
         }
       } else if (channel === "email" && email) {
         try {

@@ -20,6 +20,8 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { superAdminInsetClassName } from "@/components/super-admin/primitives";
 
 interface PlanFormProps {
   initialData?: PlanFormValues;
@@ -88,9 +90,13 @@ export function PlanForm({
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-8">
         <div className="grid gap-6 md:grid-cols-2">
-          {/* Basic Information */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-medium">Basic Information</h3>
+          <div className={cn(superAdminInsetClassName, "space-y-4 p-5")}>
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white">Basic Information</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Core plan identity, billing mode toggles, and default behavior.
+              </p>
+            </div>
             <FormField
               control={form.control}
               name="name"
@@ -210,9 +216,13 @@ export function PlanForm({
             />
           </div>
 
-          {/* Pricing */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-medium">Pricing</h3>
+          <div className={cn(superAdminInsetClassName, "space-y-4 p-5")}>
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white">Pricing</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Configure monthly, yearly, and one-time billing identifiers and anchors.
+              </p>
+            </div>
             <div className="grid gap-4">
               {hasMonthlyPricing && (
                 <div className="space-y-4">
@@ -517,11 +527,10 @@ export function PlanForm({
           </div>
         </div>
 
-        {/* Quotas */}
-        <div className="space-y-4">
+        <div className={cn(superAdminInsetClassName, "space-y-4 p-5")}>
           <div className="flex items-center gap-2">
-            <h3 className="text-lg font-medium">Quotas</h3>
-            <p className="text-sm text-muted-foreground">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Quotas</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               Can be used in code to limit the number of things a user can do.
             </p>
           </div>
@@ -593,10 +602,12 @@ export function PlanForm({
           </div>
         </div>
 
-        <Button type="submit" disabled={isSubmitting}>
+        <div className="flex justify-end">
+          <Button type="submit" disabled={isSubmitting}>
           {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {submitLabel}
-        </Button>
+          </Button>
+        </div>
       </form>
     </Form>
   );

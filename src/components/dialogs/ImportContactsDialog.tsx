@@ -14,6 +14,10 @@ import {
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { importContacts, type ImportContactRow } from "@/app/actions/contacts";
+import {
+  getMemberStatusLabel,
+  normalizeImportedMemberStatus,
+} from "@/lib/contacts/member-status";
 
 // ── CSV parser ──────────────────────────────────────────────────────────────
 
@@ -121,7 +125,7 @@ function parseRows(raw: string[][]): ParsedRow[] {
 
 function downloadTemplate() {
   const headers = "firstName,lastName,email,phone,memberStatus,source,notes";
-  const example = "Jane,Doe,jane@example.com,5551234567,visitor,website,Visited last Sunday";
+  const example = "Jane,Doe,jane@example.com,5551234567,new_guest,website,Visited last Sunday";
   const blob = new Blob([`${headers}\n${example}\n`], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -252,7 +256,12 @@ export function ImportContactsDialog({
             >
               <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-3" />
               <p className="text-sm font-medium">Drop your CSV here, or click to browse</p>
-              <p className="text-xs text-muted-foreground mt-1">Columns: firstName, lastName, email, phone, memberStatus, source, notes</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Columns: firstName, lastName, email, phone, memberStatus, source, notes
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                `memberStatus` accepts values like visitor, new_guest, regular_attendee, member, leader, inactive.
+              </p>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -316,7 +325,11 @@ export function ImportContactsDialog({
                       </td>
                       <td className="px-3 py-1.5 text-muted-foreground">{row.email || "—"}</td>
                       <td className="px-3 py-1.5 text-muted-foreground">{row.phone || "—"}</td>
-                      <td className="px-3 py-1.5 text-muted-foreground">{row.memberStatus || "visitor"}</td>
+                      <td className="px-3 py-1.5 text-muted-foreground">
+                        {getMemberStatusLabel(
+                          normalizeImportedMemberStatus(row.memberStatus) ?? "visitor"
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {rows.length > 100 && (

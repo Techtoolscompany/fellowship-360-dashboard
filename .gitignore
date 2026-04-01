@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/test-results
 
 # next.js
 /.next/
@@ -42,3 +43,6 @@ yarn-error.log*
 next-env.d.ts
 
 .source/
+
+# standalone vendor repos
+/vendors/fellowship360-gateway

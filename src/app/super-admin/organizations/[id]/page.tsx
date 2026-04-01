@@ -2,9 +2,20 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Trash2, Edit, CreditCard, Plus, Minus } from "lucide-react";
 import {
-  Card,
+  ArrowLeft,
+  Trash2,
+  Edit,
+  CreditCard,
+  Plus,
+  Minus,
+  Download,
+  CheckCircle2,
+  Clock3,
+  AlertTriangle,
+  RefreshCcw,
+} from "lucide-react";
+import {
   CardContent,
   CardDescription,
   CardHeader,
@@ -28,7 +39,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import useSWR from "swr";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Select,
@@ -50,7 +61,18 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
 import { enableCredits } from "@/lib/credits/config";
+import {
+  buildChurchOnboardingChecklist,
+  type ChurchOnboardingChecklistItem,
+} from "@/lib/super-admin/onboarding-checklist";
+import type { LaunchReportPayload } from "@/lib/super-admin/agency-launch-contracts";
+import {
+  SuperAdminEmptyState,
+  SuperAdminPageHeader,
+  SuperAdminSurface,
+} from "@/components/super-admin/primitives";
 
 interface OrganizationDetails {
   id: string;
@@ -114,6 +136,28 @@ interface CreditData {
   };
 }
 
+function checklistStatusVariant(
+  status:
+    | "complete"
+    | "in_progress"
+    | "needs_attention"
+    | LaunchReportPayload["readiness"]["status"]
+) {
+  if (status === "complete" || status === "healthy") return "secondary" as const;
+  if (status === "in_progress" || status === "degraded") return "outline" as const;
+  return "destructive" as const;
+}
+
+function checklistStatusIcon(status: "complete" | "in_progress" | "needs_attention") {
+  if (status === "complete") {
+    return <CheckCircle2 className="h-4 w-4 text-emerald-600" />;
+  }
+  if (status === "in_progress") {
+    return <Clock3 className="h-4 w-4 text-amber-600" />;
+  }
+  return <AlertTriangle className="h-4 w-4 text-destructive" />;
+}
+
 export default function OrganizationDetailsPage() {
   const { id } = useParams() as { id: string };
   const router = useRouter();
@@ -137,6 +181,15 @@ export default function OrganizationDetailsPage() {
     `/api/super-admin/organizations/${id}`
   );
 
+  const {
+    data: launchReport,
+    error: launchReportError,
+    isLoading: isLoadingLaunchReport,
+    mutate: mutateLaunchReport,
+  } = useSWR<LaunchReportPayload>(
+    `/api/super-admin/organizations/${id}/launch-report`
+  );
+
   const { data: plansList } = useSWR('/api/super-admin/plans?limit=100');
   
   const { data: redeemedCoupons } = useSWR<RedeemedCoupon[]>(
@@ -146,6 +199,20 @@ export default function OrganizationDetailsPage() {
   const { data: creditData, mutate: mutateCreditData } = useSWR<CreditData>(
     `/api/super-admin/organizations/${id}/credits?page=${creditPage}&limit=10`
   );
+
+  const onboardingChecklist = useMemo(() => {
+    if (!org || !launchReport) {
+      return null;
+    }
+
+    return buildChurchOnboardingChecklist({
+      organizationId: org.id,
+      organizationName: org.name,
+      hasPlan: Boolean(org.plan),
+      memberRoles: org.members.map((member) => member.role),
+      launchReport,
+    });
+  }, [launchReport, org]);
 
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString();
@@ -295,77 +362,207 @@ export default function OrganizationDetailsPage() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-[calc(100vh-14rem)]">
-        <div className="text-center">
-          <h2 className="text-lg font-medium">Error loading organization</h2>
-          <p className="text-sm text-muted-foreground">
-            Failed to load organization details. Please try again.
-          </p>
-          <Button variant="ghost" size="sm" asChild className="mt-4">
+      <SuperAdminEmptyState
+        title="Error loading organization"
+        description="Failed to load the church control record. Return to the organization index and try again."
+        action={
+          <Button variant="outline" size="sm" asChild>
             <Link href="/super-admin/organizations">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Organizations
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to organizations
             </Link>
           </Button>
-        </div>
-      </div>
+        }
+      />
     );
   }
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-[calc(100vh-14rem)]">
-        <div className="text-center">
-          <h2 className="text-lg font-medium">Loading...</h2>
-          <p className="text-sm text-muted-foreground">
-            Please wait while we load the organization details.
-          </p>
-        </div>
-      </div>
+      <SuperAdminEmptyState
+        title="Loading organization"
+        description="Pulling members, invites, onboarding status, and credits for this church."
+      />
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/super-admin/organizations">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back
-            </Link>
-          </Button>
-          <h1 className="text-2xl font-bold">{org?.name}</h1>
-          <Badge variant="outline">{org?.slug}</Badge>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/super-admin/organizations/${id}/integrations`}>
-              Integrations
-            </Link>
-          </Button>
-          {enableCredits && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsCreditModalOpen(true)}
-            >
-              <CreditCard className="h-4 w-4 mr-2" />
-              Manage Credits
+      <SuperAdminPageHeader
+        backHref="/super-admin/organizations"
+        backLabel="Organizations"
+        eyebrow="Church Control Record"
+        eyebrowIcon={CheckCircle2}
+        title={org?.name ?? "Organization"}
+        description={`Slug: ${org?.slug ?? "n/a"}`}
+        actions={
+          <>
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/super-admin/organizations/${id}/access`}>Access Policy</Link>
             </Button>
-          )}
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => router.push(`/super-admin/organizations/${id}/delete`)}
-          >
-            <Trash2 className="h-4 w-4 mr-2" />
-            Delete Organization
-          </Button>
-        </div>
-      </div>
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/super-admin/organizations/${id}/integrations`}>Integrations</Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <a href={`/api/super-admin/organizations/${id}/launch-report?format=csv`}>
+                <Download className="mr-2 h-4 w-4" />
+                Export Launch Report
+              </a>
+            </Button>
+            {enableCredits ? (
+              <Button variant="outline" size="sm" onClick={() => setIsCreditModalOpen(true)}>
+                <CreditCard className="mr-2 h-4 w-4" />
+                Manage Credits
+              </Button>
+            ) : null}
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => router.push(`/super-admin/organizations/${id}/delete`)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete Organization
+            </Button>
+          </>
+        }
+        stats={[
+          {
+            label: "Plan",
+            value: org?.plan?.name ?? "No plan",
+            detail: org?.plan?.codename ?? "Assign a plan",
+          },
+          {
+            label: "Members",
+            value: org?.members.length ?? 0,
+            detail: `${org?.invites.length ?? 0} pending invites`,
+          },
+          {
+            label: "Readiness",
+            value: onboardingChecklist?.completionPercent ?? 0,
+            detail: "Checklist completion %",
+          },
+        ]}
+      />
 
-      <Card>
+      <SuperAdminSurface id="organization-checklist">
+        <CardHeader className="space-y-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-2">
+              <CardTitle>Onboarding Checklist</CardTitle>
+              <CardDescription>
+                Live launch readiness for {org?.name}. This panel is derived from the launch
+                report and the current organization record.
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                variant={checklistStatusVariant(
+                  onboardingChecklist?.readinessStatus ?? "needs_attention"
+                )}
+              >
+                {onboardingChecklist?.readinessStatus ?? "loading"}
+              </Badge>
+              <Badge variant="outline">
+                {onboardingChecklist
+                  ? `${onboardingChecklist.completedItems}/${onboardingChecklist.totalItems} complete`
+                  : "Loading checklist"}
+              </Badge>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="text-muted-foreground">
+                {onboardingChecklist
+                  ? `${onboardingChecklist.completionPercent}% complete`
+                  : "Loading checklist progress"}
+              </span>
+              <span className="text-muted-foreground">
+                {launchReport
+                  ? `Updated ${formatDate(launchReport.generatedAt)}`
+                  : "Waiting for launch report"}
+              </span>
+            </div>
+            <Progress value={onboardingChecklist?.completionPercent ?? 0} className="h-2" />
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {isLoadingLaunchReport ? (
+            <div className="grid gap-3">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div key={index} className="rounded-lg border border-border/60 p-4">
+                  <div className="h-4 w-40 animate-pulse rounded bg-muted" />
+                  <div className="mt-3 h-3 w-3/4 animate-pulse rounded bg-muted" />
+                  <div className="mt-2 h-3 w-1/2 animate-pulse rounded bg-muted" />
+                </div>
+              ))}
+            </div>
+          ) : launchReportError ? (
+            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+              Failed to load the launch report for this church. Refresh the page or retry from
+              the report link below.
+            </div>
+          ) : onboardingChecklist ? (
+            <div className="grid gap-3">
+              {onboardingChecklist.items.map((item: ChurchOnboardingChecklistItem) => (
+                <div key={item.id} className="rounded-xl border border-border/60 p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        {checklistStatusIcon(item.status)}
+                        <h3 className="font-semibold">{item.title}</h3>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{item.description}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {item.details.map((detail: string) => (
+                          <Badge key={detail} variant="outline" className="text-xs">
+                            {detail}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <Badge variant={checklistStatusVariant(item.status)} className="capitalize">
+                      {item.status.replace("_", " ")}
+                    </Badge>
+                  </div>
+
+                  {item.actionLabel && item.actionHref ? (
+                    <div className="mt-3">
+                      <Button variant="outline" size="sm" asChild>
+                        <Link href={item.actionHref}>{item.actionLabel}</Link>
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {onboardingChecklist?.topNextAction ? (
+            <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold">Top next action</p>
+                  <p className="text-sm text-muted-foreground">
+                    {onboardingChecklist.topNextAction}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => void mutateLaunchReport()}>
+                    <RefreshCcw className="mr-2 h-4 w-4" />
+                    Refresh checklist
+                  </Button>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/super-admin/health">Open health board</Link>
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </CardContent>
+      </SuperAdminSurface>
+
+      <SuperAdminSurface id="organization-details">
         <CardHeader>
           <CardTitle>Organization Details</CardTitle>
           <CardDescription>Overview of the organization.</CardDescription>
@@ -425,9 +622,9 @@ export default function OrganizationDetailsPage() {
             </div>
           </dl>
         </CardContent>
-      </Card>
+      </SuperAdminSurface>
 
-      <Card>
+      <SuperAdminSurface id="organization-members">
         <CardHeader>
           <CardTitle>Members</CardTitle>
           <CardDescription>
@@ -538,10 +735,10 @@ export default function OrganizationDetailsPage() {
             </TableBody>
           </Table>
         </CardContent>
-      </Card>
+      </SuperAdminSurface>
 
       {org?.invites && org.invites.length > 0 && (
-        <Card>
+        <SuperAdminSurface>
           <CardHeader>
             <CardTitle>Pending Invitations</CardTitle>
             <CardDescription>
@@ -592,10 +789,10 @@ export default function OrganizationDetailsPage() {
               </TableBody>
             </Table>
           </CardContent>
-        </Card>
+        </SuperAdminSurface>
       )}
 
-      <Card>
+      <SuperAdminSurface>
         <CardHeader>
           <CardTitle>Redeemed Coupons</CardTitle>
           <CardDescription>
@@ -644,7 +841,7 @@ export default function OrganizationDetailsPage() {
             </TableBody>
           </Table>
         </CardContent>
-      </Card>
+      </SuperAdminSurface>
 
       {/* Credit Management Modal */}
       <Dialog open={isCreditModalOpen} onOpenChange={setIsCreditModalOpen}>
@@ -759,7 +956,7 @@ export default function OrganizationDetailsPage() {
 
       {/* Credits History Section */}
       {enableCredits && (
-        <Card>
+        <SuperAdminSurface>
           <CardHeader>
             <CardTitle>Credits & History</CardTitle>
             <CardDescription>
@@ -897,7 +1094,7 @@ export default function OrganizationDetailsPage() {
               </TabsContent>
             </Tabs>
           </CardContent>
-        </Card>
+        </SuperAdminSurface>
       )}
     </div>
   );

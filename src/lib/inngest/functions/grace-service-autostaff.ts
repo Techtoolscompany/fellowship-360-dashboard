@@ -22,8 +22,7 @@ import {
   scoreStaffCandidate,
   scoreVolunteerCandidate,
 } from "@/lib/grace/assignment-scoring";
-import { resolveSmsProvider } from "@/lib/grace/providers/resolver";
-import { sendTextBeeSMS } from "@/lib/grace/channels/sms/textbee";
+import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 import { inngest } from "../client";
 import { INNGEST_EVENTS } from "../events";
 import { INNGEST_RETRY_PROFILES } from "../policy";
@@ -804,24 +803,6 @@ export const graceServiceAutostaff = inngest.createFunction(
         return output;
       }
 
-      const smsProvider = await resolveSmsProvider(context.goal.organizationId);
-      if (!smsProvider) {
-        const output = {
-          attempted: candidates.length,
-          sent: 0,
-          skipped: candidates.length,
-          failed: 0,
-          reason: "SMS provider not configured",
-        };
-        await finishGoalStep({
-          goalId: context.goal.id,
-          stepKey: "send_offers",
-          status: "skipped",
-          outputJson: output,
-        });
-        return output;
-      }
-
       let sent = 0;
       let skipped = 0;
       let failed = 0;
@@ -836,11 +817,11 @@ export const graceServiceAutostaff = inngest.createFunction(
           context.serviceRun.serviceAt
         )}? Reply YES to confirm, NO to decline, or SWAP for a different time.`;
 
-        const result = await sendTextBeeSMS({
+        const result = await sendOrganizationSms({
+          organizationId: context.goal.organizationId,
           to,
           message,
           idempotencyKey: `${context.goal.id}:${row.assignment.id}:offer`,
-          config: smsProvider,
         });
 
         if (!result.success) {

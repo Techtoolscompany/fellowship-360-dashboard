@@ -8,6 +8,7 @@ export const graceMemoryTypeEnum = pgEnum("grace_memory_type", [
   "contact_memory",
   "org_pattern",
   "daily_briefing",
+  "service_recap",
 ]);
 
 export const graceMemory = pgTable(

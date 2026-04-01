@@ -7,6 +7,13 @@ import { OrganizationRole } from "@/db/schema/organization";
 import { db } from "@/db";
 import { aiConfig } from "@/db/schema";
 import { runGraceMessage } from "@/lib/grace/runtime";
+import { computeWeeklyGivingReport } from "@/lib/finances/weekly-report";
+import {
+  buildVoiceWeeklyFinanceReply,
+  extractWeeklyGivingReportFromActionOutcomes,
+  isVoiceWeeklyFinanceSummaryQuery,
+  resolveVoiceWeeklyFinanceRange,
+} from "@/lib/finances/voice-query";
 import {
   resolveElevenLabsApiKey,
   resolveGeminiApiKey,
@@ -75,6 +82,12 @@ export const POST = withOrganizationAuthRequired(async (req, context) => {
         { status: 400 }
       );
     }
+    if (!elevenLabsKey) {
+      return NextResponse.json(
+        { error: "ElevenLabs voice is not configured for this organization." },
+        { status: 400 }
+      );
+    }
 
     const base64Audio = body.audioData.includes(",")
       ? body.audioData.split(",")[1]
@@ -119,17 +132,41 @@ export const POST = withOrganizationAuthRequired(async (req, context) => {
       userId: user.id,
     });
 
-    const audioUrl =
-      elevenLabsKey && result.response
-        ? await synthesizeSpeech(result.response, elevenLabsKey).catch((error) => {
-            console.error("ElevenLabs TTS generation failed:", error);
-            return null;
-          })
-        : null;
+    let replyText = result.response;
+    const reportFromAction = extractWeeklyGivingReportFromActionOutcomes(
+      result.actionOutcomes
+    );
+
+    if (reportFromAction) {
+      replyText = buildVoiceWeeklyFinanceReply(reportFromAction);
+    } else if (isVoiceWeeklyFinanceSummaryQuery(normalizedTranscript)) {
+      try {
+        const range = resolveVoiceWeeklyFinanceRange(normalizedTranscript);
+        const report = await computeWeeklyGivingReport({
+          organizationId: organization.id,
+          startDate: range.startDate,
+          endDate: range.endDate,
+        });
+        replyText = buildVoiceWeeklyFinanceReply(report);
+      } catch (financeError) {
+        console.error("Grace Voice weekly finance fallback failed:", financeError);
+      }
+    }
+
+    let audioUrl: string;
+    try {
+      audioUrl = await synthesizeSpeech(replyText, elevenLabsKey);
+    } catch (error) {
+      console.error("ElevenLabs TTS generation failed:", error);
+      return NextResponse.json(
+        { error: "Unable to generate GRACE voice response right now. Please try again." },
+        { status: 502 }
+      );
+    }
 
     return NextResponse.json({
       transcript: normalizedTranscript,
-      replyText: result.response,
+      replyText,
       audioUrl,
       sessionId: result.sessionId,
       proposedActionsCount: result.proposedActions.length,

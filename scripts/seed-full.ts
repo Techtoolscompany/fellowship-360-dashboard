@@ -3,9 +3,10 @@ import { db } from "../src/db";
 import { users } from "../src/db/schema/user";
 import { organizations } from "../src/db/schema/organization";
 import { organizationMemberships } from "../src/db/schema/organization-membership";
+import { churchContacts } from "../src/db/schema/church-contacts";
 import { hash } from "bcryptjs";
-import { seedDemoData } from "../src/app/actions/seed";
-import { eq, and } from "drizzle-orm";
+import { seedDemoDataForOrg } from "../src/lib/seed/demo-data";
+import { eq, and, sql } from "drizzle-orm";
 
 async function seedFull() {
   console.log("🌱 Starting full seed process...");
@@ -84,15 +85,23 @@ async function seedFull() {
 
   // 4. Seed Demo Data
   console.log(`\n📊 Seeding demo data for organization...`);
-  try {
-    const result = await seedDemoData(orgId);
+  const [contactsCountRow] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(churchContacts)
+    .where(eq(churchContacts.organizationId, orgId));
+  const existingContactCount = Number(contactsCountRow?.count ?? 0);
+
+  if (existingContactCount > 0) {
+    console.log(
+      `   Skipping seed: organization already has ${existingContactCount} contacts (idempotent mode).`
+    );
+  } else {
+    const result = await seedDemoDataForOrg(orgId);
     if (result.success) {
       console.log(`✅ Demo data seeded successfully! (${result.contactCount} contacts created)`);
     } else {
-      console.log(`⚠️ Demo data seeding returned logic false.`);
+      throw new Error("Demo data seeding returned success=false");
     }
-  } catch (error) {
-    console.error("❌ Error seeding demo data:", error);
   }
 
   console.log("\n✅ FULL SEED COMPLETE!");

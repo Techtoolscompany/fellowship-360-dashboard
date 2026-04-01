@@ -1,11 +1,34 @@
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { eq } from "drizzle-orm";
 import { users } from "@/db/schema/user";
+import {
+  resolveSuperAdminAccess,
+  superAdminHasPermission,
+  type ResolvedSuperAdminAccess,
+} from "@/lib/super-admin/auth";
+import type { SuperAdminPermission } from "@/lib/super-admin/permissions";
+import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
-import { WithAuthHandler } from "./withAuthRequired";
+import type { MeResponse } from "@/app/api/app/me/types";
 
-const withSuperAdminAuthRequired = (handler: WithAuthHandler) => {
+export interface WithSuperAdminHandler {
+  (
+    req: NextRequest,
+    context: {
+      session: {
+        user: Promise<MeResponse["user"] & { superAdmin: ResolvedSuperAdminAccess }>;
+        expires: string;
+        superAdmin: ResolvedSuperAdminAccess;
+      };
+      params: Promise<Record<string, unknown>>;
+    }
+  ): Promise<NextResponse | Response>;
+}
+
+const withSuperAdminAuthRequired = (
+  handler: WithSuperAdminHandler,
+  requiredPermissions?: SuperAdminPermission | readonly SuperAdminPermission[]
+) => {
   return async (
     req: NextRequest,
     context: {
@@ -14,7 +37,7 @@ const withSuperAdminAuthRequired = (handler: WithAuthHandler) => {
   ) => {
     const session = await auth();
 
-    if (!session || !session.user || !session.user.id) {
+    if (!session?.user?.id || !session.user.email) {
       return NextResponse.json(
         {
           error: "Unauthorized",
@@ -24,46 +47,59 @@ const withSuperAdminAuthRequired = (handler: WithAuthHandler) => {
       );
     }
 
-    if (!process.env.SUPER_ADMIN_EMAILS) {
+    const access = await resolveSuperAdminAccess({
+      userId: session.user.id,
+      email: session.user.email,
+    });
+
+    if (!access?.isActive) {
       return NextResponse.json(
         {
           error: "Unauthorized",
-          message: "No super admins configured",
+          message: "Only active super admins can access this resource",
         },
         { status: 403 }
       );
     }
 
-    if (
-      !process.env.SUPER_ADMIN_EMAILS?.split(",").includes(session.user?.email)
-    ) {
+    if (requiredPermissions && !superAdminHasPermission(access, requiredPermissions)) {
       return NextResponse.json(
         {
-          error: "Unauthorized",
-          message: "Only super admins can access this resource",
+          error: "Forbidden",
+          message: "Your super-admin role does not allow this action",
         },
         { status: 403 }
       );
     }
 
     const sessionObject = {
-      ...session,
+      expires: session.expires,
+      superAdmin: access,
       get user() {
         return (async () => {
           const user = await db
-            .select()
+            .select({
+              id: users.id,
+              name: users.name,
+              email: users.email,
+              image: users.image,
+              createdAt: users.createdAt,
+              emailVerified: users.emailVerified,
+            })
             .from(users)
             .where(eq(users.id, session.user.id))
-            .then((users) => users[0]);
+            .then((rows) => rows[0]);
+
           return {
             ...session.user,
             ...user,
+            superAdmin: access,
           };
         })();
       },
     };
 
-    return await handler(req, {
+    return handler(req, {
       ...context,
       session: sessionObject,
     });

@@ -77,7 +77,7 @@ export const PATCH = withSuperAdminAuthRequired(async (req) => {
       { status: 500 }
     );
   }
-});
+}, "manage_messages");
 
 // Delete message
 export const DELETE = withSuperAdminAuthRequired(async (req) => {
@@ -102,4 +102,4 @@ export const DELETE = withSuperAdminAuthRequired(async (req) => {
       { status: 500 }
     );
   }
-}); 
+}, "manage_messages");

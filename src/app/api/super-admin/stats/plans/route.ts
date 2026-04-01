@@ -7,7 +7,6 @@ import { sql } from "drizzle-orm";
 
 export const GET = withSuperAdminAuthRequired(async () => {
   try {
-    // Get counts for each plan
     const planStats = await db
       .select({
         planId: organizations.planId,
@@ -18,28 +17,14 @@ export const GET = withSuperAdminAuthRequired(async () => {
       .leftJoin(plans, sql`${organizations.planId} = ${plans.id}`)
       .groupBy(organizations.planId, plans.name);
 
-    // Get count of organizations with no plan
-    const noPlanCount = await db
-      .select({
-        count: sql<number>`COUNT(*)`,
-      })
-      .from(organizations)
-      .where(sql`${organizations.planId} IS NULL`)
-      .then((res) => Number(res[0].count));
-
-    // Format the response
-    const stats = [
-      ...planStats.map((stat) => ({
-        id: stat.planId,
-        name: stat.planName || "Unknown Plan",
-        count: Number(stat.count),
-      })),
-      {
-        id: "no-plan",
-        name: "No Plan",
-        count: noPlanCount,
-      },
-    ];
+    const stats = planStats.map((stat) => ({
+      id: stat.planId ?? "no-plan",
+      name:
+        stat.planId === null
+          ? "No Plan"
+          : stat.planName ?? "Unknown Plan",
+      count: Number(stat.count),
+    }));
 
     return NextResponse.json(stats);
   } catch (error) {

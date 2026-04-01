@@ -1,6 +1,7 @@
 import "server-only";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
+import { requireConfiguredSecret } from "@/lib/security/production-readiness";
 export const SESSION_KEY = "gloow-session";
 
 export interface SessionValue {
@@ -9,10 +10,21 @@ export interface SessionValue {
 }
 
 export const getSession = async () => {
+  const sessionPassword = requireConfiguredSecret(
+    "SESSION_SECRET or AUTH_SECRET",
+    process.env.SESSION_SECRET || process.env.AUTH_SECRET
+  );
+
   const cookieStore = await cookies();
   const session = await getIronSession<SessionValue>(cookieStore, {
-    password: (process.env.SESSION_SECRET || process.env.AUTH_SECRET) as string,
+    password: sessionPassword,
     cookieName: SESSION_KEY,
+    cookieOptions: {
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      httpOnly: true,
+      path: "/",
+    },
   });
 
   return session;

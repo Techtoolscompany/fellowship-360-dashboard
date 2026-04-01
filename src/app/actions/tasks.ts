@@ -5,60 +5,21 @@ import { tasks, users, organizationMemberships } from "@/db/schema";
 import { eq, desc, and, isNull, asc } from "drizzle-orm";
 import { requireOrgMembership, auditAction } from "./utils";
 import * as z from "zod";
+import {
+  TASK_LIFECYCLE_STATUSES,
+  assertTaskStatusTransition,
+  computeTaskSlaStatus,
+  normalizeOptionalTaskDueDate,
+  type TaskLifecycleStatus,
+} from "@/lib/operations/tasks-lifecycle";
 
-const TASK_STATUS_VALUES = ["todo", "in_progress", "done", "cancelled"] as const;
 const TASK_PRIORITY_VALUES = ["low", "medium", "high", "urgent"] as const;
 
-const taskStatusSchema = z.enum(TASK_STATUS_VALUES);
+const taskStatusSchema = z.enum(TASK_LIFECYCLE_STATUSES);
 const taskPrioritySchema = z.enum(TASK_PRIORITY_VALUES);
 
-type TaskStatus = z.infer<typeof taskStatusSchema>;
+type TaskStatus = TaskLifecycleStatus;
 type TaskPriority = z.infer<typeof taskPrioritySchema>;
-type TaskSlaStatus = "overdue" | "due_soon" | "due_next_72h" | "on_track" | "no_due_date" | "closed";
-
-const TASK_STATUS_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-  todo: ["in_progress", "done", "cancelled"],
-  in_progress: ["todo", "done", "cancelled"],
-  done: ["todo"],
-  cancelled: ["todo"],
-};
-
-function normalizeOptionalDate(value: unknown): Date | null {
-  if (value === undefined || value === null || value === "") return null;
-  if (value instanceof Date) {
-    if (Number.isNaN(value.getTime())) {
-      throw new Error("Invalid dueDate");
-    }
-    return value;
-  }
-  const parsed = new Date(String(value));
-  if (Number.isNaN(parsed.getTime())) {
-    throw new Error("Invalid dueDate");
-  }
-  return parsed;
-}
-
-function computeTaskSlaStatus(task: { status: TaskStatus; dueDate: Date | null }): TaskSlaStatus {
-  if (task.status === "done" || task.status === "cancelled") {
-    return "closed";
-  }
-  if (!task.dueDate) {
-    return "no_due_date";
-  }
-
-  const now = Date.now();
-  const dueAt = task.dueDate.getTime();
-  if (dueAt < now) {
-    return "overdue";
-  }
-  if (dueAt <= now + 24 * 60 * 60 * 1000) {
-    return "due_soon";
-  }
-  if (dueAt <= now + 72 * 60 * 60 * 1000) {
-    return "due_next_72h";
-  }
-  return "on_track";
-}
 
 async function assertAssigneeInOrganization(organizationId: string, assigneeId: string | null | undefined) {
   if (!assigneeId) return;
@@ -106,16 +67,6 @@ async function getTaskWithAssignee(taskId: string, organizationId: string) {
   };
 }
 
-function assertTaskTransition(currentStatus: TaskStatus, nextStatus: TaskStatus) {
-  if (currentStatus === nextStatus) {
-    return;
-  }
-  const allowed = TASK_STATUS_TRANSITIONS[currentStatus];
-  if (!allowed.includes(nextStatus)) {
-    throw new Error(`Cannot transition task from "${currentStatus}" to "${nextStatus}"`);
-  }
-}
-
 export async function getTasks(
   orgId: string,
   filters?: {
@@ -128,7 +79,10 @@ export async function getTasks(
   await requireOrgMembership(orgId);
   const clauses: any[] = [eq(tasks.organizationId, orgId)];
 
-  if (filters?.status && TASK_STATUS_VALUES.includes(filters.status as TaskStatus)) {
+  if (
+    filters?.status &&
+    TASK_LIFECYCLE_STATUSES.includes(filters.status as TaskStatus)
+  ) {
     clauses.push(eq(tasks.status, filters.status as TaskStatus));
   }
   if (filters?.priority && TASK_PRIORITY_VALUES.includes(filters.priority as TaskPriority)) {
@@ -240,7 +194,7 @@ export async function createTask(data: {
     })
     .parse(data);
 
-  const dueDate = normalizeOptionalDate(parsed.dueDate);
+  const dueDate = normalizeOptionalTaskDueDate(parsed.dueDate);
   const { userId } = await requireOrgMembership(parsed.organizationId);
   await assertAssigneeInOrganization(parsed.organizationId, parsed.assigneeId ?? null);
 
@@ -310,13 +264,16 @@ export async function updateTask(
 
   if (!existing) throw new Error("Task not found");
   if (parsed.status) {
-    assertTaskTransition(existing.status as TaskStatus, parsed.status);
+    assertTaskStatusTransition(existing.status as TaskStatus, parsed.status);
   }
   if (parsed.assigneeId !== undefined) {
     await assertAssigneeInOrganization(parsed.organizationId, parsed.assigneeId);
   }
 
-  const dueDate = parsed.dueDate !== undefined ? normalizeOptionalDate(parsed.dueDate) : undefined;
+  const dueDate =
+    parsed.dueDate !== undefined
+      ? normalizeOptionalTaskDueDate(parsed.dueDate)
+      : undefined;
   const { organizationId, ...rest } = parsed;
   const patch: Record<string, unknown> = { ...rest };
   if (dueDate !== undefined) {

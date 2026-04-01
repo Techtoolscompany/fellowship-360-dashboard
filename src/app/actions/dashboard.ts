@@ -15,12 +15,16 @@ import {
 import { eq, sql, desc, count, sum, or, and, gte, lte } from "drizzle-orm";
 import { subDays, startOfWeek, endOfWeek, format } from "date-fns";
 import { requireOrgMembership } from "./utils";
+import * as z from "zod";
+
+const organizationIdSchema = z.string().trim().min(1);
 
 /**
  * Aggregated dashboard data for the Grace AI + Ministry dashboards
  */
 export async function getGraceDashboardData(orgId: string) {
-  await requireOrgMembership(orgId);
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
   // Run all queries in parallel
   const [
     contactCount,
@@ -32,7 +36,7 @@ export async function getGraceDashboardData(orgId: string) {
     pipelineData,
   ] = await Promise.all([
     // Total contacts
-    db.select({ count: count() }).from(churchContacts).where(eq(churchContacts.organizationId, orgId)),
+    db.select({ count: count() }).from(churchContacts).where(eq(churchContacts.organizationId, parsedOrgId)),
 
     // Prayer request stats (statuses: new, praying, answered, archived)
     db.select({
@@ -41,7 +45,7 @@ export async function getGraceDashboardData(orgId: string) {
       praying: count(sql`CASE WHEN ${prayerRequests.status} = 'praying' THEN 1 END`),
       answered: count(sql`CASE WHEN ${prayerRequests.status} = 'answered' THEN 1 END`),
       urgent: count(sql`CASE WHEN ${prayerRequests.urgency} = 'urgent' OR ${prayerRequests.urgency} = 'critical' THEN 1 END`),
-    }).from(prayerRequests).where(eq(prayerRequests.organizationId, orgId)),
+    }).from(prayerRequests).where(eq(prayerRequests.organizationId, parsedOrgId)),
 
     // Appointment stats (statuses: scheduled, confirmed, completed, cancelled, no_show)
     db.select({
@@ -49,7 +53,7 @@ export async function getGraceDashboardData(orgId: string) {
       scheduled: count(sql`CASE WHEN ${appointments.status} = 'scheduled' THEN 1 END`),
       confirmed: count(sql`CASE WHEN ${appointments.status} = 'confirmed' THEN 1 END`),
       completed: count(sql`CASE WHEN ${appointments.status} = 'completed' THEN 1 END`),
-    }).from(appointments).where(eq(appointments.organizationId, orgId)),
+    }).from(appointments).where(eq(appointments.organizationId, parsedOrgId)),
 
     // Conversation stats (statuses: open, waiting, resolved, archived)
     db.select({
@@ -58,14 +62,14 @@ export async function getGraceDashboardData(orgId: string) {
       waiting: count(sql`CASE WHEN ${conversations.status} = 'waiting' THEN 1 END`),
       resolved: count(sql`CASE WHEN ${conversations.status} = 'resolved' THEN 1 END`),
       archived: count(sql`CASE WHEN ${conversations.status} = 'archived' THEN 1 END`),
-    }).from(conversations).where(eq(conversations.organizationId, orgId)),
+    }).from(conversations).where(eq(conversations.organizationId, parsedOrgId)),
 
     // Broadcast stats (statuses: draft, scheduled, sending, sent, failed)
     db.select({
       total: count(),
       sent: count(sql`CASE WHEN ${broadcasts.status} = 'sent' THEN 1 END`),
       totalRecipients: sum(broadcasts.totalRecipients),
-    }).from(broadcasts).where(eq(broadcasts.organizationId, orgId)),
+    }).from(broadcasts).where(eq(broadcasts.organizationId, parsedOrgId)),
 
     // Task stats (statuses: todo, in_progress, done, cancelled)
     db.select({
@@ -73,14 +77,14 @@ export async function getGraceDashboardData(orgId: string) {
       done: count(sql`CASE WHEN ${tasks.status} = 'done' THEN 1 END`),
       todo: count(sql`CASE WHEN ${tasks.status} = 'todo' THEN 1 END`),
       inProgress: count(sql`CASE WHEN ${tasks.status} = 'in_progress' THEN 1 END`),
-    }).from(tasks).where(eq(tasks.organizationId, orgId)),
+    }).from(tasks).where(eq(tasks.organizationId, parsedOrgId)),
 
     // Pipeline counts via stages (pipelineItems joined with stages for org scoping)
     db.select({
       total: count(),
     }).from(pipelineItems)
       .innerJoin(pipelineStages, eq(pipelineItems.stageId, pipelineStages.id))
-      .where(eq(pipelineStages.organizationId, orgId)),
+      .where(eq(pipelineStages.organizationId, parsedOrgId)),
   ]);
 
   // Recent broadcasts
@@ -92,7 +96,7 @@ export async function getGraceDashboardData(orgId: string) {
     sentAt: broadcasts.sentAt,
     totalRecipients: broadcasts.totalRecipients,
   }).from(broadcasts)
-    .where(eq(broadcasts.organizationId, orgId))
+    .where(eq(broadcasts.organizationId, parsedOrgId))
     .orderBy(desc(broadcasts.sentAt))
     .limit(4);
 
@@ -102,7 +106,7 @@ export async function getGraceDashboardData(orgId: string) {
     count: count(pipelineItems.id),
   }).from(pipelineStages)
     .leftJoin(pipelineItems, eq(pipelineItems.stageId, pipelineStages.id))
-    .where(eq(pipelineStages.organizationId, orgId))
+    .where(eq(pipelineStages.organizationId, parsedOrgId))
     .groupBy(pipelineStages.name, pipelineStages.order)
     .orderBy(pipelineStages.order)
     .limit(4);
@@ -118,7 +122,7 @@ export async function getGraceDashboardData(orgId: string) {
   }).from(appointments)
     .where(
       and(
-        eq(appointments.organizationId, orgId),
+        eq(appointments.organizationId, parsedOrgId),
         gte(appointments.dateTime, weekStart),
         lte(appointments.dateTime, weekEnd)
       )
@@ -147,7 +151,7 @@ export async function getGraceDashboardData(orgId: string) {
     date: donations.date,
     fund: donations.fund,
   }).from(donations)
-    .where(eq(donations.organizationId, orgId))
+    .where(eq(donations.organizationId, parsedOrgId))
     .orderBy(desc(donations.date))
     .limit(3);
 
@@ -158,7 +162,7 @@ export async function getGraceDashboardData(orgId: string) {
   }).from(donations)
     .where(
       and(
-        eq(donations.organizationId, orgId),
+        eq(donations.organizationId, parsedOrgId),
         gte(donations.date, yearStart)
       )
     );
@@ -181,7 +185,7 @@ export async function getGraceDashboardData(orgId: string) {
     lastName: churchContacts.lastName,
     createdAt: churchContacts.createdAt,
   }).from(churchContacts)
-    .where(eq(churchContacts.organizationId, orgId))
+    .where(eq(churchContacts.organizationId, parsedOrgId))
     .orderBy(desc(churchContacts.createdAt))
     .limit(2);
 
@@ -217,7 +221,7 @@ export async function getGraceDashboardData(orgId: string) {
     status: tasks.status,
     updatedAt: tasks.updatedAt,
   }).from(tasks)
-    .where(eq(tasks.organizationId, orgId))
+    .where(eq(tasks.organizationId, parsedOrgId))
     .orderBy(desc(tasks.updatedAt))
     .limit(2);
 

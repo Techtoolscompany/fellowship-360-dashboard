@@ -1,6 +1,6 @@
 # Inngest Workflow Foundation (GRACE)
 
-Last updated: March 7, 2026
+Last updated: March 18, 2026
 
 ## Canonical Event Taxonomy (v1)
 
@@ -11,6 +11,22 @@ Last updated: March 7, 2026
 | `contacts.created.v1` | `createContact` server action | `process-contact-created` | Normalize contact and run post-create workflows |
 | `grace.call.missed.v1` | `POST /api/webhooks/voice/grace` (on ended call with no transcript) | `sequence-missed-call-recovery` | Trigger missed-call callback and escalation sequence |
 | `test.hello-world.requested.v1` | Internal testing | `hello-world` | Smoke-test Inngest runtime |
+
+## Scheduled Operations
+
+| Schedule | Function | Purpose |
+| --- | --- | --- |
+| Daily (`13:15 UTC`) | `automation-dispatch-daily-ministry-ops` | Dispatch workflows bound to `ministry.ops.daily.v1` |
+| Weekly Monday (`14:15 UTC`) | `automation-dispatch-weekly-ministry-ops` | Dispatch workflows bound to `ministry.ops.weekly.v1` |
+| Every 30 minutes | `automation-dead-letter-replay` | Replay due failed automation runs from dead-letter queue |
+| Hourly (`:20`) | `grace-service-run-recap-schedule` | Auto-generate post-service recap memories for recently completed service runs |
+
+## Runtime Controls
+
+- Concurrency guard limits active workflow runs (`entered` + `running`) per workflow instance.
+- Event dispatch throttling caps how many workflows can fire from a single trigger tick.
+- Failed runs are persisted in `automation_dead_letter` with exponential backoff retry windows.
+- Replay supports manual invocation and scheduled due-item processing.
 
 ## Idempotency Rules
 

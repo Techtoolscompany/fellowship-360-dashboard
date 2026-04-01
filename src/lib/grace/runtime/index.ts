@@ -55,6 +55,7 @@ export async function loadOrgPolicy(organizationId: string): Promise<OrgPolicyOv
     approvalsEnabled: row.approvalsEnabled,
     highRiskTools: (row.highRiskTools as string[]) ?? [],
     allowedPublicTools: (row.allowedPublicTools as string[]) ?? [],
+    autoEscalateOnEmergency: row.autoEscalateOnEmergency,
   };
 }
 

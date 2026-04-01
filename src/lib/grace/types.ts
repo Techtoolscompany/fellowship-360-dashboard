@@ -41,6 +41,7 @@ export interface OrgPolicyOverride {
   approvalsEnabled: boolean;
   highRiskTools: string[];
   allowedPublicTools: string[];
+  autoEscalateOnEmergency?: boolean;
 }
 
 export interface GraceSessionContext {

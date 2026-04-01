@@ -14,8 +14,7 @@ import {
 } from "@/db/schema";
 import { and, eq, gte, ilike, inArray, lte, or, SQL } from "drizzle-orm";
 import sendMail from "@/lib/email/sendMail";
-import { sendTextBeeSMS } from "../channels/sms/textbee";
-import { resolveEmailProvider, resolveSmsProvider } from "../providers/resolver";
+import { resolveEmailProvider } from "../providers/resolver";
 import type { GraceTool } from "./types";
 import {
   buildPrayerEscalationTaskMarker,
@@ -23,6 +22,11 @@ import {
   resolvePrayerRouting,
   type PrayerUrgency,
 } from "@/lib/prayer/routing";
+import { sendOrganizationSms } from "@/lib/sms-gateway/send";
+import {
+  syncContactCreatedToDittofeed,
+  syncContactToDittofeedBestEffort,
+} from "@/lib/dittofeed/contacts";
 
 function isAppointmentConflictError(error: unknown) {
   if (typeof error === "object" && error !== null && "code" in error) {
@@ -230,6 +234,16 @@ const contactsUpsert: GraceTool = {
         organizationId: ctx.organizationId,
       })
       .returning();
+
+    await syncContactToDittofeedBestEffort("grace.tools.contacts.upsert.create", () =>
+      syncContactCreatedToDittofeed({
+        organizationId: ctx.organizationId,
+        contact: created,
+        extraProperties: {
+          intakeSource: "grace_tool",
+        },
+      })
+    );
 
     return { success: true, output: { contactId: created.id, mode: "created" } };
   },
@@ -454,16 +468,11 @@ const messageSendSMS: GraceTool = {
       return { success: false, error: "Missing SMS destination or message" };
     }
 
-    const smsConfig = await resolveSmsProvider(ctx.organizationId);
-    if (!smsConfig) {
-      return { success: false, error: "SMS provider not configured for this organization" };
-    }
-
-    const sent = await sendTextBeeSMS({
+    const sent = await sendOrganizationSms({
+      organizationId: ctx.organizationId,
       to,
       message,
       idempotencyKey: String(input.idempotencyKey || `${ctx.sessionId}:${to}:${Date.now()}`),
-      config: smsConfig,
     });
 
     await db.insert(graceMessages).values({

@@ -16,19 +16,19 @@ import {
   users,
   graceGoals,
   graceGoalSteps,
+  graceMemory,
   tasks,
 } from "@/db/schema";
-import { eq, desc, and, gte, lte, ne, inArray, or, sql } from "drizzle-orm";
+import { eq, desc, and, gte, lte, ne, inArray, or, sql, ilike } from "drizzle-orm";
 import { requireOrgMembership, auditAction } from "./utils";
 import * as z from "zod";
-import { resolveSmsProvider } from "@/lib/grace/providers/resolver";
-import { sendTextBeeSMS } from "@/lib/grace/channels/sms/textbee";
 import { inngest } from "@/lib/inngest/client";
 import {
   INNGEST_EVENTS,
   buildGraceServiceAutostaffIdempotencyKey,
   buildServiceAssignmentReplacementIdempotencyKey,
 } from "@/lib/inngest/events";
+import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 import {
   APPOINTMENT_LIFECYCLE_STATUSES,
   assertAppointmentStatusTransition,
@@ -98,6 +98,73 @@ function normalizePhoneNumber(value: string | null | undefined) {
     return digits.slice(1);
   }
   return digits;
+}
+
+type PaidStaffLedgerStatus = "completed" | "no_show" | "cancelled" | "open";
+
+type PaidStaffShiftLedgerItem = {
+  assignmentId: string;
+  serviceRunId: string;
+  serviceRunName: string;
+  serviceAt: Date;
+  roleName: string;
+  staffUserId: string | null;
+  staffName: string | null;
+  staffEmail: string | null;
+  assignmentStatus: typeof serviceAssignments.$inferSelect.status;
+  checkedInAt: Date | null;
+  checkedOutAt: Date | null;
+  runDurationMinutes: number;
+  workedMinutes: number;
+  status: PaidStaffLedgerStatus;
+  payrollExportedAt: Date | null;
+};
+
+function computeWorkedMinutes(params: {
+  checkedInAt: Date | string | null;
+  checkedOutAt: Date | string | null;
+  fallbackDurationMinutes: number;
+}) {
+  if (params.checkedInAt && params.checkedOutAt) {
+    const checkedInAt = new Date(params.checkedInAt);
+    const checkedOutAt = new Date(params.checkedOutAt);
+    if (
+      !Number.isNaN(checkedInAt.getTime()) &&
+      !Number.isNaN(checkedOutAt.getTime()) &&
+      checkedOutAt.getTime() >= checkedInAt.getTime()
+    ) {
+      return Math.max(
+        0,
+        Math.round((checkedOutAt.getTime() - checkedInAt.getTime()) / 60_000)
+      );
+    }
+  }
+  return Math.max(0, Math.round(params.fallbackDurationMinutes));
+}
+
+function resolvePaidStaffLedgerStatus(
+  assignmentStatus: typeof serviceAssignments.$inferSelect.status
+): PaidStaffLedgerStatus {
+  if (assignmentStatus === "checked_out") return "completed";
+  if (assignmentStatus === "no_show") return "no_show";
+  if (assignmentStatus === "cancelled") return "cancelled";
+  return "open";
+}
+
+function escapeCsvValue(value: unknown) {
+  if (value === null || value === undefined) return "";
+  const text = String(value);
+  if (text.includes(",") || text.includes("\"") || text.includes("\n")) {
+    return `"${text.replaceAll("\"", "\"\"")}"`;
+  }
+  return text;
+}
+
+function toIsoDateTime(value: Date | string | null | undefined) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString();
 }
 
 function getServiceRunWindow(serviceAt: Date, durationMinutes: number | null | undefined) {
@@ -1721,6 +1788,9 @@ async function requireServiceAssignmentAccess(
       volunteerId: serviceAssignments.volunteerId,
       staffUserId: serviceAssignments.staffUserId,
       status: serviceAssignments.status,
+      checkedInAt: serviceAssignments.checkedInAt,
+      checkedOutAt: serviceAssignments.checkedOutAt,
+      payrollExportedAt: serviceAssignments.payrollExportedAt,
     })
     .from(serviceAssignments)
     .where(eq(serviceAssignments.id, assignmentId));
@@ -2298,6 +2368,592 @@ export async function getServiceRunAssignments(serviceRunId: string) {
     .orderBy(serviceAssignments.roleName, serviceAssignments.createdAt);
 }
 
+export async function getPaidStaffShiftLedger(input: {
+  organizationId: string;
+  fromDate?: Date | string;
+  toDate?: Date | string;
+  serviceRunId?: string;
+  includeOpen?: boolean;
+  includeExported?: boolean;
+}) {
+  const parsed = z
+    .object({
+      organizationId: z.string().min(1),
+      fromDate: z.coerce.date().optional(),
+      toDate: z.coerce.date().optional(),
+      serviceRunId: z.string().optional(),
+      includeOpen: z.boolean().optional().default(false),
+      includeExported: z.boolean().optional().default(false),
+    })
+    .parse(input);
+
+  await requireOrgMembership(parsed.organizationId, "admin");
+
+  const clauses = [
+    eq(serviceAssignments.organizationId, parsed.organizationId),
+    ne(serviceAssignments.assignmentType, "volunteer"),
+    sql`${serviceAssignments.staffUserId} is not null`,
+  ];
+
+  if (parsed.serviceRunId) {
+    clauses.push(eq(serviceAssignments.serviceRunId, parsed.serviceRunId));
+  }
+  if (parsed.fromDate) {
+    clauses.push(gte(serviceRuns.serviceAt, parsed.fromDate));
+  }
+  if (parsed.toDate) {
+    clauses.push(lte(serviceRuns.serviceAt, parsed.toDate));
+  }
+  if (!parsed.includeOpen) {
+    clauses.push(
+      inArray(serviceAssignments.status, ["checked_out", "no_show", "cancelled"])
+    );
+  }
+  if (!parsed.includeExported) {
+    clauses.push(sql`${serviceAssignments.payrollExportedAt} is null`);
+  }
+
+  const rows = await db
+    .select({
+      assignmentId: serviceAssignments.id,
+      serviceRunId: serviceAssignments.serviceRunId,
+      roleName: serviceAssignments.roleName,
+      assignmentStatus: serviceAssignments.status,
+      checkedInAt: serviceAssignments.checkedInAt,
+      checkedOutAt: serviceAssignments.checkedOutAt,
+      payrollExportedAt: serviceAssignments.payrollExportedAt,
+      staffUserId: serviceAssignments.staffUserId,
+      serviceRunName: serviceRuns.name,
+      serviceAt: serviceRuns.serviceAt,
+      runDurationMinutes: serviceRuns.durationMinutes,
+      staffName: users.name,
+      staffEmail: users.email,
+    })
+    .from(serviceAssignments)
+    .innerJoin(serviceRuns, eq(serviceAssignments.serviceRunId, serviceRuns.id))
+    .leftJoin(users, eq(serviceAssignments.staffUserId, users.id))
+    .where(and(...clauses))
+    .orderBy(serviceRuns.serviceAt, serviceAssignments.roleName, serviceAssignments.createdAt);
+
+  return rows.map((row): PaidStaffShiftLedgerItem => {
+    const plannedMinutes = Number(row.runDurationMinutes ?? 0);
+    return {
+      assignmentId: row.assignmentId,
+      serviceRunId: row.serviceRunId,
+      serviceRunName: row.serviceRunName,
+      serviceAt: row.serviceAt,
+      roleName: row.roleName,
+      staffUserId: row.staffUserId,
+      staffName: row.staffName ?? null,
+      staffEmail: row.staffEmail ?? null,
+      assignmentStatus: row.assignmentStatus,
+      checkedInAt: row.checkedInAt,
+      checkedOutAt: row.checkedOutAt,
+      runDurationMinutes: plannedMinutes,
+      workedMinutes: computeWorkedMinutes({
+        checkedInAt: row.checkedInAt,
+        checkedOutAt: row.checkedOutAt,
+        fallbackDurationMinutes: plannedMinutes,
+      }),
+      status: resolvePaidStaffLedgerStatus(row.assignmentStatus),
+      payrollExportedAt: row.payrollExportedAt,
+    };
+  });
+}
+
+export async function exportPaidStaffShiftLedgerCsv(input: {
+  organizationId: string;
+  fromDate?: Date | string;
+  toDate?: Date | string;
+  serviceRunId?: string;
+  includeOpen?: boolean;
+  markExported?: boolean;
+}) {
+  const parsed = z
+    .object({
+      organizationId: z.string().min(1),
+      fromDate: z.coerce.date().optional(),
+      toDate: z.coerce.date().optional(),
+      serviceRunId: z.string().optional(),
+      includeOpen: z.boolean().optional().default(false),
+      markExported: z.boolean().optional().default(true),
+    })
+    .parse(input);
+
+  const { userId } = await requireOrgMembership(parsed.organizationId, "admin");
+  const ledger = await getPaidStaffShiftLedger({
+    organizationId: parsed.organizationId,
+    fromDate: parsed.fromDate,
+    toDate: parsed.toDate,
+    serviceRunId: parsed.serviceRunId,
+    includeOpen: parsed.includeOpen,
+    includeExported: false,
+  });
+
+  const header = [
+    "assignment_id",
+    "service_run_id",
+    "service_run_name",
+    "service_at",
+    "role_name",
+    "staff_user_id",
+    "staff_name",
+    "staff_email",
+    "ledger_status",
+    "assignment_status",
+    "checked_in_at",
+    "checked_out_at",
+    "worked_minutes",
+    "planned_minutes",
+    "payroll_exported_at",
+  ];
+
+  const rows = ledger.map((item) => [
+    item.assignmentId,
+    item.serviceRunId,
+    item.serviceRunName,
+    toIsoDateTime(item.serviceAt),
+    item.roleName,
+    item.staffUserId ?? "",
+    item.staffName ?? "",
+    item.staffEmail ?? "",
+    item.status,
+    item.assignmentStatus,
+    toIsoDateTime(item.checkedInAt),
+    toIsoDateTime(item.checkedOutAt),
+    item.workedMinutes,
+    item.runDurationMinutes,
+    toIsoDateTime(item.payrollExportedAt),
+  ]);
+
+  const csvLines = [header, ...rows]
+    .map((line) => line.map((value) => escapeCsvValue(value)).join(","))
+    .join("\n");
+
+  const now = new Date();
+  if (parsed.markExported && ledger.length > 0) {
+    await db
+      .update(serviceAssignments)
+      .set({
+        payrollExportedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(serviceAssignments.organizationId, parsed.organizationId),
+          inArray(
+            serviceAssignments.id,
+            ledger.map((item) => item.assignmentId)
+          )
+        )
+      );
+  }
+
+  await auditAction({
+    organizationId: parsed.organizationId,
+    userId,
+    actionType: "export",
+    entityName: "service_assignment_payroll_ledger",
+    details: {
+      exportedCount: ledger.length,
+      fromDate: parsed.fromDate?.toISOString() ?? null,
+      toDate: parsed.toDate?.toISOString() ?? null,
+      serviceRunId: parsed.serviceRunId ?? null,
+      includeOpen: parsed.includeOpen,
+      markExported: parsed.markExported,
+    },
+  });
+
+  const stamp = now.toISOString().slice(0, 10).replaceAll("-", "");
+  return {
+    fileName: `payroll-ledger-${stamp}.csv`,
+    contentType: "text/csv; charset=utf-8",
+    csv: `${csvLines}\n`,
+    exportedCount: ledger.length,
+    rows: ledger,
+  };
+}
+
+async function findLatestServiceRunRecap(params: {
+  organizationId: string;
+  serviceRunId: string;
+}) {
+  const [recap] = await db
+    .select()
+    .from(graceMemory)
+    .where(
+      and(
+        eq(graceMemory.organizationId, params.organizationId),
+        eq(graceMemory.memoryType, "service_recap"),
+        sql`${graceMemory.metadataJson} ->> 'serviceRunId' = ${params.serviceRunId}`
+      )
+    )
+    .orderBy(desc(graceMemory.createdAt))
+    .limit(1);
+
+  return recap ?? null;
+}
+
+export async function generateServiceRunRecapRecord(input: {
+  organizationId: string;
+  serviceRunId: string;
+  force?: boolean;
+  createdByUserId?: string | null;
+  createdByActorType?: "staff" | "system";
+}) {
+  const parsed = z
+    .object({
+      organizationId: z.string().min(1),
+      serviceRunId: z.string().min(1),
+      force: z.boolean().optional().default(false),
+      createdByUserId: z.string().nullable().optional(),
+      createdByActorType: z.enum(["staff", "system"]).optional().default("system"),
+    })
+    .parse(input);
+
+  const [serviceRun] = await db
+    .select({
+      id: serviceRuns.id,
+      organizationId: serviceRuns.organizationId,
+      name: serviceRuns.name,
+      status: serviceRuns.status,
+      serviceAt: serviceRuns.serviceAt,
+      durationMinutes: serviceRuns.durationMinutes,
+    })
+    .from(serviceRuns)
+    .where(
+      and(
+        eq(serviceRuns.id, parsed.serviceRunId),
+        eq(serviceRuns.organizationId, parsed.organizationId)
+      )
+    )
+    .limit(1);
+
+  if (!serviceRun) {
+    throw new Error("Service run not found");
+  }
+
+  const existing = await findLatestServiceRunRecap({
+    organizationId: parsed.organizationId,
+    serviceRunId: parsed.serviceRunId,
+  });
+  if (existing && !parsed.force) {
+    return {
+      generated: false as const,
+      recap: existing,
+      serviceRun,
+    };
+  }
+
+  const [assignmentRows, openTaskRows] = await Promise.all([
+    db
+      .select({
+        id: serviceAssignments.id,
+        roleName: serviceAssignments.roleName,
+        status: serviceAssignments.status,
+        volunteerId: serviceAssignments.volunteerId,
+        staffUserId: serviceAssignments.staffUserId,
+      })
+      .from(serviceAssignments)
+      .where(
+        and(
+          eq(serviceAssignments.organizationId, parsed.organizationId),
+          eq(serviceAssignments.serviceRunId, parsed.serviceRunId)
+        )
+      )
+      .orderBy(serviceAssignments.roleName, serviceAssignments.createdAt),
+    db
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        status: tasks.status,
+      })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.organizationId, parsed.organizationId),
+          inArray(tasks.status, ["todo", "in_progress"]),
+          or(
+            ilike(tasks.title, `%${serviceRun.name}%`),
+            ilike(tasks.description, `%${parsed.serviceRunId}%`)
+          )
+        )
+      )
+      .orderBy(desc(tasks.createdAt))
+      .limit(8),
+  ]);
+
+  const totalSeats = assignmentRows.length;
+  const filledSeats = assignmentRows.filter(
+    (row) => Boolean(row.volunteerId || row.staffUserId)
+  ).length;
+  const checkedIn = assignmentRows.filter((row) => row.status === "checked_in").length;
+  const checkedOut = assignmentRows.filter((row) => row.status === "checked_out").length;
+  const noShow = assignmentRows.filter((row) => row.status === "no_show").length;
+  const needsReplacement = assignmentRows.filter(
+    (row) => row.status === "needs_replacement"
+  ).length;
+  const unresolvedStatuses = new Set([
+    "proposed",
+    "offered",
+    "declined",
+    "needs_replacement",
+    "no_show",
+  ]);
+  const unresolvedRoles = Array.from(
+    new Set(
+      assignmentRows
+        .filter((row) => unresolvedStatuses.has(row.status))
+        .map((row) => row.roleName)
+    )
+  );
+  const openSeats = assignmentRows.filter((row) => unresolvedStatuses.has(row.status)).length;
+  const closeCoverageSeats = assignmentRows.filter((row) =>
+    ["confirmed", "checked_in", "checked_out"].includes(row.status)
+  ).length;
+  const coveragePercent =
+    totalSeats > 0 ? Math.round((closeCoverageSeats / totalSeats) * 100) : 0;
+
+  const serviceAtLabel = formatShortDateTime(serviceRun.serviceAt);
+  const summary =
+    `Service recap for "${serviceRun.name}" (${serviceAtLabel}): ` +
+    `${checkedOut}/${totalSeats} seats checked out, ${noShow} no-show` +
+    `${noShow === 1 ? "" : "s"}, ${coveragePercent}% close coverage.`;
+
+  const openTaskLines =
+    openTaskRows.length > 0
+      ? openTaskRows.map((task) => `- [${task.status}] ${task.title} (${task.id})`)
+      : ["- none"];
+
+  const detailLines: string[] = [
+    `Service run: ${serviceRun.name}`,
+    `Scheduled at: ${serviceAtLabel}`,
+    `Run status: ${serviceRun.status}`,
+    `Duration (planned): ${serviceRun.durationMinutes} minutes`,
+    "",
+    "Seat summary:",
+    `- Total seats: ${totalSeats}`,
+    `- Filled seats: ${filledSeats}`,
+    `- Checked in: ${checkedIn}`,
+    `- Checked out: ${checkedOut}`,
+    `- No-show: ${noShow}`,
+    `- Needs replacement: ${needsReplacement}`,
+    `- Open/unresolved seats: ${openSeats}`,
+    "",
+    "Coverage at close:",
+    `- Coverage: ${coveragePercent}% (${closeCoverageSeats}/${totalSeats || 1} seats)`,
+    "",
+    "Unresolved roles:",
+    unresolvedRoles.length > 0 ? `- ${unresolvedRoles.join(", ")}` : "- none",
+    "",
+    "Open follow-up tasks:",
+    ...openTaskLines,
+    "",
+    `Generated at: ${new Date().toISOString()}`,
+  ];
+
+  const [created] = await db
+    .insert(graceMemory)
+    .values({
+      organizationId: parsed.organizationId,
+      memoryType: "service_recap",
+      summary,
+      details: detailLines.join("\n"),
+      tags: ["service_recap", serviceRun.status, `coverage_${coveragePercent}`],
+      metadataJson: {
+        reportType: "service_run_recap",
+        serviceRunId: parsed.serviceRunId,
+        serviceRunName: serviceRun.name,
+        serviceAt: serviceRun.serviceAt.toISOString(),
+        serviceStatus: serviceRun.status,
+        coveragePercent,
+        seatMetrics: {
+          totalSeats,
+          filledSeats,
+          checkedIn,
+          checkedOut,
+          noShow,
+          needsReplacement,
+          openSeats,
+          closeCoverageSeats,
+        },
+        unresolvedRoles,
+        openTaskIds: openTaskRows.map((task) => task.id),
+      },
+      createdByActorType: parsed.createdByActorType,
+      createdByUserId: parsed.createdByUserId ?? null,
+    })
+    .returning();
+
+  return {
+    generated: true as const,
+    recap: created,
+    serviceRun,
+  };
+}
+
+function getOperationsSystemToken() {
+  return (
+    process.env.OPERATIONS_SYSTEM_TOKEN ??
+    process.env.AUTOMATION_SYSTEM_TOKEN ??
+    process.env.INNGEST_EVENT_KEY ??
+    process.env.INNGEST_SIGNING_KEY ??
+    null
+  );
+}
+
+function assertOperationsSystemToken(token: string) {
+  const expected = getOperationsSystemToken();
+  if (!expected) {
+    throw new Error(
+      "Operations system token is not configured (set OPERATIONS_SYSTEM_TOKEN or AUTOMATION_SYSTEM_TOKEN)."
+    );
+  }
+  if (token !== expected) {
+    throw new Error("Invalid operations system token");
+  }
+}
+
+export async function generateServiceRunRecap(input: {
+  serviceRunId: string;
+  force?: boolean;
+}) {
+  const parsed = z
+    .object({
+      serviceRunId: z.string().min(1),
+      force: z.boolean().optional().default(false),
+    })
+    .parse(input);
+
+  const serviceRun = await requireServiceRunAccess(parsed.serviceRunId, "admin");
+  const result = await generateServiceRunRecapRecord({
+    organizationId: serviceRun.organizationId,
+    serviceRunId: parsed.serviceRunId,
+    force: parsed.force,
+    createdByUserId: serviceRun.session.userId,
+    createdByActorType: "staff",
+  });
+
+  if (result.generated) {
+    await auditAction({
+      organizationId: serviceRun.organizationId,
+      userId: serviceRun.session.userId,
+      actionType: "create",
+      entityName: "service_run_recap",
+      entityId: result.recap.id,
+      details: {
+        serviceRunId: parsed.serviceRunId,
+        force: parsed.force,
+      },
+    });
+  }
+
+  return result;
+}
+
+export async function getServiceRunRecaps(input: {
+  serviceRunId: string;
+  limit?: number;
+}) {
+  const parsed = z
+    .object({
+      serviceRunId: z.string().min(1),
+      limit: z.coerce.number().int().min(1).max(50).optional().default(10),
+    })
+    .parse(input);
+
+  const serviceRun = await requireServiceRunAccess(parsed.serviceRunId, "user");
+
+  return db
+    .select()
+    .from(graceMemory)
+    .where(
+      and(
+        eq(graceMemory.organizationId, serviceRun.organizationId),
+        eq(graceMemory.memoryType, "service_recap"),
+        sql`${graceMemory.metadataJson} ->> 'serviceRunId' = ${parsed.serviceRunId}`
+      )
+    )
+    .orderBy(desc(graceMemory.createdAt))
+    .limit(parsed.limit);
+}
+
+export async function generateDueServiceRunRecaps(input: {
+  organizationId?: string;
+  limit?: number;
+  lookbackHours?: number;
+  systemToken: string;
+}) {
+  const parsed = z
+    .object({
+      organizationId: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(500).optional().default(50),
+      lookbackHours: z.coerce.number().int().min(1).max(720).optional().default(72),
+      systemToken: z.string().min(1),
+    })
+    .parse(input);
+
+  assertOperationsSystemToken(parsed.systemToken);
+
+  const now = new Date();
+  const recapCutoff = new Date(now.getTime() - 30 * 60 * 1000);
+  const lookbackStart = new Date(
+    now.getTime() - parsed.lookbackHours * 60 * 60 * 1000
+  );
+
+  const clauses = [
+    ne(serviceRuns.status, "cancelled"),
+    lte(serviceRuns.serviceAt, recapCutoff),
+    gte(serviceRuns.serviceAt, lookbackStart),
+  ];
+  if (parsed.organizationId) {
+    clauses.push(eq(serviceRuns.organizationId, parsed.organizationId));
+  }
+
+  const rows = await db
+    .select({
+      organizationId: serviceRuns.organizationId,
+      serviceRunId: serviceRuns.id,
+    })
+    .from(serviceRuns)
+    .where(and(...clauses))
+    .orderBy(serviceRuns.serviceAt)
+    .limit(parsed.limit);
+
+  let generated = 0;
+  let skipped = 0;
+  const errors: Array<{ serviceRunId: string; error: string }> = [];
+
+  for (const row of rows) {
+    try {
+      const result = await generateServiceRunRecapRecord({
+        organizationId: row.organizationId,
+        serviceRunId: row.serviceRunId,
+        createdByActorType: "system",
+      });
+      if (result.generated) {
+        generated += 1;
+      } else {
+        skipped += 1;
+      }
+    } catch (error) {
+      skipped += 1;
+      errors.push({
+        serviceRunId: row.serviceRunId,
+        error:
+          error instanceof Error ? error.message : "service_recap_generation_failed",
+      });
+    }
+  }
+
+  return {
+    scanned: rows.length,
+    generated,
+    skipped,
+    errors,
+  };
+}
+
 export async function createServiceRun(data: {
   organizationId: string;
   templateId?: string;
@@ -2537,6 +3193,9 @@ export async function assignServiceAssignmentSeat(data: {
       volunteerId: parsed.volunteerId ?? null,
       staffUserId: parsed.staffUserId ?? null,
       status: "proposed",
+      checkedInAt: null,
+      checkedOutAt: null,
+      payrollExportedAt: null,
       notes: parsed.notes ?? null,
       updatedAt: new Date(),
     })
@@ -2572,10 +3231,6 @@ export async function sendServiceAssignmentOffers(data: {
     .parse(data);
 
   const serviceRun = await requireServiceRunAccess(parsed.serviceRunId, "admin");
-  const smsProvider = await resolveSmsProvider(serviceRun.organizationId);
-  if (!smsProvider) {
-    throw new Error("SMS provider is not configured for this organization");
-  }
 
   const rows = await db
     .select({
@@ -2645,11 +3300,11 @@ export async function sendServiceAssignmentOffers(data: {
           serviceRun.serviceAt
         )}? Reply YES to confirm, NO to decline, or SWAP for a different time.`;
 
-    const sendResult = await sendTextBeeSMS({
+    const sendResult = await sendOrganizationSms({
+      organizationId: serviceRun.organizationId,
       to: recipientPhone,
       message,
       idempotencyKey: `${serviceRun.id}:${row.assignment.id}:offer`,
-      config: smsProvider,
     });
 
     if (!sendResult.success) {
@@ -2792,7 +3447,6 @@ export async function processServiceAssignmentSmsReply(data: {
     });
   }
 
-  const smsProvider = await resolveSmsProvider(parsed.organizationId);
   let replyMessage = "";
   if (response.nextStatus === "confirmed") {
     replyMessage = `Grace: confirmed, thank you for serving as ${updated.roleName} on ${formatShortDateTime(
@@ -2806,14 +3460,12 @@ export async function processServiceAssignmentSmsReply(data: {
       "Grace: got it. We will follow up with a replacement or alternate scheduling option.";
   }
 
-  if (smsProvider) {
-    await sendTextBeeSMS({
-      to: normalizedFrom,
-      message: replyMessage,
-      idempotencyKey: `${updated.id}:reply:${response.nextStatus}`,
-      config: smsProvider,
-    });
-  }
+  await sendOrganizationSms({
+    organizationId: parsed.organizationId,
+    to: normalizedFrom,
+    message: replyMessage,
+    idempotencyKey: `${updated.id}:reply:${response.nextStatus}`,
+  });
 
   return {
     handled: true as const,
@@ -3740,6 +4392,9 @@ export async function updateServiceAssignmentStatus(data: {
     respondedAt?: Date | null;
     responseChannel?: string | null;
     responseText?: string | null;
+    checkedInAt?: Date | null;
+    checkedOutAt?: Date | null;
+    payrollExportedAt?: Date | null;
     updatedAt: Date;
   } = {
     status: parsed.status,
@@ -3755,6 +4410,9 @@ export async function updateServiceAssignmentStatus(data: {
     patch.respondedAt = null;
     patch.responseChannel = null;
     patch.responseText = null;
+    patch.checkedInAt = null;
+    patch.checkedOutAt = null;
+    patch.payrollExportedAt = null;
   } else if (parsed.status === "offered") {
     patch.offeredAt = now;
     patch.respondedAt = null;
@@ -3769,6 +4427,29 @@ export async function updateServiceAssignmentStatus(data: {
     patch.respondedAt = now;
     patch.responseChannel = parsed.responseChannel ?? "manual";
     patch.responseText = parsed.responseText ?? `Marked ${parsed.status.replaceAll("_", " ")} by staff`;
+  }
+
+  if (parsed.status === "checked_in") {
+    patch.checkedInAt = assignment.checkedInAt ?? now;
+    patch.checkedOutAt = null;
+    patch.payrollExportedAt = null;
+  }
+
+  if (parsed.status === "checked_out") {
+    patch.checkedInAt = assignment.checkedInAt ?? now;
+    patch.checkedOutAt = now;
+  }
+
+  if (
+    parsed.status === "declined" ||
+    parsed.status === "needs_replacement" ||
+    parsed.status === "no_show" ||
+    parsed.status === "cancelled"
+  ) {
+    patch.payrollExportedAt = null;
+    if (parsed.status !== "no_show") {
+      patch.checkedOutAt = null;
+    }
   }
 
   const [updated] = await db

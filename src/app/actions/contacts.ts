@@ -24,17 +24,44 @@ import {
   graceContactMatchAudit,
   serviceSchedulingProfiles,
 } from "@/db/schema";
-import { eq, and, ilike, or, desc, sql, count, inArray, ne } from "drizzle-orm";
+import { eq, and, ilike, or, desc, sql, count, inArray, ne, type SQL } from "drizzle-orm";
 import { requireOrgMembership } from "./utils";
+import {
+  mergeContactNotes,
+  normalizeContactEmail,
+  normalizeContactPhone,
+  resolveMergedMemberStatus,
+} from "@/lib/operations/contacts-lifecycle";
+import {
+  MEMBER_STATUS_VALUES,
+  normalizeImportedMemberStatus,
+  normalizeMemberStatusValue,
+} from "@/lib/contacts/member-status";
+import {
+  syncContactArchivedToDittofeed,
+  syncContactCreatedToDittofeed,
+  syncContactRestoredToDittofeed,
+  syncContactToDittofeedBestEffort,
+  syncContactUpdatedToDittofeed,
+} from "@/lib/dittofeed/contacts";
+import * as z from "zod";
+import type { MemberStatusValue } from "@/lib/contacts/member-status";
 
 // ── Contact Profile (full parallel fetch) ───────────────────────────────────
 
 export async function getContactProfile(contactId: string, organizationId: string) {
-  await requireOrgMembership(organizationId);
+  const parsedContactId = contactIdSchema.parse(contactId);
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
   const [contact] = await db
     .select()
     .from(churchContacts)
-    .where(and(eq(churchContacts.id, contactId), eq(churchContacts.organizationId, organizationId)))
+    .where(
+      and(
+        eq(churchContacts.id, parsedContactId),
+        eq(churchContacts.organizationId, parsedOrganizationId)
+      )
+    )
     .limit(1);
 
   if (!contact) {
@@ -61,32 +88,62 @@ export async function getContactProfile(contactId: string, organizationId: strin
     volunteerRecord,
     contactMinistries,
   ] = await Promise.all([
-    db.select().from(contactTags).where(eq(contactTags.contactId, contactId)),
+    db.select().from(contactTags).where(eq(contactTags.contactId, parsedContactId)),
     db.select().from(donations)
-      .where(and(eq(donations.contactId, contactId), eq(donations.organizationId, organizationId)))
+      .where(
+        and(
+          eq(donations.contactId, parsedContactId),
+          eq(donations.organizationId, parsedOrganizationId)
+        )
+      )
       .orderBy(desc(donations.date)),
     db.select().from(pledges)
-      .where(and(eq(pledges.contactId, contactId), eq(pledges.organizationId, organizationId)))
+      .where(
+        and(
+          eq(pledges.contactId, parsedContactId),
+          eq(pledges.organizationId, parsedOrganizationId)
+        )
+      )
       .orderBy(desc(pledges.createdAt)),
     db.select().from(appointments)
-      .where(and(eq(appointments.contactId, contactId), eq(appointments.organizationId, organizationId)))
+      .where(
+        and(
+          eq(appointments.contactId, parsedContactId),
+          eq(appointments.organizationId, parsedOrganizationId)
+        )
+      )
       .orderBy(desc(appointments.dateTime)),
     db.select().from(prayerRequests)
-      .where(and(eq(prayerRequests.contactId, contactId), eq(prayerRequests.organizationId, organizationId)))
+      .where(
+        and(
+          eq(prayerRequests.contactId, parsedContactId),
+          eq(prayerRequests.organizationId, parsedOrganizationId)
+        )
+      )
       .orderBy(desc(prayerRequests.createdAt)),
     db.select({ item: pipelineItems, stage: pipelineStages })
       .from(pipelineItems)
       .leftJoin(pipelineStages, eq(pipelineItems.stageId, pipelineStages.id))
-      .where(and(eq(pipelineItems.contactId, contactId), eq(pipelineItems.organizationId, organizationId)))
+      .where(
+        and(
+          eq(pipelineItems.contactId, parsedContactId),
+          eq(pipelineItems.organizationId, parsedOrganizationId)
+        )
+      )
       .orderBy(desc(pipelineItems.updatedAt)),
     db.select().from(volunteers)
-      .where(and(eq(volunteers.contactId, contactId), eq(volunteers.organizationId, organizationId)))
+      .where(
+        and(
+          eq(volunteers.contactId, parsedContactId),
+          eq(volunteers.organizationId, parsedOrganizationId)
+        )
+      )
       .limit(1)
       .then(r => r[0] ?? null),
     db.select({ membership: ministryMembers, ministry: ministries })
       .from(ministryMembers)
       .innerJoin(ministries, eq(ministryMembers.ministryId, ministries.id))
-      .where(eq(ministryMembers.contactId, contactId)),
+      .where(eq(ministryMembers.contactId, parsedContactId)),
   ]);
 
   // Volunteer shifts if a volunteer record exists
@@ -129,27 +186,67 @@ export type ImportContactsResult = {
   errors: { row: number; message: string }[];
 };
 
-const VALID_STATUSES = new Set([
-  "visitor", "prospect", "regular_attendee", "member", "leader", "inactive",
-]);
-const VALID_SOURCES = new Set([
-  "walk_in", "website", "referral", "event", "social_media", "other",
-]);
-const VALID_ACTIVE_STATUSES = new Set([
-  "visitor",
-  "prospect",
-  "regular_attendee",
-  "member",
-  "leader",
-]);
+const MAX_IMPORT_ROWS = 10_000;
+const DUPLICATE_GROUP_LIMIT = 100;
+const CONTACT_SOURCE_VALUES = [
+  "walk_in",
+  "website",
+  "referral",
+  "event",
+  "social_media",
+  "other",
+] as const;
 
-function normalizeEmail(value: string | null | undefined) {
-  return value?.trim().toLowerCase() || null;
-}
+type ContactSourceValue = (typeof CONTACT_SOURCE_VALUES)[number];
 
-function normalizePhone(value: string | null | undefined) {
-  const digits = value?.replace(/\D/g, "") ?? "";
-  return digits || null;
+const organizationIdSchema = z.string().trim().min(1);
+const contactIdSchema = z.string().trim().min(1);
+const memberStatusSchema = z.enum(MEMBER_STATUS_VALUES);
+const contactSourceSchema = z.enum(CONTACT_SOURCE_VALUES);
+
+const importContactRowSchema = z.object({
+  firstName: z.string(),
+  lastName: z.string(),
+  email: z.string().optional(),
+  phone: z.string().optional(),
+  memberStatus: z.string().optional(),
+  source: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+const createContactSchema = z.object({
+  firstName: z.string().trim().min(1),
+  lastName: z.string().trim().min(1),
+  email: z.string().trim().optional(),
+  phone: z.string().trim().optional(),
+  memberStatus: memberStatusSchema.optional(),
+  source: contactSourceSchema.optional(),
+  familyId: z.string().trim().optional(),
+  notes: z.string().trim().optional(),
+  organizationId: organizationIdSchema,
+});
+
+const updateContactSchema = z.object({
+  firstName: z.string().trim().min(1).optional(),
+  lastName: z.string().trim().min(1).optional(),
+  email: z.string().trim().nullable().optional(),
+  phone: z.string().trim().nullable().optional(),
+  memberStatus: memberStatusSchema.optional(),
+  source: contactSourceSchema.optional(),
+  familyId: z.string().trim().nullable().optional(),
+  notes: z.string().trim().nullable().optional(),
+});
+
+const mergeContactsSchema = z.object({
+  primaryContactId: contactIdSchema,
+  duplicateContactId: contactIdSchema,
+});
+
+const VALID_ACTIVE_STATUSES = new Set(["visitor", "prospect", "regular_attendee", "member", "leader"]);
+
+function normalizeContactSourceValue(value: string | null | undefined): ContactSourceValue {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return CONTACT_SOURCE_VALUES.find((source) => source === normalized) ?? "other";
 }
 
 async function findContactDuplicateByIdentifiers(params: {
@@ -158,8 +255,8 @@ async function findContactDuplicateByIdentifiers(params: {
   phone?: string | null;
   excludeContactId?: string;
 }) {
-  const normalizedEmail = normalizeEmail(params.email);
-  const normalizedPhone = normalizePhone(params.phone);
+  const normalizedEmail = normalizeContactEmail(params.email);
+  const normalizedPhone = normalizeContactPhone(params.phone);
 
   const matchClauses = [];
   if (normalizedEmail) {
@@ -195,10 +292,10 @@ async function findContactDuplicateByIdentifiers(params: {
   }
 
   const matchReasons: Array<"email" | "phone"> = [];
-  if (normalizedEmail && normalizeEmail(duplicate.email) === normalizedEmail) {
+  if (normalizedEmail && normalizeContactEmail(duplicate.email) === normalizedEmail) {
     matchReasons.push("email");
   }
-  if (normalizedPhone && normalizePhone(duplicate.phone) === normalizedPhone) {
+  if (normalizedPhone && normalizeContactPhone(duplicate.phone) === normalizedPhone) {
     matchReasons.push("phone");
   }
 
@@ -206,14 +303,6 @@ async function findContactDuplicateByIdentifiers(params: {
     duplicate,
     matchReasons,
   };
-}
-
-function mergeNotes(primary: string | null, duplicate: string | null) {
-  if (!primary && !duplicate) return null;
-  if (!primary) return duplicate;
-  if (!duplicate) return primary;
-  if (primary.trim() === duplicate.trim()) return primary;
-  return `${primary}\n\nMerged note:\n${duplicate}`;
 }
 
 async function requireContactAccess(contactId: string) {
@@ -234,24 +323,26 @@ export async function importContacts(
   organizationId: string,
   rows: ImportContactRow[]
 ): Promise<ImportContactsResult> {
-  await requireOrgMembership(organizationId);
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  if (rows.length > MAX_IMPORT_ROWS) {
+    throw new Error(`CSV import exceeds ${MAX_IMPORT_ROWS} rows`);
+  }
+
+  await requireOrgMembership(parsedOrganizationId);
   const result: ImportContactsResult = { inserted: 0, updated: 0, failed: 0, errors: [] };
 
   for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
     try {
+      const row = importContactRowSchema.parse(rows[i]);
       const firstName = row.firstName.trim();
       const lastName = row.lastName.trim();
       if (!firstName || !lastName) throw new Error("firstName and lastName are required");
 
       const email = row.email?.trim().toLowerCase() || null;
       const phone = row.phone?.replace(/\D/g, "") || null;
-      const memberStatus = VALID_STATUSES.has(row.memberStatus ?? "")
-        ? (row.memberStatus as any)
-        : "visitor";
-      const source = VALID_SOURCES.has(row.source ?? "")
-        ? (row.source as any)
-        : "other";
+      const importedStatus = normalizeImportedMemberStatus(row.memberStatus);
+      const memberStatus: MemberStatusValue = importedStatus ?? "visitor";
+      const source = normalizeContactSourceValue(row.source);
       const notes = row.notes?.trim() || null;
 
       // Upsert: match existing contact by email or phone within this org
@@ -264,20 +355,41 @@ export async function importContacts(
           ? await db
               .select({ id: churchContacts.id })
               .from(churchContacts)
-              .where(and(eq(churchContacts.organizationId, organizationId), or(...matchClauses)))
+              .where(and(eq(churchContacts.organizationId, parsedOrganizationId), or(...matchClauses)))
               .limit(1)
           : [];
 
       if (existing[0]) {
-        await db
+        const [updatedContact] = await db
           .update(churchContacts)
           .set({ firstName, lastName, email, phone, memberStatus, source, notes, updatedAt: new Date() })
-          .where(eq(churchContacts.id, existing[0].id));
+          .where(eq(churchContacts.id, existing[0].id))
+          .returning();
+        await syncContactToDittofeedBestEffort("contacts.import.update", () =>
+          syncContactUpdatedToDittofeed({
+            organizationId: parsedOrganizationId,
+            contact: updatedContact,
+          })
+        );
         result.updated++;
       } else {
-        await db.insert(churchContacts).values({
-          firstName, lastName, email, phone, memberStatus, source, notes, organizationId,
-        });
+        const [createdContact] = await db.insert(churchContacts).values({
+          firstName,
+          lastName,
+          email,
+          phone,
+          memberStatus,
+          source,
+          notes,
+          organizationId: parsedOrganizationId,
+        }).returning();
+        await syncContactToDittofeedBestEffort("contacts.import.create", () =>
+          syncContactCreatedToDittofeed({
+            organizationId: parsedOrganizationId,
+            contact: createdContact,
+            extraProperties: { importSource: "csv" },
+          })
+        );
         result.inserted++;
       }
     } catch (err) {
@@ -299,8 +411,9 @@ export async function getContacts(
   filters?: { search?: string; status?: string },
   page = 1
 ) {
-  await requireOrgMembership(orgId);
-  const conditions: any[] = [eq(churchContacts.organizationId, orgId)];
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
+  const conditions: any[] = [eq(churchContacts.organizationId, parsedOrgId)];
 
   if (filters?.search) {
     const searchTerm = `%${filters.search}%`;
@@ -315,7 +428,11 @@ export async function getContacts(
   }
 
   if (filters?.status) {
-    conditions.push(eq(churchContacts.memberStatus, filters.status as any));
+    const normalizedStatus = normalizeMemberStatusValue(filters.status);
+    if (!normalizedStatus) {
+      throw new Error("Invalid contact status filter");
+    }
+    conditions.push(eq(churchContacts.memberStatus, normalizedStatus));
   }
 
   const where = and(...conditions);
@@ -336,10 +453,11 @@ export async function getContacts(
 }
 
 export async function getContact(id: string) {
+  const contactId = contactIdSchema.parse(id);
   const [existing] = await db
     .select({ organizationId: churchContacts.organizationId })
     .from(churchContacts)
-    .where(eq(churchContacts.id, id))
+    .where(eq(churchContacts.id, contactId))
     .limit(1);
 
   if (!existing) {
@@ -350,7 +468,12 @@ export async function getContact(id: string) {
   const [contact] = await db
     .select()
     .from(churchContacts)
-    .where(and(eq(churchContacts.id, id), eq(churchContacts.organizationId, existing.organizationId)));
+    .where(
+      and(
+        eq(churchContacts.id, contactId),
+        eq(churchContacts.organizationId, existing.organizationId)
+      )
+    );
   return contact ?? null;
 }
 
@@ -365,12 +488,13 @@ export async function createContact(data: {
   notes?: string;
   organizationId: string;
 }) {
-  await requireOrgMembership(data.organizationId);
+  const parsed = createContactSchema.parse(data);
+  await requireOrgMembership(parsed.organizationId);
 
-  const normalizedEmail = normalizeEmail(data.email);
-  const normalizedPhone = normalizePhone(data.phone);
+  const normalizedEmail = normalizeContactEmail(parsed.email);
+  const normalizedPhone = normalizeContactPhone(parsed.phone);
   const duplicate = await findContactDuplicateByIdentifiers({
-    organizationId: data.organizationId,
+    organizationId: parsed.organizationId,
     email: normalizedEmail,
     phone: normalizedPhone,
   });
@@ -383,17 +507,24 @@ export async function createContact(data: {
   const [contact] = await db
     .insert(churchContacts)
     .values({
-      firstName: data.firstName,
-      lastName: data.lastName,
+      firstName: parsed.firstName,
+      lastName: parsed.lastName,
       email: normalizedEmail,
       phone: normalizedPhone,
-      memberStatus: (data.memberStatus as any) ?? "visitor",
-      source: (data.source as any) ?? "walk_in",
-      familyId: data.familyId ?? null,
-      notes: data.notes ?? null,
-      organizationId: data.organizationId,
+      memberStatus: parsed.memberStatus ?? "visitor",
+      source: parsed.source ?? "walk_in",
+      familyId: parsed.familyId ?? null,
+      notes: parsed.notes ?? null,
+      organizationId: parsed.organizationId,
     })
     .returning();
+
+  await syncContactToDittofeedBestEffort("contacts.create", () =>
+    syncContactCreatedToDittofeed({
+      organizationId: parsed.organizationId,
+      contact,
+    })
+  );
 
   try {
     const { inngest } = await import("@/lib/inngest/client");
@@ -403,7 +534,7 @@ export async function createContact(data: {
     } = await import("@/lib/inngest/events");
 
     const idempotencyKey = buildContactCreatedIdempotencyKey({
-      organizationId: data.organizationId,
+      organizationId: parsed.organizationId,
       contactId: contact.id,
     });
 
@@ -411,7 +542,7 @@ export async function createContact(data: {
       id: idempotencyKey,
       name: INNGEST_EVENTS.CONTACT_CREATED,
       data: {
-        organizationId: data.organizationId,
+        organizationId: parsed.organizationId,
         contactId: contact.id,
         idempotencyKey,
       },
@@ -419,7 +550,7 @@ export async function createContact(data: {
   } catch (error) {
     console.error("[Contacts] Contact created but failed to enqueue post-create workflow", {
       contactId: contact.id,
-      organizationId: data.organizationId,
+      organizationId: parsed.organizationId,
       error,
     });
   }
@@ -440,18 +571,31 @@ export async function updateContact(
     notes: string | null;
   }>
 ) {
-  const existing = await requireContactAccess(id);
+  const contactId = contactIdSchema.parse(id);
+  const parsed = updateContactSchema.parse(data);
+  if (Object.keys(parsed).length === 0) {
+    throw new Error("No contact fields provided to update");
+  }
+
+  const existing = await requireContactAccess(contactId);
+  const [previousContact] = await db
+    .select()
+    .from(churchContacts)
+    .where(
+      and(eq(churchContacts.id, contactId), eq(churchContacts.organizationId, existing.organizationId))
+    )
+    .limit(1);
 
   const normalizedEmail =
-    data.email !== undefined ? normalizeEmail(data.email) : undefined;
+    parsed.email !== undefined ? normalizeContactEmail(parsed.email) : undefined;
   const normalizedPhone =
-    data.phone !== undefined ? normalizePhone(data.phone) : undefined;
+    parsed.phone !== undefined ? normalizeContactPhone(parsed.phone) : undefined;
 
   const duplicate = await findContactDuplicateByIdentifiers({
     organizationId: existing.organizationId,
     email: normalizedEmail,
     phone: normalizedPhone,
-    excludeContactId: id,
+    excludeContactId: contactId,
   });
   if (duplicate) {
     throw new Error(
@@ -459,59 +603,115 @@ export async function updateContact(
     );
   }
 
+  const patch: Partial<typeof churchContacts.$inferInsert> = {
+    updatedAt: new Date(),
+  };
+  if (parsed.firstName !== undefined) patch.firstName = parsed.firstName;
+  if (parsed.lastName !== undefined) patch.lastName = parsed.lastName;
+  if (parsed.memberStatus !== undefined) patch.memberStatus = parsed.memberStatus;
+  if (parsed.source !== undefined) patch.source = parsed.source;
+  if (parsed.familyId !== undefined) patch.familyId = parsed.familyId;
+  if (parsed.notes !== undefined) patch.notes = parsed.notes;
+  if (normalizedEmail !== undefined) patch.email = normalizedEmail;
+  if (normalizedPhone !== undefined) patch.phone = normalizedPhone;
+
   const [contact] = await db
     .update(churchContacts)
-    .set({
-      ...data,
-      ...(normalizedEmail !== undefined && { email: normalizedEmail }),
-      ...(normalizedPhone !== undefined && { phone: normalizedPhone }),
-      updatedAt: new Date(),
-    } as any)
-    .where(and(eq(churchContacts.id, id), eq(churchContacts.organizationId, existing.organizationId)))
+    .set(patch)
+    .where(
+      and(eq(churchContacts.id, contactId), eq(churchContacts.organizationId, existing.organizationId))
+    )
     .returning();
+
+  await syncContactToDittofeedBestEffort("contacts.update", () =>
+    syncContactUpdatedToDittofeed({
+      organizationId: existing.organizationId,
+      contact,
+      previousContact,
+    })
+  );
   return contact;
 }
 
 export async function archiveContact(id: string) {
-  const existing = await requireContactAccess(id);
+  const contactId = contactIdSchema.parse(id);
+  const existing = await requireContactAccess(contactId);
+  const [previousContact] = await db
+    .select()
+    .from(churchContacts)
+    .where(
+      and(eq(churchContacts.id, contactId), eq(churchContacts.organizationId, existing.organizationId))
+    )
+    .limit(1);
   const [contact] = await db
     .update(churchContacts)
     .set({
       memberStatus: "inactive",
       updatedAt: new Date(),
-    } as any)
-    .where(and(eq(churchContacts.id, id), eq(churchContacts.organizationId, existing.organizationId)))
+    })
+    .where(
+      and(eq(churchContacts.id, contactId), eq(churchContacts.organizationId, existing.organizationId))
+    )
     .returning();
+  await syncContactToDittofeedBestEffort("contacts.archive", () =>
+    syncContactArchivedToDittofeed({
+      organizationId: existing.organizationId,
+      contact,
+      previousContact,
+    })
+  );
   return contact;
 }
 
 export async function restoreContact(id: string, status: string = "visitor") {
-  if (!VALID_ACTIVE_STATUSES.has(status)) {
+  const contactId = contactIdSchema.parse(id);
+  const parsedStatus = z.string().trim().min(1).parse(status);
+  const normalizedStatus = normalizeMemberStatusValue(parsedStatus);
+  if (!normalizedStatus || !VALID_ACTIVE_STATUSES.has(normalizedStatus)) {
     throw new Error("Invalid restore status");
   }
-  const existing = await requireContactAccess(id);
+  const existing = await requireContactAccess(contactId);
+  const [previousContact] = await db
+    .select()
+    .from(churchContacts)
+    .where(
+      and(eq(churchContacts.id, contactId), eq(churchContacts.organizationId, existing.organizationId))
+    )
+    .limit(1);
   const [contact] = await db
     .update(churchContacts)
     .set({
-      memberStatus: status as any,
+      memberStatus: normalizedStatus,
       updatedAt: new Date(),
-    } as any)
-    .where(and(eq(churchContacts.id, id), eq(churchContacts.organizationId, existing.organizationId)))
+    })
+    .where(
+      and(eq(churchContacts.id, contactId), eq(churchContacts.organizationId, existing.organizationId))
+    )
     .returning();
+  await syncContactToDittofeedBestEffort("contacts.restore", () =>
+    syncContactRestoredToDittofeed({
+      organizationId: existing.organizationId,
+      contact,
+      previousContact,
+    })
+  );
   return contact;
 }
 
 export async function deleteContact(id: string) {
+  const contactId = contactIdSchema.parse(id);
   const [existing] = await db
     .select({ organizationId: churchContacts.organizationId })
     .from(churchContacts)
-    .where(eq(churchContacts.id, id))
+    .where(eq(churchContacts.id, contactId))
     .limit(1);
   if (!existing) return;
   await requireOrgMembership(existing.organizationId);
   await db
     .delete(churchContacts)
-    .where(and(eq(churchContacts.id, id), eq(churchContacts.organizationId, existing.organizationId)));
+    .where(
+      and(eq(churchContacts.id, contactId), eq(churchContacts.organizationId, existing.organizationId))
+    );
 }
 
 export type ContactDuplicateCandidate = {
@@ -531,10 +731,30 @@ export type ContactDuplicateGroup = {
   contacts: ContactDuplicateCandidate[];
 };
 
-export async function findPotentialDuplicateContacts(orgId: string): Promise<ContactDuplicateGroup[]> {
-  await requireOrgMembership(orgId);
+async function fetchDuplicateGroupsByExpression(params: {
+  organizationId: string;
+  reason: ContactDuplicateGroup["reason"];
+  keyExpression: SQL<string>;
+  valueFilter: SQL<unknown>;
+}) {
+  const duplicateKeys = await db
+    .select({
+      key: params.keyExpression,
+      matchCount: count(),
+    })
+    .from(churchContacts)
+    .where(and(eq(churchContacts.organizationId, params.organizationId), params.valueFilter))
+    .groupBy(params.keyExpression)
+    .having(sql`count(*) > 1`)
+    .orderBy(desc(sql<number>`count(*)`), desc(sql<Date>`max(${churchContacts.updatedAt})`))
+    .limit(DUPLICATE_GROUP_LIMIT);
 
-  const rows = await db
+  const keys = duplicateKeys.map((row) => row.key).filter((key): key is string => Boolean(key));
+  if (keys.length === 0) {
+    return [] as ContactDuplicateGroup[];
+  }
+
+  const groupedRows = await db
     .select({
       id: churchContacts.id,
       firstName: churchContacts.firstName,
@@ -544,64 +764,80 @@ export async function findPotentialDuplicateContacts(orgId: string): Promise<Con
       memberStatus: churchContacts.memberStatus,
       createdAt: churchContacts.createdAt,
       updatedAt: churchContacts.updatedAt,
+      groupKey: params.keyExpression,
     })
     .from(churchContacts)
-    .where(eq(churchContacts.organizationId, orgId))
+    .where(
+      and(
+        eq(churchContacts.organizationId, params.organizationId),
+        params.valueFilter,
+        sql`${params.keyExpression} in (${sql.join(keys.map((key) => sql`${key}`), sql`, `)})`
+      )
+    )
     .orderBy(desc(churchContacts.updatedAt));
 
-  const emailMap = new Map<string, ContactDuplicateCandidate[]>();
-  const phoneMap = new Map<string, ContactDuplicateCandidate[]>();
-  const nameMap = new Map<string, ContactDuplicateCandidate[]>();
-
-  for (const row of rows) {
-    const entry: ContactDuplicateCandidate = {
-      ...row,
+  const groupsByKey = new Map<string, ContactDuplicateCandidate[]>();
+  for (const row of groupedRows) {
+    if (!row.groupKey) continue;
+    const candidate: ContactDuplicateCandidate = {
+      id: row.id,
+      firstName: row.firstName,
+      lastName: row.lastName,
+      email: row.email,
+      phone: row.phone,
       memberStatus: row.memberStatus,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
-    const email = normalizeEmail(row.email);
-    const phone = normalizePhone(row.phone);
-    const nameKey = `${row.firstName.trim().toLowerCase()}|${row.lastName.trim().toLowerCase()}`;
-
-    if (email) {
-      if (!emailMap.has(email)) emailMap.set(email, []);
-      emailMap.get(email)!.push(entry);
-    }
-
-    if (phone) {
-      if (!phoneMap.has(phone)) phoneMap.set(phone, []);
-      phoneMap.get(phone)!.push(entry);
-    }
-
-    if (nameKey !== "|") {
-      if (!nameMap.has(nameKey)) nameMap.set(nameKey, []);
-      nameMap.get(nameKey)!.push(entry);
-    }
+    const existing = groupsByKey.get(row.groupKey) ?? [];
+    existing.push(candidate);
+    groupsByKey.set(row.groupKey, existing);
   }
 
-  const groups: ContactDuplicateGroup[] = [];
-  const seen = new Set<string>();
-  const addGroups = (
-    source: Map<string, ContactDuplicateCandidate[]>,
-    reason: ContactDuplicateGroup["reason"]
-  ) => {
-    for (const [key, matches] of source.entries()) {
-      if (matches.length < 2) continue;
-      const dedupeKey = `${reason}:${key}`;
-      if (seen.has(dedupeKey)) continue;
-      seen.add(dedupeKey);
-      groups.push({
-        key,
-        reason,
-        contacts: matches,
-      });
-    }
-  };
+  return keys
+    .map((key) => ({
+      key,
+      reason: params.reason,
+      contacts: groupsByKey.get(key) ?? [],
+    }))
+    .filter((group) => group.contacts.length > 1);
+}
 
-  addGroups(emailMap, "email");
-  addGroups(phoneMap, "phone");
-  addGroups(nameMap, "name");
+export async function findPotentialDuplicateContacts(orgId: string): Promise<ContactDuplicateGroup[]> {
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
 
-  return groups.sort((a, b) => b.contacts.length - a.contacts.length);
+  const emailExpression = sql<string>`lower(trim(${churchContacts.email}))`;
+  const phoneExpression = sql<string>`regexp_replace(coalesce(${churchContacts.phone}, ''), '[^0-9]', '', 'g')`;
+  const nameExpression =
+    sql<string>`lower(trim(${churchContacts.firstName})) || '|' || lower(trim(${churchContacts.lastName}))`;
+
+  const [emailGroups, phoneGroups, nameGroups] = await Promise.all([
+    fetchDuplicateGroupsByExpression({
+      organizationId: parsedOrgId,
+      reason: "email",
+      keyExpression: emailExpression,
+      valueFilter: sql`${churchContacts.email} is not null and trim(${churchContacts.email}) <> ''`,
+    }),
+    fetchDuplicateGroupsByExpression({
+      organizationId: parsedOrgId,
+      reason: "phone",
+      keyExpression: phoneExpression,
+      valueFilter:
+        sql`${churchContacts.phone} is not null and regexp_replace(${churchContacts.phone}, '[^0-9]', '', 'g') <> ''`,
+    }),
+    fetchDuplicateGroupsByExpression({
+      organizationId: parsedOrgId,
+      reason: "name",
+      keyExpression: nameExpression,
+      valueFilter:
+        sql`trim(${churchContacts.firstName}) <> '' and trim(${churchContacts.lastName}) <> ''`,
+    }),
+  ]);
+
+  return [...emailGroups, ...phoneGroups, ...nameGroups].sort(
+    (a, b) => b.contacts.length - a.contacts.length
+  );
 }
 
 type MergeContactsInput = {
@@ -610,10 +846,11 @@ type MergeContactsInput = {
 };
 
 export async function mergeContacts(input: MergeContactsInput) {
-  const primaryAccess = await requireContactAccess(input.primaryContactId);
-  const duplicateAccess = await requireContactAccess(input.duplicateContactId);
+  const parsed = mergeContactsSchema.parse(input);
+  const primaryAccess = await requireContactAccess(parsed.primaryContactId);
+  const duplicateAccess = await requireContactAccess(parsed.duplicateContactId);
 
-  if (input.primaryContactId === input.duplicateContactId) {
+  if (parsed.primaryContactId === parsed.duplicateContactId) {
     throw new Error("Primary and duplicate contact must be different");
   }
   if (primaryAccess.organizationId !== duplicateAccess.organizationId) {
@@ -628,7 +865,7 @@ export async function mergeContacts(input: MergeContactsInput) {
       .from(churchContacts)
       .where(
         and(
-          eq(churchContacts.id, input.primaryContactId),
+          eq(churchContacts.id, parsed.primaryContactId),
           eq(churchContacts.organizationId, organizationId)
         )
       )
@@ -638,7 +875,7 @@ export async function mergeContacts(input: MergeContactsInput) {
       .from(churchContacts)
       .where(
         and(
-          eq(churchContacts.id, input.duplicateContactId),
+          eq(churchContacts.id, parsed.duplicateContactId),
           eq(churchContacts.organizationId, organizationId)
         )
       )
@@ -648,34 +885,38 @@ export async function mergeContacts(input: MergeContactsInput) {
       throw new Error("Contact not found");
     }
 
-    const mergedPreferredStatus =
-      primary.memberStatus === "inactive" && duplicate.memberStatus !== "inactive"
-        ? duplicate.memberStatus
-        : primary.memberStatus;
+    const mergedPreferredStatus = resolveMergedMemberStatus(
+      primary.memberStatus,
+      duplicate.memberStatus
+    );
 
     const [updatedPrimary] = await tx
       .update(churchContacts)
       .set({
         firstName: primary.firstName || duplicate.firstName,
         lastName: primary.lastName || duplicate.lastName,
-        email: normalizeEmail(primary.email) ?? normalizeEmail(duplicate.email),
-        phone: normalizePhone(primary.phone) ?? normalizePhone(duplicate.phone),
-        memberStatus: mergedPreferredStatus as any,
+        email:
+          normalizeContactEmail(primary.email) ??
+          normalizeContactEmail(duplicate.email),
+        phone:
+          normalizeContactPhone(primary.phone) ??
+          normalizeContactPhone(duplicate.phone),
+        memberStatus: mergedPreferredStatus,
         source: primary.source ?? duplicate.source,
         familyId: primary.familyId ?? duplicate.familyId,
         avatarUrl: primary.avatarUrl ?? duplicate.avatarUrl,
         dateOfBirth: primary.dateOfBirth ?? duplicate.dateOfBirth,
         firstVisitDate: primary.firstVisitDate ?? duplicate.firstVisitDate,
-        notes: mergeNotes(primary.notes, duplicate.notes),
+        notes: mergeContactNotes(primary.notes, duplicate.notes),
         updatedAt: new Date(),
-      } as any)
-      .where(eq(churchContacts.id, input.primaryContactId))
+      })
+      .where(eq(churchContacts.id, parsed.primaryContactId))
       .returning();
 
     const primaryTags = await tx
       .select({ tag: contactTags.tag })
       .from(contactTags)
-      .where(eq(contactTags.contactId, input.primaryContactId));
+      .where(eq(contactTags.contactId, parsed.primaryContactId));
     const primaryTagValues = Array.from(new Set(primaryTags.map((row) => row.tag)));
 
     if (primaryTagValues.length > 0) {
@@ -683,20 +924,20 @@ export async function mergeContacts(input: MergeContactsInput) {
         .delete(contactTags)
         .where(
           and(
-            eq(contactTags.contactId, input.duplicateContactId),
+            eq(contactTags.contactId, parsed.duplicateContactId),
             inArray(contactTags.tag, primaryTagValues)
           )
         );
     }
     await tx
       .update(contactTags)
-      .set({ contactId: input.primaryContactId })
-      .where(eq(contactTags.contactId, input.duplicateContactId));
+      .set({ contactId: parsed.primaryContactId })
+      .where(eq(contactTags.contactId, parsed.duplicateContactId));
 
     const primaryMinistryMemberships = await tx
       .select({ ministryId: ministryMembers.ministryId })
       .from(ministryMembers)
-      .where(eq(ministryMembers.contactId, input.primaryContactId));
+      .where(eq(ministryMembers.contactId, parsed.primaryContactId));
     const primaryMinistryIds = Array.from(
       new Set(primaryMinistryMemberships.map((row) => row.ministryId))
     );
@@ -706,7 +947,7 @@ export async function mergeContacts(input: MergeContactsInput) {
         .delete(ministryMembers)
         .where(
           and(
-            eq(ministryMembers.contactId, input.duplicateContactId),
+            eq(ministryMembers.contactId, parsed.duplicateContactId),
             inArray(ministryMembers.ministryId, primaryMinistryIds)
           )
         );
@@ -714,8 +955,8 @@ export async function mergeContacts(input: MergeContactsInput) {
 
     await tx
       .update(ministryMembers)
-      .set({ contactId: input.primaryContactId })
-      .where(eq(ministryMembers.contactId, input.duplicateContactId));
+      .set({ contactId: parsed.primaryContactId })
+      .where(eq(ministryMembers.contactId, parsed.duplicateContactId));
 
     const [primarySchedulingProfile] = await tx
       .select()
@@ -723,7 +964,7 @@ export async function mergeContacts(input: MergeContactsInput) {
       .where(
         and(
           eq(serviceSchedulingProfiles.organizationId, organizationId),
-          eq(serviceSchedulingProfiles.contactId, input.primaryContactId)
+          eq(serviceSchedulingProfiles.contactId, parsed.primaryContactId)
         )
       )
       .limit(1);
@@ -733,7 +974,7 @@ export async function mergeContacts(input: MergeContactsInput) {
       .where(
         and(
           eq(serviceSchedulingProfiles.organizationId, organizationId),
-          eq(serviceSchedulingProfiles.contactId, input.duplicateContactId)
+          eq(serviceSchedulingProfiles.contactId, parsed.duplicateContactId)
         )
       )
       .limit(1);
@@ -743,7 +984,7 @@ export async function mergeContacts(input: MergeContactsInput) {
         await tx
           .update(serviceSchedulingProfiles)
           .set({
-            contactId: input.primaryContactId,
+            contactId: parsed.primaryContactId,
             updatedAt: new Date(),
           })
           .where(eq(serviceSchedulingProfiles.id, duplicateSchedulingProfile.id));
@@ -768,7 +1009,10 @@ export async function mergeContacts(input: MergeContactsInput) {
               primarySchedulingProfile.isSchedulable || duplicateSchedulingProfile.isSchedulable,
             preferredRoles: mergedPreferredRoles,
             availabilitySlots: mergedAvailability,
-            notes: mergeNotes(primarySchedulingProfile.notes, duplicateSchedulingProfile.notes),
+            notes: mergeContactNotes(
+              primarySchedulingProfile.notes,
+              duplicateSchedulingProfile.notes
+            ),
             updatedAt: new Date(),
           })
           .where(eq(serviceSchedulingProfiles.id, primarySchedulingProfile.id));
@@ -784,7 +1028,7 @@ export async function mergeContacts(input: MergeContactsInput) {
       .where(
         and(
           eq(volunteers.organizationId, organizationId),
-          eq(volunteers.contactId, input.primaryContactId)
+          eq(volunteers.contactId, parsed.primaryContactId)
         )
       )
       .orderBy(volunteers.joinedAt);
@@ -794,7 +1038,7 @@ export async function mergeContacts(input: MergeContactsInput) {
       .where(
         and(
           eq(volunteers.organizationId, organizationId),
-          eq(volunteers.contactId, input.duplicateContactId)
+          eq(volunteers.contactId, parsed.duplicateContactId)
         )
       )
       .orderBy(volunteers.joinedAt);
@@ -821,7 +1065,7 @@ export async function mergeContacts(input: MergeContactsInput) {
       const [refreshedAnchor] = await tx
         .update(volunteers)
         .set({
-          contactId: input.primaryContactId,
+          contactId: parsed.primaryContactId,
           totalHours,
         })
         .where(eq(volunteers.id, anchorVolunteer.id))
@@ -834,126 +1078,137 @@ export async function mergeContacts(input: MergeContactsInput) {
 
     await tx
       .update(donations)
-      .set({ contactId: input.primaryContactId })
+      .set({ contactId: parsed.primaryContactId })
       .where(
-        and(eq(donations.organizationId, organizationId), eq(donations.contactId, input.duplicateContactId))
+        and(
+          eq(donations.organizationId, organizationId),
+          eq(donations.contactId, parsed.duplicateContactId)
+        )
       );
     await tx
       .update(pledges)
-      .set({ contactId: input.primaryContactId })
+      .set({ contactId: parsed.primaryContactId })
       .where(
-        and(eq(pledges.organizationId, organizationId), eq(pledges.contactId, input.duplicateContactId))
+        and(
+          eq(pledges.organizationId, organizationId),
+          eq(pledges.contactId, parsed.duplicateContactId)
+        )
       );
     await tx
       .update(appointments)
-      .set({ contactId: input.primaryContactId })
+      .set({ contactId: parsed.primaryContactId })
       .where(
         and(
           eq(appointments.organizationId, organizationId),
-          eq(appointments.contactId, input.duplicateContactId)
+          eq(appointments.contactId, parsed.duplicateContactId)
         )
       );
     await tx
       .update(prayerRequests)
-      .set({ contactId: input.primaryContactId })
+      .set({ contactId: parsed.primaryContactId })
       .where(
         and(
           eq(prayerRequests.organizationId, organizationId),
-          eq(prayerRequests.contactId, input.duplicateContactId)
+          eq(prayerRequests.contactId, parsed.duplicateContactId)
         )
       );
     await tx
       .update(pipelineItems)
-      .set({ contactId: input.primaryContactId, updatedAt: new Date() })
+      .set({ contactId: parsed.primaryContactId, updatedAt: new Date() })
       .where(
         and(
           eq(pipelineItems.organizationId, organizationId),
-          eq(pipelineItems.contactId, input.duplicateContactId)
+          eq(pipelineItems.contactId, parsed.duplicateContactId)
         )
       );
     await tx
       .update(conversations)
-      .set({ contactId: input.primaryContactId, updatedAt: new Date() })
+      .set({ contactId: parsed.primaryContactId, updatedAt: new Date() })
       .where(
         and(
           eq(conversations.organizationId, organizationId),
-          eq(conversations.contactId, input.duplicateContactId)
+          eq(conversations.contactId, parsed.duplicateContactId)
         )
       );
     await tx
       .update(ministries)
-      .set({ leaderId: input.primaryContactId, updatedAt: new Date() })
-      .where(
-        and(eq(ministries.organizationId, organizationId), eq(ministries.leaderId, input.duplicateContactId))
-      );
-    await tx
-      .update(graceSessions)
-      .set({ contactId: input.primaryContactId, updatedAt: new Date() })
+      .set({ leaderId: parsed.primaryContactId, updatedAt: new Date() })
       .where(
         and(
-          eq(graceSessions.organizationId, organizationId),
-          eq(graceSessions.contactId, input.duplicateContactId)
+          eq(ministries.organizationId, organizationId),
+          eq(ministries.leaderId, parsed.duplicateContactId)
         )
       );
     await tx
       .update(graceSessions)
-      .set({ matchedContactId: input.primaryContactId, updatedAt: new Date() })
+      .set({ contactId: parsed.primaryContactId, updatedAt: new Date() })
       .where(
         and(
           eq(graceSessions.organizationId, organizationId),
-          eq(graceSessions.matchedContactId, input.duplicateContactId)
+          eq(graceSessions.contactId, parsed.duplicateContactId)
+        )
+      );
+    await tx
+      .update(graceSessions)
+      .set({ matchedContactId: parsed.primaryContactId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(graceSessions.organizationId, organizationId),
+          eq(graceSessions.matchedContactId, parsed.duplicateContactId)
         )
       );
     await tx
       .update(graceMessages)
-      .set({ contactId: input.primaryContactId })
+      .set({ contactId: parsed.primaryContactId })
       .where(
         and(
           eq(graceMessages.organizationId, organizationId),
-          eq(graceMessages.contactId, input.duplicateContactId)
+          eq(graceMessages.contactId, parsed.duplicateContactId)
         )
       );
     await tx
       .update(graceCalls)
-      .set({ contactId: input.primaryContactId })
-      .where(and(eq(graceCalls.organizationId, organizationId), eq(graceCalls.contactId, input.duplicateContactId)));
+      .set({ contactId: parsed.primaryContactId })
+      .where(
+        and(eq(graceCalls.organizationId, organizationId), eq(graceCalls.contactId, parsed.duplicateContactId))
+      );
     await tx
       .update(graceMemory)
-      .set({ contactId: input.primaryContactId })
+      .set({ contactId: parsed.primaryContactId })
       .where(
-        and(eq(graceMemory.organizationId, organizationId), eq(graceMemory.contactId, input.duplicateContactId))
+        and(eq(graceMemory.organizationId, organizationId), eq(graceMemory.contactId, parsed.duplicateContactId))
       );
     await tx
       .update(graceHandoffs)
-      .set({ contactId: input.primaryContactId })
+      .set({ contactId: parsed.primaryContactId })
       .where(
-        and(eq(graceHandoffs.organizationId, organizationId), eq(graceHandoffs.contactId, input.duplicateContactId))
+        and(eq(graceHandoffs.organizationId, organizationId), eq(graceHandoffs.contactId, parsed.duplicateContactId))
       );
     await tx
       .update(graceFollowupProposals)
-      .set({ contactId: input.primaryContactId })
+      .set({ contactId: parsed.primaryContactId })
       .where(
         and(
           eq(graceFollowupProposals.organizationId, organizationId),
-          eq(graceFollowupProposals.contactId, input.duplicateContactId)
+          eq(graceFollowupProposals.contactId, parsed.duplicateContactId)
         )
       );
     await tx
       .update(graceContactMatchAudit)
-      .set({ matchedContactId: input.primaryContactId })
+      .set({ matchedContactId: parsed.primaryContactId })
       .where(
         and(
           eq(graceContactMatchAudit.organizationId, organizationId),
-          eq(graceContactMatchAudit.matchedContactId, input.duplicateContactId)
+          eq(graceContactMatchAudit.matchedContactId, parsed.duplicateContactId)
         )
       );
     await tx
       .update(graceContactMatchAudit)
-      .set({ createdContactId: input.primaryContactId })
+      .set({ createdContactId: parsed.primaryContactId })
       .where(
         and(
           eq(graceContactMatchAudit.organizationId, organizationId),
-          eq(graceContactMatchAudit.createdContactId, input.duplicateContactId)
+          eq(graceContactMatchAudit.createdContactId, parsed.duplicateContactId)
         )
       );
 
@@ -961,23 +1216,24 @@ export async function mergeContacts(input: MergeContactsInput) {
       .delete(churchContacts)
       .where(
         and(
-          eq(churchContacts.id, input.duplicateContactId),
+          eq(churchContacts.id, parsed.duplicateContactId),
           eq(churchContacts.organizationId, organizationId)
         )
       );
 
     return {
       contact: updatedPrimary,
-      mergedFromContactId: input.duplicateContactId,
+      mergedFromContactId: parsed.duplicateContactId,
     };
   });
 }
 
 export async function getContactCount(orgId: string) {
-  await requireOrgMembership(orgId);
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
   const [result] = await db
     .select({ count: sql<number>`count(*)` })
     .from(churchContacts)
-    .where(eq(churchContacts.organizationId, orgId));
+    .where(eq(churchContacts.organizationId, parsedOrgId));
   return result?.count ?? 0;
 }

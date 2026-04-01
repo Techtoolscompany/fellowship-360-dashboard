@@ -72,7 +72,7 @@ export const POST = withSuperAdminAuthRequired(async (req) => {
       { status: 500 }
     );
   }
-});
+}, "manage_plans");
 
 export const PATCH = withSuperAdminAuthRequired(async (req) => {
   try {
@@ -94,7 +94,7 @@ export const PATCH = withSuperAdminAuthRequired(async (req) => {
       { status: 500 }
     );
   }
-});
+}, "manage_plans");
 
 export const DELETE = withSuperAdminAuthRequired(async (req) => {
   try {
@@ -118,4 +118,4 @@ export const DELETE = withSuperAdminAuthRequired(async (req) => {
       { status: 500 }
     );
   }
-}); 
+}, "manage_plans");

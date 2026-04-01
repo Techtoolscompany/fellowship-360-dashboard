@@ -4,21 +4,82 @@ import { db } from "@/db";
 import { events } from "@/db/schema";
 import { eq, desc, and, gte, lte } from "drizzle-orm";
 import { requireOrgMembership } from "./utils";
+import * as z from "zod";
+
+const eventDateSchema = z.coerce.date();
+
+const getEventsSchema = z.object({
+  orgId: z.string().trim().min(1),
+  dateRange: z
+    .object({
+      start: eventDateSchema,
+      end: eventDateSchema,
+    })
+    .optional(),
+});
+
+const createEventSchema = z
+  .object({
+    title: z.string().trim().min(1),
+    description: z.string().trim().optional(),
+    startDate: eventDateSchema,
+    endDate: eventDateSchema.optional(),
+    location: z.string().trim().optional(),
+    isRecurring: z.boolean().optional(),
+    recurrenceRule: z.string().trim().optional(),
+    organizationId: z.string().trim().min(1),
+  })
+  .superRefine((value, ctx) => {
+    if (value.endDate && value.endDate.getTime() < value.startDate.getTime()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "endDate cannot be before startDate",
+        path: ["endDate"],
+      });
+    }
+  });
+
+const updateEventSchema = z
+  .object({
+    title: z.string().trim().min(1).optional(),
+    description: z.string().trim().nullable().optional(),
+    startDate: eventDateSchema.optional(),
+    endDate: eventDateSchema.nullable().optional(),
+    location: z.string().trim().nullable().optional(),
+    isRecurring: z.boolean().optional(),
+    recurrenceRule: z.string().trim().nullable().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.startDate &&
+      value.endDate &&
+      value.endDate.getTime() < value.startDate.getTime()
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "endDate cannot be before startDate",
+        path: ["endDate"],
+      });
+    }
+  });
+
+const eventIdSchema = z.string().trim().min(1);
 
 export async function getEvents(
   orgId: string,
   dateRange?: { start: Date; end: Date }
 ) {
-  await requireOrgMembership(orgId);
-  if (dateRange) {
+  const parsed = getEventsSchema.parse({ orgId, dateRange });
+  await requireOrgMembership(parsed.orgId);
+  if (parsed.dateRange) {
     return await db
       .select()
       .from(events)
       .where(
         and(
-          eq(events.organizationId, orgId),
-          gte(events.startDate, dateRange.start),
-          lte(events.startDate, dateRange.end)
+          eq(events.organizationId, parsed.orgId),
+          gte(events.startDate, parsed.dateRange.start),
+          lte(events.startDate, parsed.dateRange.end)
         )
       )
       .orderBy(events.startDate);
@@ -26,7 +87,7 @@ export async function getEvents(
   return await db
     .select()
     .from(events)
-    .where(eq(events.organizationId, orgId))
+    .where(eq(events.organizationId, parsed.orgId))
     .orderBy(events.startDate);
 }
 
@@ -40,18 +101,19 @@ export async function createEvent(data: {
   recurrenceRule?: string;
   organizationId: string;
 }) {
-  await requireOrgMembership(data.organizationId);
+  const parsed = createEventSchema.parse(data);
+  await requireOrgMembership(parsed.organizationId);
   const [event] = await db
     .insert(events)
     .values({
-      title: data.title,
-      description: data.description ?? null,
-      startDate: data.startDate,
-      endDate: data.endDate ?? null,
-      location: data.location ?? null,
-      isRecurring: data.isRecurring ?? false,
-      recurrenceRule: data.recurrenceRule ?? null,
-      organizationId: data.organizationId,
+      title: parsed.title,
+      description: parsed.description ?? null,
+      startDate: parsed.startDate,
+      endDate: parsed.endDate ?? null,
+      location: parsed.location ?? null,
+      isRecurring: parsed.isRecurring ?? false,
+      recurrenceRule: parsed.recurrenceRule ?? null,
+      organizationId: parsed.organizationId,
     })
     .returning();
   return event;
@@ -69,31 +131,34 @@ export async function updateEvent(
     recurrenceRule: string | null;
   }>
 ) {
+  const eventId = eventIdSchema.parse(id);
+  const parsed = updateEventSchema.parse(data);
   const [existing] = await db
     .select({ organizationId: events.organizationId })
     .from(events)
-    .where(eq(events.id, id))
+    .where(eq(events.id, eventId))
     .limit(1);
   if (!existing) throw new Error("Event not found");
   await requireOrgMembership(existing.organizationId);
 
   const [event] = await db
     .update(events)
-    .set(data)
-    .where(and(eq(events.id, id), eq(events.organizationId, existing.organizationId)))
+    .set(parsed)
+    .where(and(eq(events.id, eventId), eq(events.organizationId, existing.organizationId)))
     .returning();
   return event;
 }
 
 export async function deleteEvent(id: string) {
+  const eventId = eventIdSchema.parse(id);
   const [existing] = await db
     .select({ organizationId: events.organizationId })
     .from(events)
-    .where(eq(events.id, id))
+    .where(eq(events.id, eventId))
     .limit(1);
   if (!existing) return;
   await requireOrgMembership(existing.organizationId);
   await db
     .delete(events)
-    .where(and(eq(events.id, id), eq(events.organizationId, existing.organizationId)));
+    .where(and(eq(events.id, eventId), eq(events.organizationId, existing.organizationId)));
 }

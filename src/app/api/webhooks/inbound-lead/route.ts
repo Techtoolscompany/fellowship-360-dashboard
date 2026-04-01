@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { organizations } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { rateLimitKeyed, verifyWebhookSignature } from "@/lib/grace/channels/webhooks";
+import { getClientIp } from "@/lib/security/request";
 
 /**
  * Public webhook to ingest leads into the Grace AI pipeline.
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid signature." }, { status: 401 });
     }
 
-    const key = `${req.headers.get("x-forwarded-for") || "unknown"}:inbound-lead`;
+    const key = `${getClientIp(req)}:inbound-lead`;
     if (!(await rateLimitKeyed(key, 60, 60_000))) {
       return NextResponse.json({ error: "Rate limited" }, { status: 429 });
     }

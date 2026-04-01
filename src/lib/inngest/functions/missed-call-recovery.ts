@@ -11,8 +11,8 @@ import {
   messages,
   tasks,
 } from "@/db/schema";
-import { sendTextBeeSms } from "@/lib/communications/textbee-client";
 import { getOrCreateGraceSession } from "@/lib/grace/runtime";
+import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 import { inngest } from "../client";
 import { INNGEST_EVENTS } from "../events";
 import { INNGEST_RETRY_PROFILES } from "../policy";
@@ -276,10 +276,15 @@ export const missedCallRecoverySequence = inngest.createFunction(
 
       if (prepared.recipient) {
         try {
-          await sendTextBeeSms({
-            receivers: [prepared.recipient],
-            smsBody: firstRecoveryMessage,
+          const sendResult = await sendOrganizationSms({
+            organizationId: prepared.organizationId,
+            to: prepared.recipient,
+            message: firstRecoveryMessage,
+            idempotencyKey: `missed-call-recovery:${prepared.sessionId}:step1`,
           });
+          if (!sendResult.success) {
+            throw new Error(sendResult.error ?? "SMS delivery failed");
+          }
           status = "sent";
         } catch (error) {
           status = "pending";
@@ -377,10 +382,15 @@ export const missedCallRecoverySequence = inngest.createFunction(
 
       if (prepared.recipient) {
         try {
-          await sendTextBeeSms({
-            receivers: [prepared.recipient],
-            smsBody: secondRecoveryMessage,
+          const sendResult = await sendOrganizationSms({
+            organizationId: prepared.organizationId,
+            to: prepared.recipient,
+            message: secondRecoveryMessage,
+            idempotencyKey: `missed-call-recovery:${prepared.sessionId}:step2`,
           });
+          if (!sendResult.success) {
+            throw new Error(sendResult.error ?? "Retry SMS failed");
+          }
           retryStatus = "sent";
         } catch (error) {
           retryStatus = "pending";

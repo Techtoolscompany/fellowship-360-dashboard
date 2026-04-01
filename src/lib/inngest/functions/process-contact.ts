@@ -5,6 +5,10 @@ import { churchContacts } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { INNGEST_EVENTS } from "../events";
 import { INNGEST_RETRY_PROFILES } from "../policy";
+import {
+  syncContactToDittofeedBestEffort,
+  syncContactUpdatedToDittofeed,
+} from "@/lib/dittofeed/contacts";
 
 export const processContactCreated = inngest.createFunction(
   {
@@ -62,10 +66,25 @@ export const processContactCreated = inngest.createFunction(
       }
 
       if (updated) {
+        updates.updatedAt = new Date();
         await db
           .update(churchContacts)
           .set(updates)
           .where(eq(churchContacts.id, contactId));
+
+        await syncContactToDittofeedBestEffort("process-contact.normalize", () =>
+          syncContactUpdatedToDittofeed({
+            organizationId,
+            contact: {
+              ...contact,
+              ...updates,
+            },
+            previousContact: contact,
+            extraProperties: {
+              normalizationApplied: true,
+            },
+          })
+        );
       }
       
       return { updated, updates };

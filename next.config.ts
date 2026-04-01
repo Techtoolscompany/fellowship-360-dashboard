@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 import { createMDX } from "fumadocs-mdx/next";
 import { withSentryConfig } from "@sentry/nextjs";
+import { resolveServerActionAllowedOrigins } from "./src/lib/security/production-readiness";
 
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -15,6 +16,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  experimental: {
+    serverActions: {
+      allowedOrigins: resolveServerActionAllowedOrigins(),
+    },
+  },
   async headers() {
     return [
       {
@@ -68,4 +74,3 @@ export default process.env.NEXT_PUBLIC_SENTRY_DSN
       automaticVercelMonitors: true,
     })
   : mdxConfig;
-

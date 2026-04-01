@@ -17,6 +17,7 @@ import { getOrCreateGraceSession, runGraceMessage } from "@/lib/grace/runtime";
 import { graceFlags } from "@/lib/grace/flags";
 import { rateLimitKeyed, verifyWebhookSignature } from "@/lib/grace/channels/webhooks";
 import { resolveProviderWebhookSecret } from "@/lib/grace/providers/resolver";
+import { getClientIp } from "@/lib/security/request";
 
 function parseDate(value: string | undefined): Date | null {
   if (!value) return null;
@@ -237,7 +238,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
-  const key = `${req.headers.get("x-forwarded-for") || "unknown"}:voice`;
+  const key = `${getClientIp(req)}:voice`;
   if (!(await rateLimitKeyed(key, 120, 60_000))) {
     return NextResponse.json({ error: "Rate limited" }, { status: 429 });
   }

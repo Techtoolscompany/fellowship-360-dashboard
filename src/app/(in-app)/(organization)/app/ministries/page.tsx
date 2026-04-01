@@ -1,10 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,226 +15,202 @@ import { getMinistries, deleteMinistry } from "@/app/actions/ministries";
 import { CreateMinistryDialog } from "@/components/dialogs/CreateMinistryDialog";
 import { EditMinistryDialog } from "@/components/dialogs/EditMinistryDialog";
 import { MinistryMembersSheet } from "@/components/sheets/MinistryMembersSheet";
+import { Loader2, Search } from "lucide-react";
 
-const getGradient = (index: number) => {
-  const colors = [
-    { from: "#4f46e5", to: "#7c3aed" }, // Indigo
-    { from: "#059669", to: "#10b981" }, // Emerald
-    { from: "#ea580c", to: "#f97316" }, // Orange
-    { from: "#0284c7", to: "#0ea5e9" }, // Sky
-  ];
-  const color = colors[index % colors.length];
-  return `linear-gradient(135deg, ${color.from} 0%, ${color.to} 100%)`;
-};
-
-const getIcon = (index: number) => {
-  const icons = ["school", "public", "music_note", "auto_stories", "groups", "diversity_1", "child_care", "language"];
-  return icons[index % icons.length];
-};
-
-function MinistryCard({ ministry, index, onEdit, onDelete, onViewMembers }: { ministry: any; index: number; onEdit: (m: any) => void; onDelete: (id: string) => void; onViewMembers: (m: any) => void }) {
-  const gradientStyle = { background: getGradient(index) };
-  const icon = getIcon(index);
-
-  return (
-    <div className="group bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden hover:shadow-2xl transition-all hover:-translate-y-1 flex flex-col h-full">
-      <div className="h-48 overflow-hidden relative flex-shrink-0">
-        <div 
-          className="absolute inset-0 bg-cover bg-center group-hover:scale-110 transition-transform duration-500" 
-          style={gradientStyle}
-        ></div>
-        <div className="absolute top-4 left-4">
-          <span 
-            className="bg-[#84cc16] text-slate-950 text-[10px] font-black px-2 py-1 rounded uppercase tracking-tighter"
-          >
-            {ministry.ministry.meetingDay || "Active"}
-          </span>
-        </div>
-        <div className="absolute top-4 right-4 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm rounded-full px-2.5 py-1 flex items-center gap-1.5 shadow-sm">
-          <span className="material-symbols-outlined text-[12px] text-slate-700 dark:text-slate-300">group</span>
-          <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{ministry.memberCount}</span>
-        </div>
-      </div>
-      
-      <div className="p-6 space-y-4 flex flex-col flex-1">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-2 text-[#84cc16]">
-            <span className="material-symbols-outlined text-xl">{icon}</span>
-            <h4 className="font-bold text-lg text-slate-900 dark:text-white line-clamp-1">{ministry.ministry.name}</h4>
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="h-8 w-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg">
-                <span className="material-symbols-outlined text-base">more_horiz</span>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40 font-display">
-              <DropdownMenuItem onClick={() => onViewMembers(ministry.ministry)}>View Members</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onEdit(ministry.ministry)}>Edit Ministry</DropdownMenuItem>
-              <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={() => onDelete(ministry.ministry.id)}>Delete</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        
-        <p className="text-slate-500 dark:text-slate-400 text-sm line-clamp-2 flex-1">
-          {ministry.ministry.description || "Building foundations of faith for the next generation through fun, fellowship, and deep study."}
-        </p>
-        
-        {ministry.ministry.meetingLocation && (
-          <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-            <span className="material-symbols-outlined text-[14px]">location_on</span>
-            <span className="truncate">{ministry.ministry.meetingLocation}</span>
-          </div>
-        )}
-
-        <button 
-          onClick={() => onViewMembers(ministry.ministry)}
-          className="w-full mt-auto py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-bold group-hover:bg-[#84cc16] group-hover:text-slate-950 group-hover:border-[#84cc16] transition-all"
-        >
-          Learn More
-        </button>
-      </div>
-    </div>
+function formatMeetingSchedule(ministry: {
+  meetingDay?: string | null;
+  meetingTime?: string | null;
+  meetingLocation?: string | null;
+}) {
+  const pieces = [ministry.meetingDay, ministry.meetingTime, ministry.meetingLocation].filter(
+    Boolean
   );
+  return pieces.length ? pieces.join(" • ") : "Schedule not set";
 }
 
 export default function MinistriesPage() {
   const { organization } = useOrganization();
   const orgId = organization?.id;
   const [searchQuery, setSearchQuery] = useState("");
-
   const [showAddModal, setShowAddModal] = useState(false);
   const [editMinistryState, setEditMinistryState] = useState<any>(null);
   const [viewMembersMinistry, setViewMembersMinistry] = useState<any>(null);
 
-  const { data: ministriesList = [], error, mutate, isLoading: loading } = useSWR<any[]>(
-    orgId ? ["ministries", orgId] : null,
-    () => getMinistries(orgId!)
+  const {
+    data: ministriesList = [],
+    isLoading: loading,
+    mutate,
+  } = useSWR(orgId ? ["ministries", orgId] : null, () => getMinistries(orgId!));
+
+  const filteredMinistries = useMemo(() => {
+    if (!searchQuery.trim()) return ministriesList;
+    const query = searchQuery.toLowerCase();
+    return ministriesList.filter((row: any) => {
+      const name = row.ministry.name?.toLowerCase() ?? "";
+      const description = row.ministry.description?.toLowerCase() ?? "";
+      return name.includes(query) || description.includes(query);
+    });
+  }, [ministriesList, searchQuery]);
+
+  const totalMinistries = ministriesList.length;
+  const totalMembers = ministriesList.reduce(
+    (sum: number, row: any) => sum + Number(row.memberCount ?? 0),
+    0
   );
+  const assignedLeaderCount = ministriesList.filter(
+    (row: any) => Boolean(row.ministry.leaderId)
+  ).length;
+  const needsLeaderCount = totalMinistries - assignedLeaderCount;
 
   const handleDelete = async (id: string) => {
-    if (confirm("Are you sure you want to delete this ministry?")) {
+    if (!confirm("Delete this ministry? This removes the ministry and member assignments.")) {
+      return;
+    }
+    try {
       await deleteMinistry(id);
+      toast.success("Ministry deleted");
       await mutate();
+    } catch (error) {
+      console.error("Failed to delete ministry:", error);
+      toast.error("Failed to delete ministry");
     }
   };
 
-  const filteredMinistries = ministriesList.filter((m: any) => {
-    if (!searchQuery) return true;
-    return m.ministry.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-           (m.ministry.description || "").toLowerCase().includes(searchQuery.toLowerCase());
-  });
-
   return (
-    <div className="flex-1 flex flex-col overflow-y-auto bg-[#f6f7f8] dark:bg-[#101922] font-display -m-4 sm:-m-8 pb-10">
-      {/* Header */}
-      <header className="h-20 flex items-center justify-between px-8 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-10">
-        <div className="flex items-center gap-2">
-          <span className="material-symbols-outlined text-slate-400">search</span>
-          <input 
-            className="border-none bg-transparent focus:ring-0 text-sm w-64 placeholder-slate-400 p-0" 
-            placeholder="Find a ministry or community..." 
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        <div className="flex items-center gap-4">
-           {/* Add Ministry Button placed in header */}
-           <CreateMinistryDialog open={showAddModal} onOpenChange={setShowAddModal} onSuccess={() => void mutate()}>
-            <button className="bg-[#84cc16] hover:bg-[#84cc16]/90 text-slate-950 font-bold px-4 py-2 rounded-xl transition-all hidden sm:flex items-center gap-2 text-sm">
-              <span className="material-symbols-outlined text-sm">add</span>Add Ministry
+    <div className="flex flex-col gap-6 pb-8">
+      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-100 p-8 dark:border-slate-800 dark:from-slate-900 dark:to-slate-950">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Service Operations
+            </p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 dark:text-white">
+              Ministries
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Track ministry structure, leaders, and member coverage.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="inline-flex items-center gap-2 rounded-lg bg-lime-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-sm transition-colors hover:bg-lime-400"
+            >
+              <span className="material-symbols-outlined text-lg">add</span>
+              Add Ministry
             </button>
-          </CreateMinistryDialog>
+          </div>
         </div>
-      </header>
+      </section>
 
-      <div className="p-8 max-w-7xl mx-auto w-full space-y-12">
-        {/* Hero Section */}
-        <section className="relative h-[400px] rounded-3xl overflow-hidden group">
-          <div className="absolute inset-0 bg-slate-900 transition-transform duration-700" 
-               style={{ backgroundImage: "url('https://images.unsplash.com/photo-1511632765486-a01980e01a18?q=80&w=2070&auto=format&fit=crop')", backgroundSize: "cover", backgroundPosition: "center" }}></div>
-          <div className="absolute inset-0 bg-gradient-to-r from-slate-950/80 via-slate-950/40 to-transparent"></div>
-          <div className="absolute inset-0 p-12 flex flex-col justify-center max-w-2xl gap-4">
-            <span className="inline-block px-3 py-1 bg-[#84cc16] text-slate-950 text-xs font-bold rounded-full w-max uppercase tracking-wider">Featured Outreach</span>
-            <h2 className="text-4xl md:text-5xl font-black text-white leading-tight">Make an impact in your local community.</h2>
-            <p className="text-slate-200 text-lg">Join our &quot;Harvest Project&quot; this Saturday. We&apos;re providing over 500 meals to families in need and looking for hands to help.</p>
-            <div className="flex gap-4 mt-4">
-              <button className="bg-[#84cc16] hover:bg-[#84cc16]/90 text-slate-950 font-bold px-8 py-3 rounded-xl transition-all flex items-center gap-2">
-                Register Now <span className="material-symbols-outlined">arrow_forward</span>
-              </button>
-              <button className="bg-white/10 hover:bg-white/20 backdrop-blur-md text-white border border-white/20 font-bold px-8 py-3 rounded-xl transition-all">
-                View Details
-              </button>
-            </div>
-          </div>
-        </section>
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Total Ministries" value={loading ? "…" : String(totalMinistries)} />
+        <MetricCard label="Assigned Leaders" value={loading ? "…" : String(assignedLeaderCount)} />
+        <MetricCard label="Total Members" value={loading ? "…" : String(totalMembers)} />
+        <MetricCard
+          label="Needs Leader"
+          value={loading ? "…" : String(needsLeaderCount)}
+          tone={needsLeaderCount > 0 ? "warning" : "default"}
+        />
+      </section>
 
-        {/* Filter & Categories Header */}
-        <section className="space-y-8">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div>
-              <h3 className="text-2xl font-bold text-slate-900 dark:text-white">Discover Ministries</h3>
-              <p className="text-slate-500 dark:text-slate-400">Find where you belong in our growing church family.</p>
-            </div>
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-              <button className="px-5 py-2 rounded-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-sm font-bold border border-slate-900 dark:border-white shrink-0">All Areas</button>
-              <button className="px-5 py-2 rounded-full bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-medium border border-slate-200 dark:border-slate-700 shrink-0 hover:border-[#84cc16] transition-colors">Adults</button>
-              <button className="px-5 py-2 rounded-full bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-medium border border-slate-200 dark:border-slate-700 shrink-0 hover:border-[#84cc16] transition-colors">Students</button>
-              <button className="px-5 py-2 rounded-full bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-medium border border-slate-200 dark:border-slate-700 shrink-0 hover:border-[#84cc16] transition-colors">Creative</button>
-              <button className="px-5 py-2 rounded-full bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-medium border border-slate-200 dark:border-slate-700 shrink-0 hover:border-[#84cc16] transition-colors">Compassion</button>
-            </div>
+      <section className="rounded-3xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/60 shadow-sm overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-slate-200 p-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white">Ministry Directory</h2>
+          <div className="relative w-full sm:w-80">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-10 pr-4 text-sm outline-none focus:border-lime-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              placeholder="Search ministries..."
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
           </div>
-          
-          {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-              {[1, 2, 3, 4].map(i => (
-                <Skeleton key={i} className="h-80 w-full rounded-3xl bg-slate-200 dark:bg-slate-800" />
-              ))}
-            </div>
-          ) : filteredMinistries.length === 0 ? (
-            <div className="text-center py-20 bg-white dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-700">
-              <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <span className="material-symbols-outlined text-3xl text-slate-400">group</span>
+        </div>
+
+        {loading ? (
+          <div className="py-20 text-center">
+            <Loader2 className="mx-auto h-7 w-7 animate-spin text-lime-500" />
+          </div>
+        ) : filteredMinistries.length === 0 ? (
+          <div className="py-16 text-center text-sm text-slate-500">
+            No ministries match your search.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
+            {filteredMinistries.map((row: any) => (
+              <div
+                key={row.ministry.id}
+                className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+              >
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                      {row.ministry.name}
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {formatMeetingSchedule(row.ministry)}
+                    </p>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="rounded-md p-1 text-slate-400 transition-colors hover:text-lime-500">
+                        <span className="material-symbols-outlined">more_horiz</span>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuItem onClick={() => setViewMembersMinistry(row.ministry)}>
+                        View Members
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setEditMinistryState(row.ministry)}>
+                        Edit Ministry
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="text-red-600 focus:text-red-600"
+                        onClick={() => handleDelete(row.ministry.id)}
+                      >
+                        Delete Ministry
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                <p className="line-clamp-2 text-sm text-slate-600 dark:text-slate-300">
+                  {row.ministry.description || "No description added yet."}
+                </p>
+
+                <div className="mt-4 flex items-center justify-between text-xs">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    {Number(row.memberCount ?? 0)} members
+                  </span>
+                  <span
+                    className={`rounded-full px-2.5 py-1 font-semibold ${
+                      row.ministry.leaderId
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                        : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                    }`}
+                  >
+                    {row.ministry.leaderId ? "Leader assigned" : "Leader needed"}
+                  </span>
+                </div>
+
+                <Button
+                  variant="outline"
+                  className="mt-4 w-full"
+                  onClick={() => setViewMembersMinistry(row.ministry)}
+                >
+                  Manage Members
+                </Button>
               </div>
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">No ministries found</h3>
-              <p className="text-slate-500 max-w-md mx-auto mb-6">You haven&apos;t created any ministries yet. Click the button below to get started building your community.</p>
-              <Button onClick={() => setShowAddModal(true)} className="bg-[#84cc16] text-slate-950 hover:bg-[#84cc16]/90 font-bold rounded-xl">
-                Create First Ministry
-              </Button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-              {filteredMinistries.map((ministry, i) => (
-                <MinistryCard 
-                  key={ministry.ministry.id} 
-                  ministry={ministry} 
-                  index={i} 
-                  onEdit={setEditMinistryState}
-                  onDelete={handleDelete}
-                  onViewMembers={setViewMembersMinistry}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* CTA Section from Stitch */}
-        {!loading && ministriesList.length > 0 && (
-          <section className="bg-slate-900 dark:bg-[#84cc16]/10 rounded-3xl p-12 text-center space-y-6">
-            <h3 className="text-3xl font-bold text-white dark:text-[#84cc16]">Not sure where you fit in?</h3>
-            <p className="text-slate-400 dark:text-slate-300 max-w-xl mx-auto">Take our 2-minute &quot;Community Connector&quot; quiz to find the ministry that matches your unique spiritual gifts and passions.</p>
-            <button className="bg-[#84cc16] text-slate-950 font-bold px-10 py-4 rounded-xl hover:bg-[#84cc16]/90 transition-all shadow-xl shadow-[#84cc16]/10">
-              Take the Quiz
-            </button>
-          </section>
+            ))}
+          </div>
         )}
-      </div>
+      </section>
 
-      <CreateMinistryDialog 
-        open={showAddModal} 
-        onOpenChange={setShowAddModal} 
-        onSuccess={() => void mutate()} 
+      <CreateMinistryDialog
+        open={showAddModal}
+        onOpenChange={setShowAddModal}
+        onSuccess={() => void mutate()}
       />
       <EditMinistryDialog
         open={!!editMinistryState}
@@ -243,18 +218,42 @@ export default function MinistriesPage() {
         onSuccess={() => void mutate()}
         ministry={editMinistryState}
       />
-
       <MinistryMembersSheet
         open={!!viewMembersMinistry}
         onOpenChange={(open) => {
           if (!open) {
             setViewMembersMinistry(null);
-            void mutate(); 
+            void mutate();
           }
         }}
         ministryId={viewMembersMinistry?.id || null}
         ministryName={viewMembersMinistry?.name || ""}
       />
+    </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "warning";
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <p
+        className={`mt-2 text-3xl font-black ${
+          tone === "warning"
+            ? "text-amber-600 dark:text-amber-400"
+            : "text-slate-900 dark:text-white"
+        }`}
+      >
+        {value}
+      </p>
     </div>
   );
 }

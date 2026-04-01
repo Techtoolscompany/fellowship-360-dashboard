@@ -16,6 +16,10 @@ import useOrganization from "@/lib/organizations/useOrganization";
 import { toast } from "sonner";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import {
+  MEMBER_STATUS_VALUES,
+  getMemberStatusLabel,
+} from "@/lib/contacts/member-status";
 
 const fmt$ = (n: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
@@ -29,12 +33,12 @@ const fmtPhone = (p: string) => {
 };
 
 const STATUS_CONFIG: Record<string, string> = {
-  member:           "Member",
-  visitor:          "Visitor",
-  prospect:         "Prospect",
-  regular_attendee: "Regular Attendee",
-  leader:           "Leader",
-  inactive:         "Inactive",
+  member: getMemberStatusLabel("member"),
+  visitor: getMemberStatusLabel("visitor"),
+  prospect: getMemberStatusLabel("prospect"),
+  regular_attendee: getMemberStatusLabel("regular_attendee"),
+  leader: getMemberStatusLabel("leader"),
+  inactive: getMemberStatusLabel("inactive"),
 };
 
 function Field({ label, value, onChange, type = "text" }: {
@@ -190,12 +194,26 @@ export default function ContactProfilePage() {
     );
   }
 
-  const { contact, donations, appointments, volunteer, ministries: contactMinistries } = profile;
+  const {
+    contact,
+    donations,
+    appointments,
+    prayer,
+    volunteer,
+    shifts,
+    ministries: contactMinistries,
+  } = profile;
   const fullName   = `${contact.firstName} ${contact.lastName}`;
   const initials   = `${contact.firstName?.[0] ?? ""}${contact.lastName?.[0] ?? ""}`.toUpperCase();
   const statusLabel = STATUS_CONFIG[contact.memberStatus ?? "visitor"] ?? "Visitor";
 
   const totalGiving = donations.reduce((s, d) => s + Number(d.amount ?? 0), 0);
+  const totalVolunteerHours = shifts.reduce(
+    (sum, shift) => sum + Number(shift.hours ?? 0),
+    0
+  );
+  const openPrayerCount = prayer.filter((row) => row.status !== "answered").length;
+  const answeredPrayerCount = prayer.filter((row) => row.status === "answered").length;
 
   const upcomingAppts = appointments.filter(a =>
     new Date(a.dateTime) >= new Date() && a.status !== "cancelled"
@@ -250,22 +268,11 @@ export default function ContactProfilePage() {
               </button>
             </div>
           </div>
-          
-          {/* Profile Tabs */}
-          <div className="flex gap-8 mt-10">
-            <a className="pb-4 text-[#84cc16] border-b-2 border-[#84cc16] font-semibold text-sm" href="#">Overview</a>
-            <a className="pb-4 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors font-medium text-sm" href="#">Giving</a>
-            <a className="pb-4 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors font-medium text-sm" href="#">Spiritual Growth</a>
-            <a className="pb-4 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors font-medium text-sm" href="#">Volunteer</a>
-            <a className="pb-4 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors font-medium text-sm" href="#">Groups</a>
-          </div>
         </div>
       </div>
 
       <div className="max-w-6xl mx-auto px-8 py-10 grid grid-cols-1 lg:grid-cols-3 gap-8 font-display">
-        {/* Left Column: Info & Details */}
         <div className="lg:col-span-1 space-y-8">
-          {/* Contact Information */}
           <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <h3 className="font-bold text-lg">Contact Information</h3>
@@ -300,12 +307,20 @@ export default function ContactProfilePage() {
                   <p className="text-sm font-medium">{contact.createdAt ? fmtDate(contact.createdAt) : "—"}</p>
                 </div>
               </div>
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-slate-50 dark:bg-slate-800 rounded-lg text-slate-500">
+                  <span className="material-symbols-outlined text-base">flag</span>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Source</p>
+                  <p className="text-sm font-medium capitalize">{(contact.source ?? "walk_in").replaceAll("_", " ")}</p>
+                </div>
+              </div>
             </div>
           </section>
 
-          {/* Upcoming Events */}
           <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
-            <h3 className="font-bold text-lg mb-4">Upcoming Events</h3>
+            <h3 className="font-bold text-lg mb-4">Upcoming Appointments</h3>
             <div className="space-y-4">
               {upcomingAppts.length > 0 ? (
                 upcomingAppts.map(appt => (
@@ -323,26 +338,15 @@ export default function ContactProfilePage() {
                   </div>
                 ))
               ) : (
-                <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-lg bg-[#84cc16]/10 flex flex-col items-center justify-center text-[#84cc16] shrink-0">
-                      <span className="text-[10px] font-bold uppercase">Oct</span>
-                      <span className="text-lg font-bold leading-none">24</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold truncate">New Members Dinner</p>
-                      <p className="text-xs text-slate-500">6:30 PM • Fellowship Hall</p>
-                    </div>
+                <div className="rounded-lg border border-dashed border-slate-200 dark:border-slate-700 p-4 text-sm text-slate-500">
+                  No upcoming appointments.
                 </div>
               )}
             </div>
-            <button className="w-full mt-6 py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">View All Events</button>
           </section>
         </div>
 
-        {/* Right Column: Dashboard Sections */}
         <div className="lg:col-span-2 space-y-8">
-          
-          {/* Giving & Stewardship */}
           <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-8 shadow-sm">
             <div className="flex items-center justify-between mb-8">
               <div>
@@ -354,54 +358,9 @@ export default function ContactProfilePage() {
                   <p className="text-xs text-slate-500 uppercase font-bold tracking-wider">Total Given</p>
                   <p className="text-2xl font-bold text-[#84cc16]">{fmt$(totalGiving)}</p>
                 </div>
-                <button className="p-2 bg-slate-50 dark:bg-slate-800 rounded-full hover:bg-slate-100 transition-colors">
-                  <span className="material-symbols-outlined text-slate-500">download</span>
-                </button>
               </div>
             </div>
-            
-            {/* Monthly giving bars — last 12 months from real data */}
-            {(() => {
-              const now = new Date();
-              const months = Array.from({ length: 12 }, (_, i) => {
-                const d = new Date(now.getFullYear(), now.getMonth() - 11 + i, 1);
-                return { year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleString("default", { month: "short" }) };
-              });
-              const totals = months.map(({ year, month }) =>
-                donations.reduce((sum, d) => {
-                  const dd = new Date(d.date ?? d.createdAt);
-                  return dd.getFullYear() === year && dd.getMonth() === month ? sum + Number(d.amount ?? 0) : sum;
-                }, 0)
-              );
-              const max = Math.max(...totals, 1);
-              return (
-                <div className="grid grid-cols-12 gap-2 h-32 items-end mb-2">
-                  {totals.map((amt, i) => {
-                    const pct = Math.max(amt > 0 ? Math.round((amt / max) * 95) : 0, amt > 0 ? 4 : 0);
-                    return (
-                      <div key={i} className="relative group flex flex-col items-center justify-end h-full">
-                        <div
-                          className={`w-full rounded-t-sm transition-colors ${amt > 0 ? "bg-[#84cc16]/60 hover:bg-[#84cc16]" : "bg-slate-100 dark:bg-slate-800"}`}
-                          style={{ height: `${pct}%` }}
-                        />
-                        {amt > 0 && (
-                          <div className="hidden group-hover:block absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-10">
-                            {fmt$(amt)}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-            <div className="grid grid-cols-12 gap-2 mb-8">
-              {Array.from({ length: 12 }, (_, i) => {
-                const d = new Date(new Date().getFullYear(), new Date().getMonth() - 11 + i, 1);
-                return <div key={i} className="text-[9px] text-slate-400 text-center">{d.toLocaleString("default", { month: "short" })}</div>;
-              })}
-            </div>
-            
+
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
                 <thead className="text-slate-500 uppercase text-[10px] font-bold tracking-widest border-b border-slate-100 dark:border-slate-800">
@@ -433,14 +392,13 @@ export default function ContactProfilePage() {
               </table>
             </div>
           </section>
-          
-          {/* Ministries */}
-          {contactMinistries && contactMinistries.length > 0 && (
-            <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
-              <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                <span className="material-symbols-outlined text-[#84cc16]">groups</span>
-                Ministries
-              </h3>
+
+          <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
+            <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+              <span className="material-symbols-outlined text-[#84cc16]">groups</span>
+              Ministries
+            </h3>
+            {contactMinistries && contactMinistries.length > 0 ? (
               <div className="space-y-3">
                 {contactMinistries.map(({ membership, ministry }) => (
                   <div key={membership.id} className="flex items-center justify-between p-3 rounded-lg border border-slate-100 dark:border-slate-800">
@@ -450,12 +408,11 @@ export default function ContactProfilePage() {
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-slate-900 dark:text-white">{ministry.name}</p>
-                        {ministry.meetingDay && (
+                        {(ministry.meetingDay || ministry.meetingTime) ? (
                           <p className="text-xs text-slate-500">
-                            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][Number(ministry.meetingDay)] ?? ministry.meetingDay}
-                            {ministry.meetingTime ? ` @ ${ministry.meetingTime}` : ""}
+                            {[ministry.meetingDay, ministry.meetingTime].filter(Boolean).join(" @ ")}
                           </p>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                     <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-[#84cc16]/10 text-[#84cc16]">
@@ -464,78 +421,60 @@ export default function ContactProfilePage() {
                   </div>
                 ))}
               </div>
-            </section>
-          )}
+            ) : (
+              <p className="text-sm text-slate-500">No ministry memberships yet.</p>
+            )}
+          </section>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* Spiritual Growth */}
             <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
               <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                <span className="material-symbols-outlined text-[#84cc16]">auto_stories</span>
-                Spiritual Growth
-              </h3>
-              <div className="space-y-6">
-                <div>
-                  <p className="text-xs font-bold text-slate-500 uppercase mb-2">Current Study</p>
-                  <div className="p-3 bg-[#84cc16]/5 rounded-lg border border-[#84cc16]/10">
-                    <p className="text-sm font-bold">Foundations of Faith</p>
-                    <p className="text-xs text-slate-500">6 of 12 Lessons Completed</p>
-                    <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full mt-2">
-                      <div className="bg-[#84cc16] h-1.5 rounded-full w-1/2"></div>
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-slate-500 uppercase mb-2">Small Groups</p>
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                      <span className="material-symbols-outlined text-slate-500">groups</span>
-                    </div>
-                    <div>
-                      <p className="text-sm font-bold">Young Professionals</p>
-                      <p className="text-xs text-slate-500">Meets Tuesdays @ 7 PM</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-            
-            {/* Volunteer Roles */}
-            <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm flex flex-col">
-              <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
                 <span className="material-symbols-outlined text-[#84cc16]">volunteer_activism</span>
-                Volunteer Roles
+                Volunteer Summary
               </h3>
-              <div className="space-y-4 flex-1">
-                {volunteer ? (
-                  <div className="flex items-center justify-between p-3 rounded-lg border border-slate-100 dark:border-slate-800">
-                    <div className="flex items-center gap-3">
-                      <span className="material-symbols-outlined text-slate-400">meeting_room</span>
-                      <span className="text-sm font-medium">{volunteer.role || "Greeter Team"}</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded bg-green-100 text-green-700 text-[10px] font-bold">{volunteer.status || "ACTIVE"}</span>
+              {volunteer ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between rounded-lg border border-slate-100 dark:border-slate-800 p-3">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white">{volunteer.role || "Volunteer"}</p>
+                    <span className="text-xs font-bold uppercase text-emerald-600">{volunteer.status}</span>
                   </div>
-                ) : (
-                  <div className="flex items-center justify-between p-3 rounded-lg border border-slate-100 dark:border-slate-800">
-                    <div className="flex items-center gap-3">
-                      <span className="material-symbols-outlined text-slate-400">meeting_room</span>
-                      <span className="text-sm font-medium">Greeter Team</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded bg-green-100 text-green-700 text-[10px] font-bold">ACTIVE</span>
+                  <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3 text-sm text-slate-600 dark:text-slate-300">
+                    <p>Total logged hours: <span className="font-semibold">{totalVolunteerHours.toFixed(1)}</span></p>
+                    <p>Last shift: <span className="font-semibold">{shifts[0] ? fmtDate(shifts[0].date, { month: "short", day: "numeric", year: "numeric" }) : "No shifts logged"}</span></p>
                   </div>
-                )}
-                
-                <div className="flex items-center justify-between p-3 rounded-lg border border-slate-100 dark:border-slate-800 opacity-60">
-                  <div className="flex items-center gap-3">
-                    <span className="material-symbols-outlined text-slate-400">coffee</span>
-                    <span className="text-sm font-medium">Hospitality</span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-bold">PENDING</span>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">No volunteer role assigned.</p>
+              )}
+            </section>
+
+            <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
+              <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+                <span className="material-symbols-outlined text-[#84cc16]">favorite</span>
+                Prayer Requests
+              </h3>
+              <div className="mb-3 grid grid-cols-2 gap-3">
+                <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Open</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-white">{openPrayerCount}</p>
+                </div>
+                <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">Answered</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-white">{answeredPrayerCount}</p>
                 </div>
               </div>
-              <button className="w-full text-center text-[#84cc16] text-sm font-bold py-2 mt-2 hover:bg-[#84cc16]/5 rounded-lg transition-colors">
-                Apply for New Role
-              </button>
+              {prayer.length > 0 ? (
+                <div className="space-y-2">
+                  {prayer.slice(0, 3).map((request) => (
+                    <div key={request.id} className="rounded-lg border border-slate-100 dark:border-slate-800 p-3">
+                      <p className="text-xs text-slate-500">{fmtDate(request.createdAt, { month: "short", day: "numeric", year: "numeric" })}</p>
+                      <p className="text-sm text-slate-700 dark:text-slate-200 line-clamp-2">{request.content}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">No prayer requests recorded.</p>
+              )}
             </section>
           </div>
         </div>
@@ -569,14 +508,10 @@ export default function ContactProfilePage() {
                   label="Member Status"
                   value={editForm.memberStatus ?? "visitor"}
                   onChange={v => setEditForm(p => ({ ...p, memberStatus: v }))}
-                  options={[
-                    { value: "visitor",          label: "Visitor" },
-                    { value: "prospect",         label: "Prospect" },
-                    { value: "regular_attendee", label: "Regular Attendee" },
-                    { value: "member",           label: "Member" },
-                    { value: "leader",           label: "Leader" },
-                    { value: "inactive",         label: "Inactive" },
-                  ]}
+                  options={MEMBER_STATUS_VALUES.map((status) => ({
+                    value: status,
+                    label: getMemberStatusLabel(status),
+                  }))}
                />
                <SelectField
                   label="Source"

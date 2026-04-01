@@ -10,8 +10,7 @@ import {
   Zap,
   Users,
   CheckCircle,
-  MessageCircle,
-  Clock,
+  DollarSign,
   BarChart2,
   Shield,
   MapPin,
@@ -20,11 +19,11 @@ import {
   ChevronDown,
   ChevronRight,
   CreditCard,
-  Bot,
   Plug,
   Sparkles,
   CalendarClock,
   ListChecks,
+  GitBranch,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -41,6 +40,16 @@ import { PageLoader } from "@/components/in-app/page-loader";
 import { OrganizationSwitcher } from "@/components/in-app/organization-switcher";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { GraceFab } from "@/components/grace/GraceFab";
+import { getOrganizationRoleAccess } from "@/app/actions/access";
+import {
+  type AccessSection,
+  defaultRoleAccessMatrix,
+  getAllowedSectionsForRole,
+  getDefaultPathForAllowedSections,
+  isPathAllowed,
+} from "@/lib/access/role-access.shared";
+
+const DEFAULT_ACCESS_MATRIX = defaultRoleAccessMatrix();
 
 function NavItem({
   href,
@@ -120,12 +129,25 @@ function NavItem({
   return content;
 }
 
-function SidebarContent({ className, isCollapsed }: { className?: string; isCollapsed?: boolean }) {
+function SidebarContent({
+  className,
+  isCollapsed,
+  allowedSections,
+  canManageAccess,
+}: {
+  className?: string;
+  isCollapsed?: boolean;
+  allowedSections: AccessSection[];
+  canManageAccess: boolean;
+}) {
   const { user } = useUser();
+  const allowedSectionSet = new Set(allowedSections);
   const [collapsedSections, setCollapsedSections] = React.useState<Record<string, boolean>>({
     explore: true,
     onboarding: true,
   });
+
+  const hasAccess = (section: AccessSection) => allowedSectionSet.has(section);
 
   const toggleSection = (section: string) => {
     setCollapsedSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -157,91 +179,145 @@ function SidebarContent({ className, isCollapsed }: { className?: string; isColl
 
       {/* Main Navigation */}
       <nav className={cn("space-y-1 flex-1 overflow-y-auto", isCollapsed ? "px-2" : "px-2")}>
-        {/* Grace Section */}
-        <SectionHeader title="Grace" section="grace" />
-        {!collapsedSections.grace && (
-          <div className="space-y-0.5">
-            <NavItem href="/app/grace?tab=command" icon={Zap} isCollapsed={isCollapsed} badgeLabel="Live">
-              Grace
-            </NavItem>
-          </div>
-        )}
+        {hasAccess("grace") ? (
+          <>
+            <SectionHeader title="Grace" section="grace" />
+            {!collapsedSections.grace && (
+              <div className="space-y-0.5">
+                <NavItem
+                  href="/app/grace?tab=command"
+                  icon={Zap}
+                  isCollapsed={isCollapsed}
+                  badgeLabel="Live"
+                >
+                  Grace
+                </NavItem>
+              </div>
+            )}
+          </>
+        ) : null}
 
-        {/* Ministry Workflows Section */}
-        <SectionHeader title="Ministry Workflows" section="core" />
-        {!collapsedSections.core && (
-          <div className="space-y-0.5">
-            <NavItem href="/app/grace?tab=inbox" icon={MessageCircle} isCollapsed={isCollapsed}>
-              Communications
-            </NavItem>
-            <NavItem href="/app/contacts" icon={Users} isCollapsed={isCollapsed}>
-              People
-            </NavItem>
-            <NavItem href="/app/tasks" icon={CheckCircle} isCollapsed={isCollapsed}>
-              Action Items
-            </NavItem>
-            <NavItem href="/app/grace?tab=calendar" icon={Clock} isCollapsed={isCollapsed}>
-              Calendar
-            </NavItem>
-            <NavItem href="/app/grace?tab=operations" icon={Bot} isCollapsed={isCollapsed}>
-              Service Planning
-            </NavItem>
-            <NavItem href="/app/settings/role-matrix" icon={ListChecks} isCollapsed={isCollapsed}>
-              Church Roles
-            </NavItem>
-            <NavItem href="/app/settings/scheduling-matrix" icon={CalendarClock} isCollapsed={isCollapsed}>
-              Scheduling
-            </NavItem>
-            <NavItem href="/app/grace?tab=visitors" icon={MapPin} isCollapsed={isCollapsed}>
-              Guest Follow-Up
-            </NavItem>
-          </div>
-        )}
+        {hasAccess("people") ||
+        hasAccess("tasks") ||
+        hasAccess("finance") ||
+        hasAccess("automations") ||
+        hasAccess("service_ops") ? (
+          <>
+            <SectionHeader title="Ministry Workflows" section="core" />
+            {!collapsedSections.core && (
+              <div className="space-y-0.5">
+                {hasAccess("people") ? (
+                  <NavItem href="/app/contacts" icon={Users} isCollapsed={isCollapsed}>
+                    People
+                  </NavItem>
+                ) : null}
+                {hasAccess("tasks") ? (
+                  <NavItem href="/app/tasks" icon={CheckCircle} isCollapsed={isCollapsed}>
+                    Action Items
+                  </NavItem>
+                ) : null}
+                {hasAccess("finance") ? (
+                  <NavItem href="/app/donations" icon={DollarSign} isCollapsed={isCollapsed}>
+                    Finance
+                  </NavItem>
+                ) : null}
+                {hasAccess("automations") ? (
+                  <NavItem href="/app/automations" icon={GitBranch} isCollapsed={isCollapsed}>
+                    Automations
+                  </NavItem>
+                ) : null}
+                {hasAccess("service_ops") ? (
+                  <NavItem href="/app/volunteers" icon={CalendarClock} isCollapsed={isCollapsed}>
+                    Volunteers
+                  </NavItem>
+                ) : null}
+                {hasAccess("service_ops") ? (
+                  <NavItem href="/app/ministries" icon={ListChecks} isCollapsed={isCollapsed}>
+                    Ministries
+                  </NavItem>
+                ) : null}
+              </div>
+            )}
+          </>
+        ) : null}
 
-        {/* Onboarding Section */}
-        <SectionHeader title="Onboarding" section="onboarding" />
-        {!collapsedSections.onboarding && (
-          <div className="space-y-0.5">
-            <NavItem href="/app/get-started" icon={MapPin} isCollapsed={isCollapsed} badgeLabel="Setup">
-              Get Started
-            </NavItem>
-          </div>
-        )}
+        {hasAccess("onboarding") ? (
+          <>
+            <SectionHeader title="Onboarding" section="onboarding" />
+            {!collapsedSections.onboarding && (
+              <div className="space-y-0.5">
+                <NavItem
+                  href="/app/get-started"
+                  icon={MapPin}
+                  isCollapsed={isCollapsed}
+                  badgeLabel="Setup"
+                >
+                  Get Started
+                </NavItem>
+              </div>
+            )}
+          </>
+        ) : null}
 
-        {/* Administration Section */}
-        <SectionHeader title="Administration" section="administration" />
-        {!collapsedSections.administration && (
-          <div className="space-y-0.5">
-            <NavItem href="/app/settings" icon={Shield} isCollapsed={isCollapsed}>
-              Organization Settings
-            </NavItem>
-            <NavItem href="/app/settings/team" icon={Shield} isCollapsed={isCollapsed}>
-              Users & Roles
-            </NavItem>
-            <NavItem href="/app/settings/billing" icon={CreditCard} isCollapsed={isCollapsed}>
-              Billing
-            </NavItem>
-            <NavItem href="/app/settings/integrations" icon={Plug} isCollapsed={isCollapsed}>
-              Integrations
-            </NavItem>
-            <NavItem href="/app/settings/grace" icon={Sparkles} isCollapsed={isCollapsed}>
-              Grace Runtime
-            </NavItem>
-          </div>
-        )}
+        {hasAccess("settings") ? (
+          <>
+            <SectionHeader title="Administration" section="administration" />
+            {!collapsedSections.administration && (
+              <div className="space-y-0.5">
+                <NavItem href="/app/settings" icon={Shield} isCollapsed={isCollapsed}>
+                  Organization Settings
+                </NavItem>
+                <NavItem href="/app/settings/team" icon={Shield} isCollapsed={isCollapsed}>
+                  Users & Roles
+                </NavItem>
+                {canManageAccess ? (
+                  <NavItem href="/app/settings/access" icon={ListChecks} isCollapsed={isCollapsed}>
+                    Access Control
+                  </NavItem>
+                ) : null}
+                <NavItem href="/app/settings/role-matrix" icon={ListChecks} isCollapsed={isCollapsed}>
+                  Church Roles
+                </NavItem>
+                <NavItem
+                  href="/app/settings/scheduling-matrix"
+                  icon={CalendarClock}
+                  isCollapsed={isCollapsed}
+                >
+                  Scheduling
+                </NavItem>
+                <NavItem href="/app/settings/billing" icon={CreditCard} isCollapsed={isCollapsed}>
+                  Billing
+                </NavItem>
+                <NavItem href="/app/settings/integrations" icon={Plug} isCollapsed={isCollapsed}>
+                  Integrations
+                </NavItem>
+                <NavItem href="/app/settings/grace" icon={Sparkles} isCollapsed={isCollapsed}>
+                  Grace Runtime
+                </NavItem>
+              </div>
+            )}
+          </>
+        ) : null}
 
-        {/* Explore Section (Beta) */}
-        <SectionHeader title="Explore" section="explore" />
-        {!collapsedSections.explore && (
-          <div className="space-y-0.5">
-            <NavItem href="/app/broadcasts" icon={Zap} isCollapsed={isCollapsed} badgeLabel="Beta">
-              Broadcasts
-            </NavItem>
-            <NavItem href="/app/reports" icon={BarChart2} isCollapsed={isCollapsed} badgeLabel="Beta">
-              Reports
-            </NavItem>
-          </div>
-        )}
+        {hasAccess("communications") || hasAccess("reports") ? (
+          <>
+            <SectionHeader title="Explore" section="explore" />
+            {!collapsedSections.explore && (
+              <div className="space-y-0.5">
+                {hasAccess("communications") ? (
+                  <NavItem href="/app/broadcasts" icon={Zap} isCollapsed={isCollapsed} badgeLabel="Beta">
+                    Messaging
+                  </NavItem>
+                ) : null}
+                {hasAccess("reports") ? (
+                  <NavItem href="/app/reports" icon={BarChart2} isCollapsed={isCollapsed} badgeLabel="Beta">
+                    Reports
+                  </NavItem>
+                ) : null}
+              </div>
+            )}
+          </>
+        ) : null}
       </nav>
 
       {/* User Dropdown at bottom */}
@@ -261,6 +337,8 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const { isLoading: isUserLoading } = useUser();
   const { organization, isLoading: isOrgLoading } = useOrganization();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [allowedSections, setAllowedSections] = useState<AccessSection[] | null>(null);
+  const [isAccessLoading, setIsAccessLoading] = useState(true);
 
   // Close mobile menu when route changes
   const pathname = usePathname();
@@ -275,7 +353,54 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [isUserLoading, isOrgLoading, organization, pathname, router]);
 
-  if (isUserLoading || isOrgLoading) {
+  useEffect(() => {
+    if (!organization?.id || !organization.role) {
+      setAllowedSections(null);
+      setIsAccessLoading(false);
+      return;
+    }
+
+    let active = true;
+    setIsAccessLoading(true);
+
+    getOrganizationRoleAccess(organization.id)
+      .then((data) => {
+        if (!active) return;
+        setAllowedSections(data.allowedSections);
+      })
+      .catch((error) => {
+        console.error("Failed to load role access policy", error);
+        if (!active) return;
+        setAllowedSections(getAllowedSectionsForRole(DEFAULT_ACCESS_MATRIX, organization.role));
+      })
+      .finally(() => {
+        if (!active) return;
+        setIsAccessLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [organization?.id, organization?.role]);
+
+  useEffect(() => {
+    if (!organization || isAccessLoading || !allowedSections) return;
+    if (isPathAllowed(pathname, allowedSections)) return;
+
+    const nextPath = getDefaultPathForAllowedSections(allowedSections);
+    if (pathname !== nextPath) {
+      router.replace(nextPath);
+    }
+  }, [allowedSections, isAccessLoading, organization, pathname, router]);
+
+  const effectiveAllowedSections =
+    allowedSections ??
+    (organization?.role
+      ? getAllowedSectionsForRole(DEFAULT_ACCESS_MATRIX, organization.role)
+      : []);
+  const canManageAccess = organization?.role === "owner" || organization?.role === "admin";
+
+  if (isUserLoading || isOrgLoading || (organization && isAccessLoading)) {
     return <PageLoader />;
   }
 
@@ -291,7 +416,11 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           )}
         >
           <div className="p-3 flex-1">
-            <SidebarContent isCollapsed={isCollapsed} />
+            <SidebarContent
+              isCollapsed={isCollapsed}
+              allowedSections={effectiveAllowedSections}
+              canManageAccess={canManageAccess}
+            />
           </div>
           <div className="flex items-center justify-center gap-1 mb-3 px-2">
             <ThemeSwitcher />
@@ -329,7 +458,10 @@ function AppLayout({ children }: { children: React.ReactNode }) {
               </SheetTrigger>
               <SheetContent side="right" className="w-64 p-0 pt-16">
                 <div className="p-3">
-                  <SidebarContent />
+                  <SidebarContent
+                    allowedSections={effectiveAllowedSections}
+                    canManageAccess={canManageAccess}
+                  />
                 </div>
               </SheetContent>
             </Sheet>

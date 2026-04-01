@@ -7,6 +7,7 @@ import { organizations } from "@/db/schema/organization";
 import { providerConfigs } from "@/db/schema/provider-configs";
 import { smsDevices } from "@/db/schema/sms-gateway";
 import {
+  allowsMultipleActiveProvidersForChannel,
   normalizeAndEncryptProviderConfig,
   redactProviderConfigForClient,
 } from "@/lib/grace/providers/security";
@@ -17,7 +18,7 @@ const updateIntegrationSchema = z.object({
     .object({
       channel: z.string().min(1),
       provider: z.string().min(1),
-      mode: z.enum(["agency_managed", "byo", "disabled"]),
+      mode: z.enum(["agency_managed", "disabled"]),
       isActive: z.boolean().optional(),
       configJson: z.record(z.string(), z.unknown()).optional(),
     })
@@ -58,14 +59,16 @@ async function loadIntegrationSnapshot(organizationId: string) {
   ]);
 
   const providers = rows.map((row) => {
+    const normalizedMode = row.mode === "byo" ? "agency_managed" : row.mode;
     const redacted = redactProviderConfigForClient({
       channel: row.channel,
       provider: row.provider,
       config: row.configJson ?? {},
-      mode: row.mode,
+      mode: normalizedMode,
     });
     return {
       ...row,
+      mode: normalizedMode,
       configJson: redacted.configJson,
       secretStatus: redacted.secretStatus,
       validation: redacted.validation,
@@ -177,16 +180,6 @@ export const PATCH = withSuperAdminAuthRequired(async (req, context) => {
         existing: existing?.configJson ?? {},
       });
 
-      if (body.provider.mode === "byo" && !normalized.validation.isValid) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: `Missing required provider credentials: ${normalized.validation.missing.join(", ")}`,
-          },
-          { status: 400 }
-        );
-      }
-
       const nextIsActive =
         body.provider.mode === "disabled"
           ? false
@@ -204,7 +197,10 @@ export const PATCH = withSuperAdminAuthRequired(async (req, context) => {
           .where(eq(providerConfigs.id, existing.id))
           .returning();
 
-        if (updated.isActive) {
+        if (
+          updated.isActive &&
+          !allowsMultipleActiveProvidersForChannel(body.provider.channel)
+        ) {
           await db
             .update(providerConfigs)
             .set({ isActive: false, updatedAt: new Date() })
@@ -230,7 +226,10 @@ export const PATCH = withSuperAdminAuthRequired(async (req, context) => {
           })
           .returning();
 
-        if (created.isActive) {
+        if (
+          created.isActive &&
+          !allowsMultipleActiveProvidersForChannel(body.provider.channel)
+        ) {
           await db
             .update(providerConfigs)
             .set({ isActive: false, updatedAt: new Date() })
@@ -260,4 +259,4 @@ export const PATCH = withSuperAdminAuthRequired(async (req, context) => {
     const status = message === "Organization not found" ? 404 : 500;
     return NextResponse.json({ success: false, error: message }, { status });
   }
-});
+}, "manage_integrations");

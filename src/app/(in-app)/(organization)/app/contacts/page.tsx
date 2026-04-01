@@ -11,14 +11,18 @@ import { CreateContactDialog } from "@/components/dialogs/CreateContactDialog";
 import { ImportContactsDialog } from "@/components/dialogs/ImportContactsDialog";
 import useOrganization from "@/lib/organizations/useOrganization";
 import { getContacts, archiveContact, restoreContact } from "@/app/actions/contacts";
+import {
+  getMemberStatusLabel,
+  getMemberStatusPluralLabel,
+} from "@/lib/contacts/member-status";
 
 const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
-  member:           { label: "Member",          className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400" },
-  visitor:          { label: "Visitor",          className: "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400" },
-  leader:           { label: "Leader",           className: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400" },
-  regular_attendee: { label: "Regular",          className: "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400" },
-  prospect:         { label: "Prospect",         className: "bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400" },
-  inactive:         { label: "Inactive",         className: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" },
+  member:           { label: getMemberStatusLabel("member"), className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400" },
+  visitor:          { label: getMemberStatusLabel("visitor"), className: "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400" },
+  leader:           { label: getMemberStatusLabel("leader"), className: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400" },
+  regular_attendee: { label: getMemberStatusLabel("regular_attendee"), className: "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400" },
+  prospect:         { label: getMemberStatusLabel("prospect"), className: "bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400" },
+  inactive:         { label: getMemberStatusLabel("inactive"), className: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" },
 };
 
 const AVATAR_COLORS = [
@@ -113,7 +117,7 @@ export default function ContactsPage() {
     if (!contacts.length) { toast.error("No contacts to export"); return; }
     const rows = [
       ["First Name","Last Name","Email","Phone","Status","Added"].join(","),
-      ...contacts.map(c => [`"${c.firstName||''}"`,`"${c.lastName||''}"`,`"${c.email||''}"`,`"${c.phone||''}"`,`"${c.memberStatus||''}"`,`"${new Date(c.createdAt).toLocaleDateString()}"`].join(","))
+      ...contacts.map(c => [`"${c.firstName||''}"`,`"${c.lastName||''}"`,`"${c.email||''}"`,`"${c.phone||''}"`,`"${getMemberStatusLabel(c.memberStatus)}"`,`"${new Date(c.createdAt).toLocaleDateString()}"`].join(","))
     ].join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([rows], { type: "text/csv" }));
@@ -125,14 +129,14 @@ export default function ContactsPage() {
   const filtered = contacts;
   const memberCount = contacts.filter(c => c.memberStatus === "member").length;
   const visitorCount = contacts.filter(c => c.memberStatus === "visitor").length;
-  const prospectCount = contacts.filter(c => c.memberStatus === "prospect").length;
+  const newGuestCount = contacts.filter(c => c.memberStatus === "prospect").length;
   const archivedCount = contacts.filter(c => c.memberStatus === "inactive").length;
 
   const STATUS_FILTERS = [
     { id: "all",      label: "All",       count: statusFilter === "all" ? total : null },
-    { id: "member",   label: "Members",   count: statusFilter === "member" ? total : null },
-    { id: "visitor",  label: "Visitors",  count: statusFilter === "visitor" ? total : null },
-    { id: "prospect", label: "Prospects", count: statusFilter === "prospect" ? total : null },
+    { id: "member",   label: getMemberStatusPluralLabel("member"), count: statusFilter === "member" ? total : null },
+    { id: "visitor",  label: getMemberStatusPluralLabel("visitor"), count: statusFilter === "visitor" ? total : null },
+    { id: "prospect", label: getMemberStatusPluralLabel("prospect"), count: statusFilter === "prospect" ? total : null },
     { id: "inactive", label: "Archived",  count: statusFilter === "inactive" ? total : null },
   ];
 
@@ -172,9 +176,9 @@ export default function ContactsPage() {
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
           { label: "Total", value: total,              color: "text-slate-900 dark:text-white",          bg: "bg-white dark:bg-slate-900" },
-          { label: "Members",   value: memberCount,    color: "text-emerald-700 dark:text-emerald-400",  bg: "bg-emerald-50 dark:bg-emerald-500/10" },
-          { label: "Visitors",  value: visitorCount,   color: "text-sky-700 dark:text-sky-400",          bg: "bg-sky-50 dark:bg-sky-500/10" },
-          { label: "Prospects", value: prospectCount,  color: "text-orange-700 dark:text-orange-400",     bg: "bg-orange-50 dark:bg-orange-500/10" },
+          { label: getMemberStatusPluralLabel("member"), value: memberCount, color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-50 dark:bg-emerald-500/10" },
+          { label: getMemberStatusPluralLabel("visitor"), value: visitorCount, color: "text-sky-700 dark:text-sky-400", bg: "bg-sky-50 dark:bg-sky-500/10" },
+          { label: getMemberStatusPluralLabel("prospect"), value: newGuestCount, color: "text-orange-700 dark:text-orange-400", bg: "bg-orange-50 dark:bg-orange-500/10" },
           { label: "Archived",  value: archivedCount,  color: "text-slate-700 dark:text-slate-300",      bg: "bg-slate-100 dark:bg-slate-700/30" },
         ].map(({ label, value, color, bg }) => (
           <div key={label} className={`${bg} border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm`}>
@@ -257,7 +261,10 @@ export default function ContactsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filtered.map((c) => {
             const name = `${c.firstName} ${c.lastName}`;
-            const status = STATUS_CONFIG[c.memberStatus] ?? { label: c.memberStatus, className: "bg-slate-100 text-slate-600" };
+            const status = STATUS_CONFIG[c.memberStatus] ?? {
+              label: getMemberStatusLabel(c.memberStatus),
+              className: "bg-slate-100 text-slate-600",
+            };
             const grad = getAvatarColor(name);
             return (
               <Link
@@ -304,7 +311,10 @@ export default function ContactsPage() {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filtered.map((c) => {
                   const name = `${c.firstName} ${c.lastName}`;
-                  const status = STATUS_CONFIG[c.memberStatus] ?? { label: c.memberStatus, className: "bg-slate-100 text-slate-500" };
+                  const status = STATUS_CONFIG[c.memberStatus] ?? {
+                    label: getMemberStatusLabel(c.memberStatus),
+                    className: "bg-slate-100 text-slate-500",
+                  };
                   const grad = getAvatarColor(name);
                   return (
                     <tr

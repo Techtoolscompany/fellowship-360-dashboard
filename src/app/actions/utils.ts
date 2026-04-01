@@ -1,9 +1,23 @@
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { organizationMemberships } from "@/db/schema";
+import { actionAuditLogs, organizationMemberships } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
+import * as z from "zod";
+
+const organizationIdSchema = z.string().trim().min(1);
+const requiredRoleSchema = z.enum(["admin", "user"]).optional();
+const auditActionSchema = z.object({
+  organizationId: organizationIdSchema,
+  userId: z.string().trim().min(1),
+  actionType: z.string().trim().min(1),
+  entityName: z.string().trim().min(1),
+  entityId: z.string().trim().min(1).optional(),
+  details: z.record(z.string(), z.unknown()).optional(),
+});
 
 export async function requireOrgMembership(organizationId: string, requiredRole?: "admin" | "user") {
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  const parsedRequiredRole = requiredRoleSchema.parse(requiredRole);
   const session = await auth();
   if (!session?.user?.id) {
     throw new Error("Unauthorized");
@@ -15,7 +29,7 @@ export async function requireOrgMembership(organizationId: string, requiredRole?
     .where(
       and(
         eq(organizationMemberships.userId, session.user.id),
-        eq(organizationMemberships.organizationId, organizationId)
+        eq(organizationMemberships.organizationId, parsedOrganizationId)
       )
     );
 
@@ -24,7 +38,7 @@ export async function requireOrgMembership(organizationId: string, requiredRole?
   }
 
   if (
-    requiredRole === "admin" &&
+    parsedRequiredRole === "admin" &&
     member.role !== "admin" &&
     member.role !== "owner"
   ) {
@@ -33,8 +47,6 @@ export async function requireOrgMembership(organizationId: string, requiredRole?
 
   return { userId: session.user.id, role: member.role };
 }
-
-import { actionAuditLogs } from "@/db/schema";
 
 export async function auditAction(params: {
   organizationId: string;
@@ -45,7 +57,8 @@ export async function auditAction(params: {
   details?: Record<string, unknown>;
 }) {
   try {
-    await db.insert(actionAuditLogs).values(params);
+    const parsed = auditActionSchema.parse(params);
+    await db.insert(actionAuditLogs).values(parsed);
   } catch (error) {
     console.error("Failed to insert audit log:", error);
   }

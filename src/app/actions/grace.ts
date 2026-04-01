@@ -7,6 +7,7 @@ import {
   graceMessages,
   graceToolAudit,
   graceKnowledge,
+  graceKnowledgeVersions,
   graceApprovals,
   graceFollowupProposals,
   graceMemory,
@@ -22,17 +23,138 @@ import { organizationMemberships } from "@/db/schema/organization-membership";
 import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { runGraceMessage } from "@/lib/grace/runtime";
-import { sendTextBeeSMS } from "@/lib/grace/channels/sms/textbee";
 import sendMail from "@/lib/email/sendMail";
 import {
   resolveEmailProvider,
-  resolveSmsProvider,
 } from "@/lib/grace/providers/resolver";
 import {
-  isByoAllowedForChannel,
+  allowsMultipleActiveProvidersForChannel,
   normalizeAndEncryptProviderConfig,
   redactProviderConfigForClient,
 } from "@/lib/grace/providers/security";
+import { sendOrganizationSms } from "@/lib/sms-gateway/send";
+import * as z from "zod";
+
+const organizationIdSchema = z.string().trim().min(1);
+const graceIdSchema = z.string().trim().min(1);
+const optionalDateSchema = z.union([z.coerce.date(), z.null()]).optional();
+const optionalTrimmedStringSchema = z.string().trim().nullable().optional();
+const trimmedStringSchema = z.string().trim().min(1);
+
+const updateGraceCallSchema = z.object({
+  organizationId: organizationIdSchema,
+  callId: graceIdSchema,
+  contactId: z.string().trim().nullable().optional(),
+  startedAt: optionalDateSchema,
+  endedAt: optionalDateSchema,
+  durationSec: z.number().finite().nonnegative().nullable().optional(),
+  recordingUrl: optionalTrimmedStringSchema,
+  transcriptText: optionalTrimmedStringSchema,
+  summaryText: optionalTrimmedStringSchema,
+  intent: optionalTrimmedStringSchema,
+  outcome: optionalTrimmedStringSchema,
+});
+
+const escalateGraceCallSchema = z.object({
+  organizationId: organizationIdSchema,
+  callId: graceIdSchema,
+  reason: trimmedStringSchema,
+  summaryText: optionalTrimmedStringSchema,
+  assignedTeam: optionalTrimmedStringSchema,
+  metadataJson: z.record(z.string(), z.unknown()).optional(),
+});
+
+const createGraceKnowledgeSchema = z.object({
+  organizationId: organizationIdSchema,
+  title: trimmedStringSchema,
+  content: trimmedStringSchema,
+  tags: z.array(z.string().trim()).optional(),
+  useForGrace: z.boolean().optional(),
+  visibility: z.enum(["public", "internal"]).optional(),
+});
+
+const updateGraceKnowledgeSchema = z.object({
+  organizationId: organizationIdSchema,
+  knowledgeId: graceIdSchema,
+  title: z.string().trim().min(1).optional(),
+  content: z.string().trim().min(1).optional(),
+  tags: z.array(z.string().trim()).optional(),
+  useForGrace: z.boolean().optional(),
+  visibility: z.enum(["public", "internal"]).optional(),
+});
+
+const graceKnowledgeIdSchema = z.object({
+  organizationId: organizationIdSchema,
+  knowledgeId: graceIdSchema,
+});
+
+const getGraceKnowledgeVersionsSchema = z.object({
+  organizationId: organizationIdSchema,
+  knowledgeId: graceIdSchema,
+  limit: z.number().int().positive().max(100).optional(),
+});
+
+const updateGraceFollowupProposalStatusSchema = z.object({
+  organizationId: organizationIdSchema,
+  proposalId: graceIdSchema,
+  status: z.enum(["approved", "rejected", "pending", "sent"]),
+});
+
+const getGraceMemoriesSchema = z.object({
+  organizationId: organizationIdSchema,
+  memoryType: z.enum(["contact_memory", "org_pattern", "daily_briefing"]).optional(),
+  contactId: z.string().trim().min(1).optional(),
+  limit: z.number().int().positive().max(100).optional(),
+});
+
+const createGraceMemorySchema = z.object({
+  organizationId: organizationIdSchema,
+  sessionId: z.string().trim().nullable().optional(),
+  contactId: z.string().trim().nullable().optional(),
+  memoryType: z.enum(["contact_memory", "org_pattern", "daily_briefing"]),
+  summary: trimmedStringSchema,
+  details: optionalTrimmedStringSchema,
+  tags: z.array(z.string().trim()).optional(),
+  metadataJson: z.record(z.string(), z.unknown()).optional(),
+});
+
+const updateGraceApprovalSchema = z.object({
+  organizationId: organizationIdSchema,
+  approvalId: graceIdSchema,
+  status: z.enum(["approved", "rejected"]),
+  decisionNote: z.string().trim().optional(),
+});
+
+const upsertGraceProviderConfigSchema = z.object({
+  organizationId: organizationIdSchema,
+  channel: trimmedStringSchema,
+  provider: trimmedStringSchema,
+  mode: z.enum(["agency_managed", "disabled"]),
+  isActive: z.boolean().optional(),
+  configJson: z.record(z.string(), z.unknown()).optional(),
+});
+
+const updateGracePolicyConfigSchema = z.object({
+  organizationId: organizationIdSchema,
+  approvalsEnabled: z.boolean().optional(),
+  autoEscalateOnEmergency: z.boolean().optional(),
+  confidenceThreshold: z
+    .string()
+    .trim()
+    .refine((value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1;
+    }, "confidenceThreshold must be between 0 and 1")
+    .optional(),
+  highRiskTools: z.array(z.string().trim().min(1)).optional(),
+  allowedPublicTools: z.array(z.string().trim().min(1)).optional(),
+});
+
+const sendCopilotMessageSchema = z.object({
+  organizationId: organizationIdSchema,
+  sessionId: z.string().trim().optional(),
+  message: trimmedStringSchema,
+});
 
 async function requireOrgMembership(organizationId: string) {
   const session = await auth();
@@ -179,17 +301,77 @@ async function createManualFollowupTask(params: {
   return task.id;
 }
 
+type GraceKnowledgeSnapshot = Pick<
+  typeof graceKnowledge.$inferSelect,
+  "title" | "content" | "tags" | "useForGrace" | "visibility"
+>;
+
+async function getNextKnowledgeVersionNumber(params: {
+  organizationId: string;
+  knowledgeId: string;
+}) {
+  const [row] = await db
+    .select({
+      latestVersionNumber:
+        sql<number>`coalesce(max(${graceKnowledgeVersions.versionNumber}), 0)`,
+    })
+    .from(graceKnowledgeVersions)
+    .where(
+      and(
+        eq(graceKnowledgeVersions.organizationId, params.organizationId),
+        eq(graceKnowledgeVersions.knowledgeId, params.knowledgeId)
+      )
+    );
+
+  return Number(row?.latestVersionNumber ?? 0) + 1;
+}
+
+async function writeKnowledgeVersion(params: {
+  organizationId: string;
+  knowledgeId: string;
+  snapshot: GraceKnowledgeSnapshot;
+  changeType: "create" | "update" | "delete";
+  changedByUserId: string;
+  changeSummary?: string | null;
+}) {
+  const versionNumber = await getNextKnowledgeVersionNumber({
+    organizationId: params.organizationId,
+    knowledgeId: params.knowledgeId,
+  });
+
+  const [version] = await db
+    .insert(graceKnowledgeVersions)
+    .values({
+      organizationId: params.organizationId,
+      knowledgeId: params.knowledgeId,
+      versionNumber,
+      changeType: params.changeType,
+      title: params.snapshot.title,
+      content: params.snapshot.content,
+      tags: params.snapshot.tags ?? [],
+      useForGrace: params.snapshot.useForGrace,
+      visibility: params.snapshot.visibility,
+      changeSummary: params.changeSummary ?? null,
+      changedByUserId: params.changedByUserId,
+    })
+    .returning();
+
+  return version;
+}
+
 export async function getGraceSessions(organizationId: string) {
-  await requireOrgMembership(organizationId);
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
   return db
     .select()
     .from(graceSessions)
-    .where(eq(graceSessions.organizationId, organizationId))
+    .where(eq(graceSessions.organizationId, parsedOrganizationId))
     .orderBy(desc(graceSessions.createdAt));
 }
 
 export async function getGraceCalls(organizationId: string) {
-  await requireOrgMembership(organizationId);
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
   return db
     .select({
       call: graceCalls,
@@ -246,7 +428,7 @@ export async function getGraceCalls(organizationId: string) {
       churchContacts,
       sql`${churchContacts.id} = coalesce(${graceCalls.contactId}, ${graceSessions.contactId}, ${graceSessions.matchedContactId})`
     )
-    .where(eq(graceCalls.organizationId, organizationId))
+    .where(eq(graceCalls.organizationId, parsedOrganizationId))
     .orderBy(desc(graceCalls.createdAt));
 }
 
@@ -263,7 +445,8 @@ export async function updateGraceCall(input: {
   intent?: string | null;
   outcome?: string | null;
 }) {
-  await requireOrgMembership(input.organizationId);
+  const parsed = updateGraceCallSchema.parse(input);
+  await requireOrgMembership(parsed.organizationId);
   const [existing] = await db
     .select({
       id: graceCalls.id,
@@ -280,8 +463,8 @@ export async function updateGraceCall(input: {
     .from(graceCalls)
     .where(
       and(
-        eq(graceCalls.organizationId, input.organizationId),
-        eq(graceCalls.id, input.callId)
+        eq(graceCalls.organizationId, parsed.organizationId),
+        eq(graceCalls.id, parsed.callId)
       )
     )
     .limit(1);
@@ -302,15 +485,15 @@ export async function updateGraceCall(input: {
     outcome?: string | null;
   } = {};
 
-  if (input.contactId !== undefined) {
-    const nextContactId = input.contactId ? String(input.contactId).trim() : null;
+  if (parsed.contactId !== undefined) {
+    const nextContactId = parsed.contactId ? String(parsed.contactId).trim() : null;
     if (nextContactId) {
       const [contact] = await db
         .select({ id: churchContacts.id })
         .from(churchContacts)
         .where(
           and(
-            eq(churchContacts.organizationId, input.organizationId),
+            eq(churchContacts.organizationId, parsed.organizationId),
             eq(churchContacts.id, nextContactId)
           )
         )
@@ -325,12 +508,12 @@ export async function updateGraceCall(input: {
     }
   }
 
-  const startedAt = normalizeOptionalDate(input.startedAt, "startedAt");
+  const startedAt = normalizeOptionalDate(parsed.startedAt, "startedAt");
   if (startedAt !== undefined) {
     updates.startedAt = startedAt;
   }
 
-  const endedAt = normalizeOptionalDate(input.endedAt, "endedAt");
+  const endedAt = normalizeOptionalDate(parsed.endedAt, "endedAt");
   if (endedAt !== undefined) {
     updates.endedAt = endedAt;
   }
@@ -342,15 +525,15 @@ export async function updateGraceCall(input: {
     throw new Error("endedAt cannot be before startedAt");
   }
 
-  if (input.durationSec !== undefined) {
-    if (input.durationSec === null) {
+  if (parsed.durationSec !== undefined) {
+    if (parsed.durationSec === null) {
       updates.durationSec = null;
     } else {
-      const parsed = Number(input.durationSec);
-      if (!Number.isFinite(parsed) || parsed < 0) {
+      const durationSec = Number(parsed.durationSec);
+      if (!Number.isFinite(durationSec) || durationSec < 0) {
         throw new Error("durationSec must be a non-negative number");
       }
-      updates.durationSec = Math.round(parsed);
+      updates.durationSec = Math.round(durationSec);
     }
   } else if (updates.startedAt !== undefined || updates.endedAt !== undefined) {
     if (nextStartedAt && nextEndedAt) {
@@ -361,19 +544,19 @@ export async function updateGraceCall(input: {
     }
   }
 
-  const recordingUrl = normalizeOptionalText(input.recordingUrl);
+  const recordingUrl = normalizeOptionalText(parsed.recordingUrl);
   if (recordingUrl !== undefined) updates.recordingUrl = recordingUrl;
 
-  const transcriptText = normalizeOptionalText(input.transcriptText);
+  const transcriptText = normalizeOptionalText(parsed.transcriptText);
   if (transcriptText !== undefined) updates.transcriptText = transcriptText;
 
-  const summaryText = normalizeOptionalText(input.summaryText);
+  const summaryText = normalizeOptionalText(parsed.summaryText);
   if (summaryText !== undefined) updates.summaryText = summaryText;
 
-  const intent = normalizeOptionalText(input.intent);
+  const intent = normalizeOptionalText(parsed.intent);
   if (intent !== undefined) updates.intent = intent;
 
-  const outcome = normalizeOptionalText(input.outcome);
+  const outcome = normalizeOptionalText(parsed.outcome);
   if (outcome !== undefined) updates.outcome = outcome;
 
   if (Object.keys(updates).length === 0) {
@@ -385,8 +568,8 @@ export async function updateGraceCall(input: {
     .set(updates)
     .where(
       and(
-        eq(graceCalls.organizationId, input.organizationId),
-        eq(graceCalls.id, input.callId)
+        eq(graceCalls.organizationId, parsed.organizationId),
+        eq(graceCalls.id, parsed.callId)
       )
     )
     .returning();
@@ -406,11 +589,9 @@ export async function escalateGraceCall(input: {
   assignedTeam?: string | null;
   metadataJson?: Record<string, unknown>;
 }) {
-  await requireOrgMembership(input.organizationId);
-  const reason = String(input.reason || "").trim();
-  if (!reason) {
-    throw new Error("reason is required");
-  }
+  const parsed = escalateGraceCallSchema.parse(input);
+  await requireOrgMembership(parsed.organizationId);
+  const reason = parsed.reason;
 
   const [callRow] = await db
     .select({
@@ -428,13 +609,13 @@ export async function escalateGraceCall(input: {
       graceSessions,
       and(
         eq(graceCalls.sessionId, graceSessions.id),
-        eq(graceSessions.organizationId, input.organizationId)
+        eq(graceSessions.organizationId, parsed.organizationId)
       )
     )
     .where(
       and(
-        eq(graceCalls.organizationId, input.organizationId),
-        eq(graceCalls.id, input.callId)
+        eq(graceCalls.organizationId, parsed.organizationId),
+        eq(graceCalls.id, parsed.callId)
       )
     )
     .limit(1);
@@ -444,11 +625,11 @@ export async function escalateGraceCall(input: {
   }
 
   const summaryText =
-    normalizeOptionalText(input.summaryText) ??
+    normalizeOptionalText(parsed.summaryText) ??
     normalizeOptionalText(callRow.callSummaryText) ??
     normalizeOptionalText(callRow.callTranscriptText) ??
     `Call ${callRow.id} requires escalation`;
-  const assignedTeam = normalizeOptionalText(input.assignedTeam) ?? "pastoral_care";
+  const assignedTeam = normalizeOptionalText(parsed.assignedTeam) ?? "pastoral_care";
   const resolvedContactId =
     callRow.callContactId ??
     callRow.sessionContactId ??
@@ -464,7 +645,7 @@ export async function escalateGraceCall(input: {
     })
     .where(
       and(
-        eq(graceSessions.organizationId, input.organizationId),
+        eq(graceSessions.organizationId, parsed.organizationId),
         eq(graceSessions.id, callRow.sessionId)
       )
     );
@@ -477,7 +658,7 @@ export async function escalateGraceCall(input: {
     })
     .where(
       and(
-        eq(graceCalls.organizationId, input.organizationId),
+        eq(graceCalls.organizationId, parsed.organizationId),
         eq(graceCalls.id, callRow.id)
       )
     );
@@ -487,7 +668,7 @@ export async function escalateGraceCall(input: {
     .from(graceHandoffs)
     .where(
       and(
-        eq(graceHandoffs.organizationId, input.organizationId),
+        eq(graceHandoffs.organizationId, parsed.organizationId),
         eq(graceHandoffs.sessionId, callRow.sessionId),
         eq(graceHandoffs.status, "open")
       )
@@ -501,7 +682,7 @@ export async function escalateGraceCall(input: {
     const [createdHandoffRow] = await db
       .insert(graceHandoffs)
       .values({
-        organizationId: input.organizationId,
+        organizationId: parsed.organizationId,
         sessionId: callRow.sessionId,
         contactId: resolvedContactId,
         actorType: callRow.sessionActorType,
@@ -510,7 +691,7 @@ export async function escalateGraceCall(input: {
         assignedTeam,
         status: "open",
         metadataJson: {
-          ...(input.metadataJson ?? {}),
+          ...(parsed.metadataJson ?? {}),
           source: "calls.escalate",
           callId: callRow.id,
         },
@@ -528,7 +709,7 @@ export async function escalateGraceCall(input: {
       .from(conversations)
       .where(
         and(
-          eq(conversations.organizationId, input.organizationId),
+          eq(conversations.organizationId, parsed.organizationId),
           eq(conversations.channel, "phone"),
           eq(conversations.contactId, resolvedContactId)
         )
@@ -547,7 +728,7 @@ export async function escalateGraceCall(input: {
         })
         .where(
           and(
-            eq(conversations.organizationId, input.organizationId),
+            eq(conversations.organizationId, parsed.organizationId),
             eq(conversations.id, conversation.id)
           )
         );
@@ -555,7 +736,7 @@ export async function escalateGraceCall(input: {
       const [createdConversation] = await db
         .insert(conversations)
         .values({
-          organizationId: input.organizationId,
+          organizationId: parsed.organizationId,
           contactId: resolvedContactId,
           channel: "phone",
           status: "waiting",
@@ -578,29 +759,32 @@ export async function escalateGraceCall(input: {
 }
 
 export async function getGraceMessages(organizationId: string) {
-  await requireOrgMembership(organizationId);
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
   return db
     .select()
     .from(graceMessages)
-    .where(eq(graceMessages.organizationId, organizationId))
+    .where(eq(graceMessages.organizationId, parsedOrganizationId))
     .orderBy(desc(graceMessages.createdAt));
 }
 
 export async function getGraceToolAudit(organizationId: string) {
-  await requireOrgMembership(organizationId);
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
   return db
     .select()
     .from(graceToolAudit)
-    .where(eq(graceToolAudit.organizationId, organizationId))
+    .where(eq(graceToolAudit.organizationId, parsedOrganizationId))
     .orderBy(desc(graceToolAudit.createdAt));
 }
 
 export async function getGraceKnowledge(organizationId: string) {
-  await requireOrgMembership(organizationId);
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
   return db
     .select()
     .from(graceKnowledge)
-    .where(eq(graceKnowledge.organizationId, organizationId))
+    .where(eq(graceKnowledge.organizationId, parsedOrganizationId))
     .orderBy(desc(graceKnowledge.updatedAt));
 }
 
@@ -610,37 +794,208 @@ export async function createGraceKnowledge(input: {
   content: string;
   tags?: string[];
   useForGrace?: boolean;
+  visibility?: "public" | "internal";
 }) {
-  await requireOrgMembership(input.organizationId);
+  const parsed = createGraceKnowledgeSchema.parse(input);
+  const { userId } = await requireOrgMembership(parsed.organizationId);
+  const title = parsed.title.trim();
+  const content = parsed.content.trim();
+
   const [created] = await db
     .insert(graceKnowledge)
     .values({
-      organizationId: input.organizationId,
-      title: input.title,
-      content: input.content,
-      tags: input.tags ?? [],
-      useForGrace: input.useForGrace ?? true,
+      organizationId: parsed.organizationId,
+      title,
+      content,
+      tags: parsed.tags ?? [],
+      useForGrace: parsed.useForGrace ?? true,
+      visibility: parsed.visibility ?? "internal",
     })
     .returning();
+
+  await writeKnowledgeVersion({
+    organizationId: parsed.organizationId,
+    knowledgeId: created.id,
+    snapshot: created,
+    changeType: "create",
+    changedByUserId: userId,
+    changeSummary: "Initial creation",
+  });
 
   return created;
 }
 
+export async function updateGraceKnowledge(input: {
+  organizationId: string;
+  knowledgeId: string;
+  title?: string;
+  content?: string;
+  tags?: string[];
+  useForGrace?: boolean;
+  visibility?: "public" | "internal";
+}) {
+  const parsed = updateGraceKnowledgeSchema.parse(input);
+  const { userId } = await requireOrgMembership(parsed.organizationId);
+  const [existing] = await db
+    .select()
+    .from(graceKnowledge)
+    .where(
+      and(
+        eq(graceKnowledge.organizationId, parsed.organizationId),
+        eq(graceKnowledge.id, parsed.knowledgeId)
+      )
+    )
+    .limit(1);
+
+  if (!existing) {
+    throw new Error("Knowledge entry not found");
+  }
+
+  const patch: Partial<typeof graceKnowledge.$inferInsert> = {
+    updatedAt: new Date(),
+  };
+  const changedFields: string[] = [];
+
+  if (parsed.title !== undefined) {
+    patch.title = parsed.title.trim();
+    changedFields.push("title");
+  }
+
+  if (parsed.content !== undefined) {
+    patch.content = parsed.content.trim();
+    changedFields.push("content");
+  }
+
+  if (parsed.tags !== undefined) {
+    patch.tags = parsed.tags;
+    changedFields.push("tags");
+  }
+
+  if (parsed.useForGrace !== undefined) {
+    patch.useForGrace = parsed.useForGrace;
+    changedFields.push("useForGrace");
+  }
+
+  if (parsed.visibility !== undefined) {
+    patch.visibility = parsed.visibility;
+    changedFields.push("visibility");
+  }
+
+  if (changedFields.length === 0) {
+    return existing;
+  }
+
+  const [updated] = await db
+    .update(graceKnowledge)
+    .set(patch)
+    .where(
+      and(
+        eq(graceKnowledge.organizationId, parsed.organizationId),
+        eq(graceKnowledge.id, parsed.knowledgeId)
+      )
+    )
+    .returning();
+
+  if (!updated) {
+    throw new Error("Knowledge entry not found");
+  }
+
+  await writeKnowledgeVersion({
+    organizationId: parsed.organizationId,
+    knowledgeId: updated.id,
+    snapshot: updated,
+    changeType: "update",
+    changedByUserId: userId,
+    changeSummary: `Updated ${changedFields.join(", ")}`,
+  });
+
+  return updated;
+}
+
+export async function deleteGraceKnowledge(input: {
+  organizationId: string;
+  knowledgeId: string;
+}) {
+  const parsed = graceKnowledgeIdSchema.parse(input);
+  const { userId } = await requireOrgAdmin(parsed.organizationId);
+  const [existing] = await db
+    .select()
+    .from(graceKnowledge)
+    .where(
+      and(
+        eq(graceKnowledge.organizationId, parsed.organizationId),
+        eq(graceKnowledge.id, parsed.knowledgeId)
+      )
+    )
+    .limit(1);
+
+  if (!existing) {
+    throw new Error("Knowledge entry not found");
+  }
+
+  await writeKnowledgeVersion({
+    organizationId: parsed.organizationId,
+    knowledgeId: existing.id,
+    snapshot: existing,
+    changeType: "delete",
+    changedByUserId: userId,
+    changeSummary: "Deleted entry",
+  });
+
+  const [deleted] = await db
+    .delete(graceKnowledge)
+    .where(
+      and(
+        eq(graceKnowledge.organizationId, parsed.organizationId),
+        eq(graceKnowledge.id, parsed.knowledgeId)
+      )
+    )
+    .returning({ id: graceKnowledge.id });
+
+  if (!deleted) {
+    throw new Error("Knowledge entry not found");
+  }
+
+  return deleted;
+}
+
+export async function getGraceKnowledgeVersions(input: {
+  organizationId: string;
+  knowledgeId: string;
+  limit?: number;
+}) {
+  const parsed = getGraceKnowledgeVersionsSchema.parse(input);
+  await requireOrgMembership(parsed.organizationId);
+  return db
+    .select()
+    .from(graceKnowledgeVersions)
+    .where(
+      and(
+        eq(graceKnowledgeVersions.organizationId, parsed.organizationId),
+        eq(graceKnowledgeVersions.knowledgeId, parsed.knowledgeId)
+      )
+    )
+    .orderBy(desc(graceKnowledgeVersions.versionNumber), desc(graceKnowledgeVersions.createdAt))
+    .limit(parsed.limit ?? 20);
+}
+
 export async function getGraceApprovals(organizationId: string) {
-  await requireOrgMembership(organizationId);
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
   return db
     .select()
     .from(graceApprovals)
-    .where(eq(graceApprovals.organizationId, organizationId))
+    .where(eq(graceApprovals.organizationId, parsedOrganizationId))
     .orderBy(desc(graceApprovals.createdAt));
 }
 
 export async function getGraceFollowupProposals(organizationId: string) {
-  await requireOrgMembership(organizationId);
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
   return db
     .select()
     .from(graceFollowupProposals)
-    .where(eq(graceFollowupProposals.organizationId, organizationId))
+    .where(eq(graceFollowupProposals.organizationId, parsedOrganizationId))
     .orderBy(desc(graceFollowupProposals.createdAt));
 }
 
@@ -649,14 +1004,15 @@ export async function updateGraceFollowupProposalStatus(input: {
   proposalId: string;
   status: "approved" | "rejected" | "pending" | "sent";
 }) {
-  const { userId } = await requireOrgMembership(input.organizationId);
+  const parsed = updateGraceFollowupProposalStatusSchema.parse(input);
+  const { userId } = await requireOrgMembership(parsed.organizationId);
   const [proposal] = await db
     .select()
     .from(graceFollowupProposals)
     .where(
       and(
-        eq(graceFollowupProposals.organizationId, input.organizationId),
-        eq(graceFollowupProposals.id, input.proposalId)
+        eq(graceFollowupProposals.organizationId, parsed.organizationId),
+        eq(graceFollowupProposals.id, parsed.proposalId)
       )
     )
     .limit(1);
@@ -665,18 +1021,18 @@ export async function updateGraceFollowupProposalStatus(input: {
     throw new Error("Proposal not found");
   }
 
-  if (input.status !== "approved") {
+  if (parsed.status !== "approved") {
     const [updated] = await db
       .update(graceFollowupProposals)
       .set({
-        status: input.status,
+        status: parsed.status,
         approvedByUserId: null,
         approvedAt: null,
       })
       .where(
         and(
-          eq(graceFollowupProposals.organizationId, input.organizationId),
-          eq(graceFollowupProposals.id, input.proposalId)
+          eq(graceFollowupProposals.organizationId, parsed.organizationId),
+          eq(graceFollowupProposals.id, parsed.proposalId)
         )
       )
       .returning();
@@ -719,16 +1075,11 @@ export async function updateGraceFollowupProposalStatus(input: {
   } else {
     try {
       if (dispatchChannel === "sms") {
-        const smsConfig = await resolveSmsProvider(proposal.organizationId);
-        if (!smsConfig) {
-          throw new Error("SMS provider is not configured");
-        }
-
-        const sent = await sendTextBeeSMS({
+        const sent = await sendOrganizationSms({
+          organizationId: proposal.organizationId,
           to: recipient,
           message: proposal.messageText,
           idempotencyKey: `${proposal.id}:approved-send`,
-          config: smsConfig,
         });
 
         if (!sent.success) {
@@ -813,8 +1164,8 @@ export async function updateGraceFollowupProposalStatus(input: {
     })
     .where(
       and(
-        eq(graceFollowupProposals.organizationId, input.organizationId),
-        eq(graceFollowupProposals.id, input.proposalId)
+        eq(graceFollowupProposals.organizationId, parsed.organizationId),
+        eq(graceFollowupProposals.id, parsed.proposalId)
       )
     )
     .returning();
@@ -832,13 +1183,14 @@ export async function getGraceMemories(input: {
   contactId?: string;
   limit?: number;
 }) {
-  await requireOrgMembership(input.organizationId);
-  const clauses = [eq(graceMemory.organizationId, input.organizationId)];
-  if (input.memoryType) {
-    clauses.push(eq(graceMemory.memoryType, input.memoryType));
+  const parsed = getGraceMemoriesSchema.parse(input);
+  await requireOrgMembership(parsed.organizationId);
+  const clauses = [eq(graceMemory.organizationId, parsed.organizationId)];
+  if (parsed.memoryType) {
+    clauses.push(eq(graceMemory.memoryType, parsed.memoryType));
   }
-  if (input.contactId) {
-    clauses.push(eq(graceMemory.contactId, input.contactId));
+  if (parsed.contactId) {
+    clauses.push(eq(graceMemory.contactId, parsed.contactId));
   }
 
   return db
@@ -846,11 +1198,12 @@ export async function getGraceMemories(input: {
     .from(graceMemory)
     .where(and(...clauses))
     .orderBy(desc(graceMemory.createdAt))
-    .limit(input.limit ?? 20);
+    .limit(parsed.limit ?? 20);
 }
 
 export async function getGraceDailyBriefing(organizationId: string) {
-  await requireOrgMembership(organizationId);
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
@@ -859,7 +1212,7 @@ export async function getGraceDailyBriefing(organizationId: string) {
     .from(graceMemory)
     .where(
       and(
-        eq(graceMemory.organizationId, organizationId),
+        eq(graceMemory.organizationId, parsedOrganizationId),
         eq(graceMemory.memoryType, "daily_briefing"),
         gte(graceMemory.createdAt, startOfToday)
       )
@@ -874,7 +1227,7 @@ export async function getGraceDailyBriefing(organizationId: string) {
     .from(graceMemory)
     .where(
       and(
-        eq(graceMemory.organizationId, organizationId),
+        eq(graceMemory.organizationId, parsedOrganizationId),
         eq(graceMemory.memoryType, "daily_briefing")
       )
     )
@@ -894,23 +1247,26 @@ export async function createGraceMemory(input: {
   tags?: string[];
   metadataJson?: Record<string, unknown>;
 }) {
-  const { userId } = await requireOrgMembership(input.organizationId);
+  const parsed = createGraceMemorySchema.parse(input);
+  const { userId } = await requireOrgMembership(parsed.organizationId);
+  const sessionId = normalizeOptionalText(parsed.sessionId);
+  const contactId = normalizeOptionalText(parsed.contactId);
 
-  if (input.memoryType === "contact_memory" && !input.contactId) {
+  if (parsed.memoryType === "contact_memory" && !contactId) {
     throw new Error("contactId is required for contact_memory entries");
   }
 
   const [created] = await db
     .insert(graceMemory)
     .values({
-      organizationId: input.organizationId,
-      sessionId: input.sessionId ?? null,
-      contactId: input.contactId ?? null,
-      memoryType: input.memoryType,
-      summary: input.summary.trim(),
-      details: input.details?.trim() || null,
-      tags: input.tags ?? [],
-      metadataJson: input.metadataJson,
+      organizationId: parsed.organizationId,
+      sessionId: sessionId ?? null,
+      contactId: contactId ?? null,
+      memoryType: parsed.memoryType,
+      summary: parsed.summary.trim(),
+      details: normalizeOptionalText(parsed.details) ?? null,
+      tags: parsed.tags ?? [],
+      metadataJson: parsed.metadataJson,
       createdByActorType: "staff",
       createdByUserId: userId,
     })
@@ -920,13 +1276,14 @@ export async function createGraceMemory(input: {
 }
 
 export async function getGracePendingGoals(organizationId: string) {
-  await requireOrgMembership(organizationId);
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
   return db
     .select()
     .from(graceGoals)
     .where(
       and(
-        eq(graceGoals.organizationId, organizationId),
+        eq(graceGoals.organizationId, parsedOrganizationId),
         inArray(graceGoals.status, ["queued", "in_progress", "waiting"])
       )
     )
@@ -941,20 +1298,21 @@ export async function updateGraceApproval(input: {
   decidedByUserId?: string;
   decisionNote?: string;
 }) {
-  const { userId } = await requireOrgMembership(input.organizationId);
+  const parsed = updateGraceApprovalSchema.parse(input);
+  const { userId } = await requireOrgMembership(parsed.organizationId);
   const [updated] = await db
     .update(graceApprovals)
     .set({
-      status: input.status,
+      status: parsed.status,
       // Always record the actual authenticated user, not a caller-supplied value
       decidedByUserId: userId,
-      decisionNote: input.decisionNote ?? null,
+      decisionNote: parsed.decisionNote ?? null,
       decidedAt: new Date(),
     })
     .where(
       and(
-        eq(graceApprovals.organizationId, input.organizationId),
-        eq(graceApprovals.id, input.approvalId)
+        eq(graceApprovals.organizationId, parsed.organizationId),
+        eq(graceApprovals.id, parsed.approvalId)
       )
     )
     .returning();
@@ -963,23 +1321,26 @@ export async function updateGraceApproval(input: {
 }
 
 export async function getGraceProviderConfigs(organizationId: string) {
-  await requireOrgMembership(organizationId);
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
   const rows = await db
     .select()
     .from(providerConfigs)
-    .where(eq(providerConfigs.organizationId, organizationId))
+    .where(eq(providerConfigs.organizationId, parsedOrganizationId))
     .orderBy(desc(providerConfigs.updatedAt));
 
   return rows.map((row) => {
+    const normalizedMode = row.mode === "byo" ? "agency_managed" : row.mode;
     const redacted = redactProviderConfigForClient({
       channel: row.channel,
       provider: row.provider,
       config: row.configJson ?? {},
-      mode: row.mode,
+      mode: normalizedMode,
     });
 
     return {
       ...row,
+      mode: normalizedMode,
       configJson: redacted.configJson,
       secretStatus: redacted.secretStatus,
       validation: redacted.validation,
@@ -991,52 +1352,43 @@ export async function upsertGraceProviderConfig(input: {
   organizationId: string;
   channel: string;
   provider: string;
-  mode: "agency_managed" | "byo" | "disabled";
+  mode: "agency_managed" | "disabled";
   isActive?: boolean;
   configJson?: Record<string, unknown>;
 }) {
-  await requireOrgAdmin(input.organizationId);
-  if (input.mode === "byo" && !isByoAllowedForChannel(input.channel)) {
-    throw new Error(
-      `BYO is not allowed for ${input.channel}. This channel is agency-managed in your current plan.`
-    );
-  }
+  const parsed = upsertGraceProviderConfigSchema.parse(input);
+  await requireOrgAdmin(parsed.organizationId);
 
   const [existing] = await db
     .select()
     .from(providerConfigs)
     .where(
       and(
-        eq(providerConfigs.organizationId, input.organizationId),
-        eq(providerConfigs.channel, input.channel),
-        eq(providerConfigs.provider, input.provider)
+        eq(providerConfigs.organizationId, parsed.organizationId),
+        eq(providerConfigs.channel, parsed.channel),
+        eq(providerConfigs.provider, parsed.provider)
       )
     )
     .limit(1);
 
   const normalized = normalizeAndEncryptProviderConfig({
-    channel: input.channel,
-    provider: input.provider,
-    mode: input.mode,
-    incoming: input.configJson,
+    channel: parsed.channel,
+    provider: parsed.provider,
+    mode: parsed.mode,
+    // Organization admins can only enable/disable platform-managed providers.
+    incoming: undefined,
     existing: existing?.configJson ?? {},
   });
 
-  if (input.mode === "byo" && !normalized.validation.isValid) {
-    throw new Error(
-      `Missing required provider credentials for ${input.channel}/${input.provider}: ${normalized.validation.missing.join(", ")}`
-    );
-  }
-
   const nextIsActive =
-    input.mode === "disabled" ? false : (input.isActive ?? existing?.isActive ?? true);
+    parsed.mode === "disabled" ? false : (parsed.isActive ?? existing?.isActive ?? true);
 
   if (existing) {
     const [updated] = await db
       .update(providerConfigs)
       .set({
-        provider: input.provider,
-        mode: input.mode,
+        provider: parsed.provider,
+        mode: parsed.mode,
         isActive: nextIsActive,
         configJson: normalized.configJson,
         updatedAt: new Date(),
@@ -1044,7 +1396,7 @@ export async function upsertGraceProviderConfig(input: {
       .where(eq(providerConfigs.id, existing.id))
       .returning();
 
-    if (updated.isActive) {
+    if (updated.isActive && !allowsMultipleActiveProvidersForChannel(parsed.channel)) {
       await db
         .update(providerConfigs)
         .set({
@@ -1053,8 +1405,8 @@ export async function upsertGraceProviderConfig(input: {
         })
         .where(
           and(
-            eq(providerConfigs.organizationId, input.organizationId),
-            eq(providerConfigs.channel, input.channel),
+            eq(providerConfigs.organizationId, parsed.organizationId),
+            eq(providerConfigs.channel, parsed.channel),
             eq(providerConfigs.isActive, true),
             ne(providerConfigs.id, updated.id)
           )
@@ -1078,16 +1430,16 @@ export async function upsertGraceProviderConfig(input: {
   const [created] = await db
     .insert(providerConfigs)
     .values({
-      organizationId: input.organizationId,
-      channel: input.channel,
-      provider: input.provider,
-      mode: input.mode,
+      organizationId: parsed.organizationId,
+      channel: parsed.channel,
+      provider: parsed.provider,
+      mode: parsed.mode,
       isActive: nextIsActive,
       configJson: normalized.configJson,
     })
     .returning();
 
-  if (created.isActive) {
+  if (created.isActive && !allowsMultipleActiveProvidersForChannel(parsed.channel)) {
     await db
       .update(providerConfigs)
       .set({
@@ -1096,8 +1448,8 @@ export async function upsertGraceProviderConfig(input: {
       })
       .where(
         and(
-          eq(providerConfigs.organizationId, input.organizationId),
-          eq(providerConfigs.channel, input.channel),
+          eq(providerConfigs.organizationId, parsed.organizationId),
+          eq(providerConfigs.channel, parsed.channel),
           eq(providerConfigs.isActive, true),
           ne(providerConfigs.id, created.id)
         )
@@ -1119,11 +1471,12 @@ export async function upsertGraceProviderConfig(input: {
 }
 
 export async function getGracePolicyConfig(organizationId: string) {
-  await requireOrgMembership(organizationId);
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
   const [policy] = await db
     .select()
     .from(gracePolicyConfigs)
-    .where(eq(gracePolicyConfigs.organizationId, organizationId))
+    .where(eq(gracePolicyConfigs.organizationId, parsedOrganizationId))
     .limit(1);
 
   if (policy) return policy;
@@ -1131,7 +1484,7 @@ export async function getGracePolicyConfig(organizationId: string) {
   const [created] = await db
     .insert(gracePolicyConfigs)
     .values({
-      organizationId,
+      organizationId: parsedOrganizationId,
       approvalsEnabled: true,
       autoEscalateOnEmergency: true,
       confidenceThreshold: "0.7",
@@ -1156,18 +1509,19 @@ export async function updateGracePolicyConfig(input: {
   highRiskTools?: string[];
   allowedPublicTools?: string[];
 }) {
-  await requireOrgAdmin(input.organizationId);
-  const current = await getGracePolicyConfig(input.organizationId);
+  const parsed = updateGracePolicyConfigSchema.parse(input);
+  await requireOrgAdmin(parsed.organizationId);
+  const current = await getGracePolicyConfig(parsed.organizationId);
 
   const [updated] = await db
     .update(gracePolicyConfigs)
     .set({
-      approvalsEnabled: input.approvalsEnabled ?? current.approvalsEnabled,
+      approvalsEnabled: parsed.approvalsEnabled ?? current.approvalsEnabled,
       autoEscalateOnEmergency:
-        input.autoEscalateOnEmergency ?? current.autoEscalateOnEmergency,
-      confidenceThreshold: input.confidenceThreshold ?? current.confidenceThreshold,
-      highRiskTools: input.highRiskTools ?? (current.highRiskTools || []),
-      allowedPublicTools: input.allowedPublicTools ?? (current.allowedPublicTools || []),
+        parsed.autoEscalateOnEmergency ?? current.autoEscalateOnEmergency,
+      confidenceThreshold: parsed.confidenceThreshold ?? current.confidenceThreshold,
+      highRiskTools: parsed.highRiskTools ?? (current.highRiskTools || []),
+      allowedPublicTools: parsed.allowedPublicTools ?? (current.allowedPublicTools || []),
       updatedAt: new Date(),
     })
     .where(eq(gracePolicyConfigs.id, current.id))
@@ -1181,13 +1535,14 @@ export async function sendCopilotMessage(input: {
   sessionId?: string;
   message: string;
 }) {
-  const { userId } = await requireOrgMembership(input.organizationId);
+  const parsed = sendCopilotMessageSchema.parse(input);
+  const { userId } = await requireOrgMembership(parsed.organizationId);
   return runGraceMessage({
-    organizationId: input.organizationId,
+    organizationId: parsed.organizationId,
     channel: "in_app",
     actorType: "staff",
-    message: input.message,
-    sessionId: input.sessionId,
+    message: parsed.message,
+    sessionId: parsed.sessionId,
     userId,
   });
 }

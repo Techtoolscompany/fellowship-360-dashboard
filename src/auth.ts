@@ -16,7 +16,23 @@ import MagicLinkEmail from "./emails/MagicLinkEmail";
 import sendMail from "./lib/email/sendMail";
 import { appConfig } from "./lib/config";
 import { decryptJson } from "./lib/encryption/edge-jwt";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import {
+  logSuperAdminAudit,
+  resolveSuperAdminAccess,
+  superAdminHasPermission,
+} from "./lib/super-admin/auth";
+import type {
+  SuperAdminMembershipStatus,
+  SuperAdminPermission,
+  SuperAdminRole,
+} from "./lib/super-admin/permissions";
+import { assertStrongSecretInProduction } from "./lib/security/production-readiness";
+
+assertStrongSecretInProduction(
+  "AUTH_SECRET",
+  process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET
+);
 
 // Overrides default session type
 declare module "next-auth" {
@@ -25,6 +41,12 @@ declare module "next-auth" {
       id: string;
       email: string;
       impersonatedBy?: string;
+      superAdmin?: {
+        membershipId: string;
+        role: SuperAdminRole;
+        status: SuperAdminMembershipStatus;
+        permissions: SuperAdminPermission[];
+      };
     };
     expires: string;
   }
@@ -34,7 +56,6 @@ interface ImpersonateToken {
   impersonateIntoId: string;
   impersonateIntoEmail: string;
   impersonator: string;
-  expiry: string;
 }
 
 const emailProvider: EmailConfig = {
@@ -125,6 +146,19 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (token.impersonatedBy) {
         session.user.impersonatedBy = token.impersonatedBy as string;
       }
+      if (
+        token.isSuperAdmin &&
+        token.superAdminMembershipId &&
+        token.superAdminRole &&
+        token.superAdminStatus
+      ) {
+        session.user.superAdmin = {
+          membershipId: token.superAdminMembershipId as string,
+          role: token.superAdminRole as SuperAdminRole,
+          status: token.superAdminStatus as SuperAdminMembershipStatus,
+          permissions: (token.superAdminPermissions as SuperAdminPermission[]) ?? [],
+        };
+      }
       return session;
     },
     async jwt({ token, user }) {
@@ -136,13 +170,34 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       // NOTE: Do not add anything else to the token, except for the sub
       // This avoids stale data problems, while increasing db roundtrips
       // which is acceptable while starting small.
-      return {
+      const nextToken = {
         sub: token.sub,
-        email: token.email,
+        email: (user?.email ?? token.email) || undefined,
         impersonatedBy: token.impersonatedBy,
         iat: token.iat,
         exp: token.exp,
         jti: token.jti,
+      };
+
+      const access = await resolveSuperAdminAccess({
+        userId: user?.id ?? token.sub,
+        email: user?.email ?? token.email,
+      });
+
+      if (!access) {
+        return {
+          ...nextToken,
+          isSuperAdmin: false,
+        };
+      }
+
+      return {
+        ...nextToken,
+        isSuperAdmin: access.isActive,
+        superAdminMembershipId: access.membershipId,
+        superAdminRole: access.role,
+        superAdminStatus: access.status,
+        superAdminPermissions: access.permissions,
       };
     },
   },
@@ -177,6 +232,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
               }
 
               try {
+                const normalizedEmail = String(credentials.email)
+                  .trim()
+                  .toLowerCase();
+
                 // Find user by email
                 const user = await db
                   .select({
@@ -186,7 +245,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                     password: users.password,
                   })
                   .from(users)
-                  .where(eq(users.email, credentials.email as string))
+                  .where(sql`lower(${users.email}) = ${normalizedEmail}`)
                   .limit(1)
                   .then((users) => users[0]);
 
@@ -238,19 +297,73 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         try {
           // The token is already URL encoded, decryptJson handles the decoding
           const impersonationToken = await decryptJson<ImpersonateToken>(
-            credentials.signedToken as string
+            credentials.signedToken as string,
+            { purpose: "impersonation" }
           );
 
-          // Validate token expiry
-          if (new Date(impersonationToken.expiry) < new Date()) {
-            throw new Error("Impersonation token expired");
+          const [targetUser, impersonatorUser] = await Promise.all([
+            db
+              .select({
+                id: users.id,
+                email: users.email,
+              })
+              .from(users)
+              .where(eq(users.id, impersonationToken.impersonateIntoId))
+              .limit(1)
+              .then((rows) => rows[0]),
+            db
+              .select({
+                id: users.id,
+                email: users.email,
+              })
+              .from(users)
+              .where(eq(users.id, impersonationToken.impersonator))
+              .limit(1)
+              .then((rows) => rows[0]),
+          ]);
+
+          if (!targetUser || !impersonatorUser) {
+            return null;
           }
 
-          // Trust the decrypted token without additional database validations
+          if (
+            targetUser.email.toLowerCase() !==
+            impersonationToken.impersonateIntoEmail.toLowerCase()
+          ) {
+            return null;
+          }
+
+          const impersonatorAccess = await resolveSuperAdminAccess({
+            userId: impersonatorUser.id,
+            email: impersonatorUser.email,
+          });
+
+          if (
+            !impersonatorAccess?.isActive ||
+            !superAdminHasPermission(impersonatorAccess, "impersonate_users")
+          ) {
+            return null;
+          }
+
+          if (targetUser.id === impersonatorUser.id) {
+            return null;
+          }
+
+          await logSuperAdminAudit({
+            actorUserId: impersonatorUser.id,
+            actionType: "impersonation_started",
+            entityName: "app_user",
+            entityId: targetUser.id,
+            details: {
+              targetUserId: targetUser.id,
+              targetUserEmail: targetUser.email,
+            },
+          });
+
           return {
-            id: impersonationToken.impersonateIntoId,
-            email: impersonationToken.impersonateIntoEmail,
-            impersonatedBy: impersonationToken.impersonator,
+            id: targetUser.id,
+            email: targetUser.email,
+            impersonatedBy: impersonatorUser.id,
           };
         } catch (error) {
           console.error("Error during impersonation:", error);

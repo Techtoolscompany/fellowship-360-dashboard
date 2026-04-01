@@ -78,4 +78,4 @@ export const DELETE = withSuperAdminAuthRequired(async (req) => {
       { status: 500 }
     );
   }
-}); 
+}, "manage_waitlist");

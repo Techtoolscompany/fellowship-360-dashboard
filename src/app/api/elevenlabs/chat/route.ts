@@ -4,6 +4,7 @@ import { aiConfig, organizations } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { runGraceMessage } from "@/lib/grace/runtime";
 import { rateLimitKeyed, verifyWebhookSignature } from "@/lib/grace/channels/webhooks";
+import { getClientIp } from "@/lib/security/request";
 
 export const runtime = "nodejs";
 
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid signature." }, { status: 401 });
     }
 
-    const key = `${req.headers.get("x-forwarded-for") || "unknown"}:elevenlabs-chat`;
+    const key = `${getClientIp(req)}:elevenlabs-chat`;
     if (!(await rateLimitKeyed(key, 30, 60_000))) {
       return NextResponse.json({ error: "Rate limited" }, { status: 429 });
     }

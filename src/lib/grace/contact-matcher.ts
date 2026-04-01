@@ -18,6 +18,10 @@ import { graceSessions } from "@/db/schema/grace-sessions";
 import { graceContactMatchAudit } from "@/db/schema/grace-contact-match-audit";
 import { and, eq, or, ilike, sql } from "drizzle-orm";
 import type { GraceMatchTier } from "./types";
+import {
+  syncContactCreatedToDittofeed,
+  syncContactToDittofeedBestEffort,
+} from "@/lib/dittofeed/contacts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -246,10 +250,21 @@ export async function matchOrCreateContact(
         memberStatus: "visitor",
         source: "other",
       })
-      .returning({ id: churchContacts.id });
+      .returning();
     contactId = newContact.id;
     isNewContact = true;
     outcome = "created_review_candidate";
+
+    await syncContactToDittofeedBestEffort("grace.contact-matcher.review-create", () =>
+      syncContactCreatedToDittofeed({
+        organizationId,
+        contact: newContact,
+        extraProperties: {
+          confidenceTier: tier,
+          requiresReview,
+        },
+      })
+    );
   } else {
     // ── LOW confidence → create new contact ──
     tier = "low";
@@ -264,10 +279,21 @@ export async function matchOrCreateContact(
         memberStatus: "visitor",
         source: "other",
       })
-      .returning({ id: churchContacts.id });
+      .returning();
     contactId = newContact.id;
     isNewContact = true;
     outcome = "created_new";
+
+    await syncContactToDittofeedBestEffort("grace.contact-matcher.create", () =>
+      syncContactCreatedToDittofeed({
+        organizationId,
+        contact: newContact,
+        extraProperties: {
+          confidenceTier: tier,
+          requiresReview,
+        },
+      })
+    );
   }
 
   // Update session with match result

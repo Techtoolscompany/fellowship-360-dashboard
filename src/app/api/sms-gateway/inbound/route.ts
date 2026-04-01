@@ -1,90 +1,112 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { z } from "zod";
 import { db } from "@/db";
-import { smsMessages, smsDevices } from "@/db/schema/sms-gateway";
-import { eq, and } from "drizzle-orm";
+import { smsMessages } from "@/db/schema/sms-gateway";
+import { trackDittofeedSmsReply } from "@/lib/dittofeed/sms";
+import {
+  resolveSmsGatewayDeviceRequestAuth,
+  SmsGatewayAuthError,
+} from "@/lib/sms-gateway/auth";
+import { updateSmsGatewayDevicePresence } from "@/lib/sms-gateway/devices";
+
+const inboundSchema = z.object({
+  deviceId: z.string().trim().optional().nullable(),
+  fromNumber: z.string().trim().min(1),
+  toNumber: z.string().trim().optional().nullable(),
+  body: z.string().min(1),
+  receivedAt: z.string().datetime().optional(),
+  metadataJson: z.record(z.string(), z.unknown()).optional(),
+});
 
 /**
  * POST /api/sms-gateway/inbound — Receive inbound SMS from Android app
- * Auth: device API key
+ * Auth: device token or legacy gateway API key
  * Creates message record and fires GRACE lead event for processing.
  */
 export async function POST(req: NextRequest) {
-  const apiKey = req.headers.get("x-api-key");
-  if (!apiKey || apiKey !== process.env.SMS_GATEWAY_API_KEY) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const body = await req.json();
-  const { deviceId, fromNumber, toNumber, body: smsBody } = body;
-
-  if (!deviceId || !fromNumber || !smsBody) {
-    return NextResponse.json(
-      { error: "deviceId, fromNumber, and body are required" },
-      { status: 400 }
-    );
-  }
-
-  // Look up the device to find which org it belongs to
-  const [device] = await db
-    .select()
-    .from(smsDevices)
-    .where(eq(smsDevices.id, deviceId))
-    .limit(1);
-
-  if (!device || !device.organizationId) {
-    return NextResponse.json(
-      { error: "Device not found or not assigned to an organization" },
-      { status: 422 }
-    );
-  }
-
-  // Update device last seen
-  await db
-    .update(smsDevices)
-    .set({ lastSeenAt: new Date() })
-    .where(eq(smsDevices.id, deviceId));
-
-  // Store inbound message
-  const [message] = await db
-    .insert(smsMessages)
-    .values({
-      organizationId: device.organizationId,
-      deviceId: device.id,
-      direction: "inbound",
-      fromNumber,
-      toNumber: toNumber || device.phoneNumber,
-      body: smsBody,
-      status: "delivered",
-      deliveredAt: new Date(),
-    })
-    .returning();
-
-  // Fire Inngest event for GRACE processing
   try {
-    const { inngest } = await import("@/lib/inngest/client");
-    const {
-      INNGEST_EVENTS,
-      buildLeadReceivedIdempotencyKey,
-    } = await import("@/lib/inngest/events");
-
-    await inngest.send({
-      id: buildLeadReceivedIdempotencyKey({
-        organizationId: device.organizationId,
-        contactEmail: fromNumber, // use phone as identifier
-        message: smsBody,
-      }),
-      name: INNGEST_EVENTS.GRACE_LEAD_RECEIVED,
-      data: {
-        organizationId: device.organizationId,
-        contactName: fromNumber,
-        contactEmail: fromNumber,
-        message: smsBody,
-        idempotencyKey: `sms-inbound-${message.id}`,
-      },
+    const body = inboundSchema.parse(await req.json());
+    const { device } = await resolveSmsGatewayDeviceRequestAuth({
+      req,
+      deviceId: body.deviceId,
     });
-  } catch (err) {
-    console.error("[SMS Gateway] Failed to fire GRACE event for inbound SMS:", err);
-  }
 
-  return NextResponse.json({ message, organizationId: device.organizationId });
+    if (!device.organizationId) {
+      return NextResponse.json(
+        { error: "Device not found or not assigned to an organization" },
+        { status: 422 }
+      );
+    }
+
+    await updateSmsGatewayDevicePresence({ deviceId: device.id });
+
+    const deliveredAt = body.receivedAt ? new Date(body.receivedAt) : new Date();
+    const [message] = await db
+      .insert(smsMessages)
+      .values({
+        organizationId: device.organizationId,
+        deviceId: device.id,
+        direction: "inbound",
+        fromNumber: body.fromNumber,
+        toNumber: body.toNumber || device.phoneNumber,
+        body: body.body,
+        status: "delivered",
+        deliveredAt,
+        metadataJson: {
+          source: "sms_gateway_device",
+          ...(body.metadataJson ?? {}),
+        },
+      })
+      .returning();
+
+    try {
+      await trackDittofeedSmsReply({
+        organizationId: device.organizationId,
+        fromNumber: body.fromNumber,
+        toNumber: body.toNumber || device.phoneNumber,
+        body: body.body,
+        inboundMessageId: message.id,
+      });
+    } catch (error) {
+      console.error("[SMS Gateway] Failed to sync Dittofeed SMS reply:", error);
+    }
+
+    try {
+      const { inngest } = await import("@/lib/inngest/client");
+      const {
+        INNGEST_EVENTS,
+        buildLeadReceivedIdempotencyKey,
+      } = await import("@/lib/inngest/events");
+
+      await inngest.send({
+        id: buildLeadReceivedIdempotencyKey({
+          organizationId: device.organizationId,
+          contactEmail: body.fromNumber,
+          message: body.body,
+        }),
+        name: INNGEST_EVENTS.GRACE_LEAD_RECEIVED,
+        data: {
+          organizationId: device.organizationId,
+          contactName: body.fromNumber,
+          contactEmail: body.fromNumber,
+          message: body.body,
+          idempotencyKey: `sms-inbound-${message.id}`,
+        },
+      });
+    } catch (error) {
+      console.error("[SMS Gateway] Failed to fire GRACE event for inbound SMS:", error);
+    }
+
+    return NextResponse.json({ message, organizationId: device.organizationId });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: "Invalid inbound payload" }, { status: 400 });
+    }
+
+    const status = error instanceof SmsGatewayAuthError ? error.status : 500;
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to process inbound SMS" },
+      { status }
+    );
+  }
 }

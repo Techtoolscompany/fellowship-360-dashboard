@@ -92,4 +92,4 @@ export const POST = withSuperAdminAuthRequired(async (req) => {
       { status: 500 }
     );
   }
-}); 
+}, "manage_coupons");

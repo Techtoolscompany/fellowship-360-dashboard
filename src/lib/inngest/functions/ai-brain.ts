@@ -14,6 +14,10 @@ import { eq, and } from "drizzle-orm";
 import { getGeminiClient } from "@/lib/ai/gemini-client";
 import { isFirstTimeGuestStageName } from "@/lib/pipeline/first-time-guest";
 import {
+  syncContactCreatedToDittofeed,
+  syncContactToDittofeedBestEffort,
+} from "@/lib/dittofeed/contacts";
+import {
   INNGEST_EVENTS,
   buildFirstTimeGuestAppointmentIdempotencyKey,
 } from "../events";
@@ -98,6 +102,16 @@ You must return ONLY a raw JSON object with the exact following schema:
           memberStatus: 'visitor'
         }).returning();
         contact = result[0];
+
+        await syncContactToDittofeedBestEffort("ai-brain.create-contact", () =>
+          syncContactCreatedToDittofeed({
+            organizationId,
+            contact,
+            extraProperties: {
+              intakeSource: "grace_lead_received",
+            },
+          })
+        );
       }
 
       // 3.2 Create Conversation

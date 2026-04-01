@@ -7,6 +7,7 @@ import { graceFlags } from "@/lib/grace/flags";
 import { rateLimitKeyed, verifyWebhookSignature } from "@/lib/grace/channels/webhooks";
 import { processServiceAssignmentSmsReply } from "@/app/actions/operations";
 import { resolveProviderWebhookSecret } from "@/lib/grace/providers/resolver";
+import { getClientIp } from "@/lib/security/request";
 
 export async function POST(req: NextRequest) {
   if (!graceFlags.enabled || !graceFlags.publicChannelsEnabled) {
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
-  const key = `${req.headers.get("x-forwarded-for") || "unknown"}:sms`;
+  const key = `${getClientIp(req)}:sms`;
   if (!(await rateLimitKeyed(key, 240, 60_000))) {
     return NextResponse.json({ error: "Rate limited" }, { status: 429 });
   }

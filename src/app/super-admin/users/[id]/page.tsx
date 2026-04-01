@@ -3,13 +3,6 @@
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Trash2, User, Copy, Check, AlertTriangle } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import Link from "next/link";
 import useSWR from "swr";
@@ -24,6 +17,11 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  SuperAdminEmptyState,
+  SuperAdminPageHeader,
+  SuperAdminSurface,
+} from "@/components/super-admin/primitives";
 
 interface UserDetails {
   id: string;
@@ -102,67 +100,69 @@ export default function UserDetailsPage() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-[calc(100vh-14rem)]">
-        <div className="text-center">
-          <h2 className="text-lg font-medium">Error loading user</h2>
-          <p className="text-sm text-muted-foreground">
-            Failed to load user details. Please try again.
-          </p>
-          <Button variant="ghost" size="sm" asChild className="mt-4">
+      <SuperAdminEmptyState
+        title="Error loading user"
+        description="Failed to load the user details. Return to the user index and try again."
+        action={
+          <Button variant="outline" size="sm" asChild>
             <Link href="/super-admin/users">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Users
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to users
             </Link>
           </Button>
-        </div>
-      </div>
+        }
+      />
     );
   }
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-[calc(100vh-14rem)]">
-        <div className="text-center">
-          <h2 className="text-lg font-medium">Loading...</h2>
-          <p className="text-sm text-muted-foreground">
-            Please wait while we load the user details.
-          </p>
-        </div>
-      </div>
+      <SuperAdminEmptyState
+        title="Loading user"
+        description="Pulling profile, organizations, and impersonation context for this account."
+      />
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/super-admin/users">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back
-            </Link>
-          </Button>
-          <h1 className="text-2xl font-bold">User Details</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleImpersonate}
-          >
-            <User className="h-4 w-4 mr-2" />
-            Impersonate
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => router.push(`/super-admin/users/${id}/delete`)}
-          >
-            <Trash2 className="h-4 w-4 mr-2" />
-            Delete User
-          </Button>
-        </div>
-      </div>
+      <SuperAdminPageHeader
+        backHref="/super-admin/users"
+        backLabel="Users"
+        eyebrow="User Control"
+        eyebrowIcon={User}
+        title={user?.name || "Unnamed User"}
+        description={user?.email}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={handleImpersonate}>
+              <User className="mr-2 h-4 w-4" />
+              Impersonate
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => router.push(`/super-admin/users/${id}/delete`)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete user
+            </Button>
+          </>
+        }
+        stats={[
+          { label: "Joined", value: formatDate(user?.createdAt || null), detail: "Account creation" },
+          {
+            label: "Verified",
+            value: user?.emailVerified ? "Yes" : "No",
+            detail: user?.emailVerified ? formatDate(user.emailVerified) : "No verification date",
+          },
+          {
+            label: "Organizations",
+            value: user?.organizations?.length || 0,
+            detail: "Current memberships",
+          },
+        ]}
+      />
 
       {/* User Impersonation Link Modal */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
@@ -230,12 +230,12 @@ export default function UserDetailsPage() {
       </Dialog>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>User Profile</CardTitle>
-            <CardDescription>Basic information about the user.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
+        <SuperAdminSurface>
+          <div className="border-b border-slate-200/80 px-6 py-5 dark:border-slate-700">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">User Profile</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Basic information about the user.</p>
+          </div>
+          <div className="space-y-6 px-6 py-5">
             <div className="flex items-center gap-4">
               <Avatar className="h-16 w-16">
                 <AvatarImage src={user?.image || undefined} />
@@ -272,18 +272,18 @@ export default function UserDetailsPage() {
                 <dd className="text-sm mt-1">{user?.organizations?.length || 0}</dd>
               </div>
             </dl>
-          </CardContent>
-        </Card>
+          </div>
+        </SuperAdminSurface>
 
         {user?.organizations && user.organizations.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Organizations</CardTitle>
-              <CardDescription>
+          <SuperAdminSurface>
+            <div className="border-b border-slate-200/80 px-6 py-5 dark:border-slate-700">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Organizations</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 Organizations this user belongs to.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+              </p>
+            </div>
+            <div className="px-6 py-5">
               <ul className="space-y-3">
                 {user.organizations.map((org) => (
                   <li key={org.id} className="flex justify-between items-center border-b pb-2 last:border-hidden">
@@ -300,10 +300,10 @@ export default function UserDetailsPage() {
                   </li>
                 ))}
               </ul>
-            </CardContent>
-          </Card>
+            </div>
+          </SuperAdminSurface>
         )}
       </div>
     </div>
   );
-} 
+}

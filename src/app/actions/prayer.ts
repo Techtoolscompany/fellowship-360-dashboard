@@ -7,14 +7,38 @@ import { requireOrgMembership } from "./utils";
 import {
   buildPrayerEscalationTaskMarker,
   buildPrayerEscalationTaskTitle,
-  isPrayerRequestActive,
   normalizePrayerStatus,
   resolvePrayerRouting,
   type PrayerStatus,
   type PrayerUrgency,
 } from "@/lib/prayer/routing";
+import { derivePrayerLifecycleEffects } from "@/lib/operations/prayer-lifecycle";
+import * as z from "zod";
 
 const ACTIVE_TASK_STATUSES: Array<"todo" | "in_progress"> = ["todo", "in_progress"];
+const organizationIdSchema = z.string().trim().min(1);
+const prayerRequestIdSchema = z.string().trim().min(1);
+
+const createPrayerRequestSchema = z.object({
+  contactId: z.string().trim().min(1).optional(),
+  contactName: z.string().trim().optional(),
+  content: z.string().trim().min(1),
+  urgency: z.string().trim().optional(),
+  assignedTeam: z.string().trim().optional(),
+  isAnonymous: z.boolean().optional(),
+  organizationId: organizationIdSchema,
+});
+
+const updatePrayerRequestSchema = z.object({
+  contactId: z.string().trim().nullable().optional(),
+  contactName: z.string().trim().nullable().optional(),
+  content: z.string().trim().min(1).optional(),
+  isAnonymous: z.union([z.boolean(), z.literal("true"), z.literal("false")]).optional(),
+  status: z.string().trim().min(1).optional(),
+  urgency: z.string().trim().min(1).optional(),
+  assignedTeam: z.string().trim().nullable().optional(),
+  response: z.string().trim().nullable().optional(),
+});
 
 async function ensurePrayerEscalationTask(params: {
   organizationId: string;
@@ -141,8 +165,9 @@ export async function getPrayerRequests(
   orgId: string,
   filters?: { status?: string; urgency?: string }
 ) {
-  await requireOrgMembership(orgId);
-  const clauses: any[] = [eq(prayerRequests.organizationId, orgId)];
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
+  const clauses: any[] = [eq(prayerRequests.organizationId, parsedOrgId)];
 
   if (filters?.status) {
     clauses.push(eq(prayerRequests.status, normalizePrayerStatus(filters.status)));
@@ -172,27 +197,28 @@ export async function createPrayerRequest(data: {
   isAnonymous?: boolean;
   organizationId: string;
 }) {
-  await requireOrgMembership(data.organizationId);
+  const parsed = createPrayerRequestSchema.parse(data);
+  await requireOrgMembership(parsed.organizationId);
   const routing = resolvePrayerRouting({
-    content: data.content,
-    urgency: data.urgency,
-    assignedTeam: data.assignedTeam,
+    content: parsed.content,
+    urgency: parsed.urgency,
+    assignedTeam: parsed.assignedTeam,
   });
 
-  const requesterName = data.isAnonymous
+  const requesterName = parsed.isAnonymous
     ? "Anonymous"
-    : data.contactName?.trim() || "Community Member";
+    : parsed.contactName?.trim() || "Community Member";
 
   const [request] = await db
     .insert(prayerRequests)
     .values({
-      contactId: data.contactId ?? null,
+      contactId: parsed.contactId ?? null,
       contactName: requesterName,
-      content: data.content,
+      content: parsed.content,
       urgency: routing.urgency,
-      isAnonymous: data.isAnonymous ? "true" : "false",
+      isAnonymous: parsed.isAnonymous ? "true" : "false",
       assignedTeam: routing.assignedTeam,
-      organizationId: data.organizationId,
+      organizationId: parsed.organizationId,
     })
     .returning();
 
@@ -232,6 +258,8 @@ export async function updatePrayerRequest(
     response: string | null;
   }>
 ) {
+  const prayerRequestId = prayerRequestIdSchema.parse(id);
+  const parsed = updatePrayerRequestSchema.parse(data);
   const [existing] = await db
     .select({
       id: prayerRequests.id,
@@ -244,22 +272,24 @@ export async function updatePrayerRequest(
       isAnonymous: prayerRequests.isAnonymous,
     })
     .from(prayerRequests)
-    .where(eq(prayerRequests.id, id))
+    .where(eq(prayerRequests.id, prayerRequestId))
     .limit(1);
   if (!existing) throw new Error("Prayer request not found");
   await requireOrgMembership(existing.organizationId);
 
-  const normalized = { ...data } as Record<string, unknown>;
+  const normalized = { ...parsed } as Record<string, unknown>;
   if (typeof normalized.isAnonymous === "boolean") {
     normalized.isAnonymous = normalized.isAnonymous ? "true" : "false";
   }
 
-  const resolvedStatus = data.status ? normalizePrayerStatus(data.status) : (existing.status as PrayerStatus);
+  const resolvedStatus = parsed.status
+    ? normalizePrayerStatus(parsed.status)
+    : (existing.status as PrayerStatus);
   const routing = resolvePrayerRouting({
-    content: data.content ?? existing.content,
-    urgency: data.urgency ?? existing.urgency,
+    content: parsed.content ?? existing.content,
+    urgency: parsed.urgency ?? existing.urgency,
     assignedTeam:
-      data.assignedTeam !== undefined ? data.assignedTeam : existing.assignedTeam,
+      parsed.assignedTeam !== undefined ? parsed.assignedTeam : existing.assignedTeam,
   });
 
   normalized.urgency = routing.urgency;
@@ -268,11 +298,18 @@ export async function updatePrayerRequest(
 
   const [request] = await db
     .update(prayerRequests)
-    .set({ ...normalized, updatedAt: new Date() } as any)
-    .where(and(eq(prayerRequests.id, id), eq(prayerRequests.organizationId, existing.organizationId)))
+    .set({ ...normalized, updatedAt: new Date() })
+    .where(
+      and(eq(prayerRequests.id, prayerRequestId), eq(prayerRequests.organizationId, existing.organizationId))
+    )
     .returning();
 
-  if (isPrayerRequestActive(resolvedStatus) && routing.escalationPriority !== "none") {
+  const effects = derivePrayerLifecycleEffects({
+    status: resolvedStatus,
+    escalationPriority: routing.escalationPriority,
+  });
+
+  if (effects.ensureEscalationTask) {
     await ensurePrayerEscalationTask({
       organizationId: request.organizationId,
       requestId: request.id,
@@ -284,14 +321,14 @@ export async function updatePrayerRequest(
     });
   }
 
-  if (!isPrayerRequestActive(resolvedStatus)) {
+  if (effects.closeEscalationTasks) {
     await closePrayerEscalationTasks({
       organizationId: request.organizationId,
       requestId: request.id,
     });
   }
 
-  if (isPrayerRequestActive(resolvedStatus)) {
+  if (effects.enqueueFollowupSequence) {
     await enqueuePrayerFollowupSequence({
       organizationId: request.organizationId,
       requestId: request.id,
@@ -306,14 +343,17 @@ export async function updatePrayerRequest(
 }
 
 export async function deletePrayerRequest(id: string) {
+  const prayerRequestId = prayerRequestIdSchema.parse(id);
   const [existing] = await db
     .select({ organizationId: prayerRequests.organizationId })
     .from(prayerRequests)
-    .where(eq(prayerRequests.id, id))
+    .where(eq(prayerRequests.id, prayerRequestId))
     .limit(1);
   if (!existing) return;
   await requireOrgMembership(existing.organizationId);
   await db
     .delete(prayerRequests)
-    .where(and(eq(prayerRequests.id, id), eq(prayerRequests.organizationId, existing.organizationId)));
+    .where(
+      and(eq(prayerRequests.id, prayerRequestId), eq(prayerRequests.organizationId, existing.organizationId))
+    );
 }

@@ -1,6 +1,10 @@
 import { db } from "@/db";
 import { churchContacts, graceContactMatchAudit } from "@/db/schema";
 import { eq, or, ilike, and } from "drizzle-orm";
+import {
+  syncContactCreatedToDittofeed,
+  syncContactToDittofeedBestEffort,
+} from "@/lib/dittofeed/contacts";
 
 export interface ContactInput {
   firstName?: string;
@@ -121,6 +125,17 @@ export async function matchContactForGraceSession(
       phone: input.phone,
     }).returning();
     finalContactId = newContact.id;
+
+    await syncContactToDittofeedBestEffort("grace.contacts.matcher.create", () =>
+      syncContactCreatedToDittofeed({
+        organizationId,
+        contact: newContact,
+        extraProperties: {
+          confidenceTier: tier,
+          requiresReview,
+        },
+      })
+    );
   }
 
   // 5. Audit the match

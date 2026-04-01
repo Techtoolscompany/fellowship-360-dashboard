@@ -10,9 +10,13 @@ import {
 import { and, desc, eq, or } from "drizzle-orm";
 import { requireOrgMembership } from "./utils";
 import { getServiceSchedulingMatrix } from "./operations";
+import * as z from "zod";
+
+const organizationIdSchema = z.string().trim().min(1);
 
 export async function getPeopleOverview(orgId: string) {
-  await requireOrgMembership(orgId);
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
 
   const [members, volunteerRoster, paidStaff, schedulingMatrix] = await Promise.all([
     db
@@ -28,7 +32,7 @@ export async function getPeopleOverview(orgId: string) {
       .from(churchContacts)
       .where(
         and(
-          eq(churchContacts.organizationId, orgId),
+          eq(churchContacts.organizationId, parsedOrgId),
           or(
             eq(churchContacts.memberStatus, "member"),
             eq(churchContacts.memberStatus, "leader"),
@@ -51,7 +55,7 @@ export async function getPeopleOverview(orgId: string) {
       })
       .from(volunteers)
       .leftJoin(churchContacts, eq(volunteers.contactId, churchContacts.id))
-      .where(eq(volunteers.organizationId, orgId))
+      .where(eq(volunteers.organizationId, parsedOrgId))
       .orderBy(desc(volunteers.joinedAt))
       .limit(12),
     db
@@ -63,10 +67,10 @@ export async function getPeopleOverview(orgId: string) {
       })
       .from(organizationMemberships)
       .innerJoin(users, eq(organizationMemberships.userId, users.id))
-      .where(eq(organizationMemberships.organizationId, orgId))
+      .where(eq(organizationMemberships.organizationId, parsedOrgId))
       .orderBy(users.name, users.email)
       .limit(12),
-    getServiceSchedulingMatrix(orgId),
+    getServiceSchedulingMatrix(parsedOrgId),
   ]);
 
   return {

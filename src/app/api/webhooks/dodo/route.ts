@@ -483,16 +483,21 @@ async function handler(req: NextRequest) {
             { status: 401 }
           );
         }
+      } else if (
+        process.env.NODE_ENV === "development" &&
+        process.env.DODO_ALLOW_INSECURE_WEBHOOKS === "true"
+      ) {
+        console.warn(
+          "[dodo-webhook] Running without signature verification because DODO_ALLOW_INSECURE_WEBHOOKS=true"
+        );
       } else {
-        if (process.env.NODE_ENV !== "development") {
-          return NextResponse.json(
-            {
-              received: true,
-              error: "Webhook secret not configured",
-            },
-            { status: 500 }
-          );
-        }
+        return NextResponse.json(
+          {
+            received: true,
+            error: "Webhook secret not configured",
+          },
+          { status: 503 }
+        );
       }
 
       const data = JSON.parse(bodyText);

@@ -12,9 +12,8 @@ import {
 } from "@/db/schema";
 import { and, eq, inArray, lte, gte, ne } from "drizzle-orm";
 import { INNGEST_RETRY_PROFILES } from "../policy";
-import { resolveSmsProvider } from "@/lib/grace/providers/resolver";
-import { sendTextBeeSMS } from "@/lib/grace/channels/sms/textbee";
 import { getOrCreateGraceSession } from "@/lib/grace/runtime";
+import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 
 type ReminderMilestone = {
   key: "t48" | "t24" | "t2";
@@ -186,10 +185,6 @@ export const serviceConfirmationReminders = inngest.createFunction(
         .filter((id): id is string => Boolean(id))
     );
 
-    const providerByOrg = new Map<
-      string,
-      Awaited<ReturnType<typeof resolveSmsProvider>> | null
-    >();
     const sessionByOrg = new Map<string, string>();
 
     let sent = 0;
@@ -209,19 +204,6 @@ export const serviceConfirmationReminders = inngest.createFunction(
         continue;
       }
 
-      if (!providerByOrg.has(row.organizationId)) {
-        providerByOrg.set(
-          row.organizationId,
-          await resolveSmsProvider(row.organizationId)
-        );
-      }
-      const smsProvider = providerByOrg.get(row.organizationId) ?? null;
-
-      if (!smsProvider) {
-        skippedNoProvider += 1;
-        continue;
-      }
-
       const message = buildReminderMessage({
         churchName: row.churchName || "your church",
         roleName: row.roleName,
@@ -229,14 +211,18 @@ export const serviceConfirmationReminders = inngest.createFunction(
         milestone: row.milestone,
       });
 
-      const sendResult = await sendTextBeeSMS({
+      const sendResult = await sendOrganizationSms({
+        organizationId: row.organizationId,
         to: row.normalizedPhone,
         message,
         idempotencyKey: row.reminderKey,
-        config: smsProvider,
       });
 
       if (!sendResult.success) {
+        if (sendResult.error === "No active SMS device assigned to this organization") {
+          skippedNoProvider += 1;
+          continue;
+        }
         failed += 1;
         continue;
       }

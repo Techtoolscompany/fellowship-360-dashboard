@@ -5,6 +5,8 @@ import { organizations } from "@/db/schema/organization";
 import { plans } from "@/db/schema/plans";
 import { organizationMemberships } from "@/db/schema/organization-membership";
 import { desc, sql, eq, count } from "drizzle-orm";
+import { z } from "zod";
+import { createOrganization } from "@/lib/organizations/createOrganization";
 
 export const GET = withSuperAdminAuthRequired(async (req) => {
   try {
@@ -94,4 +96,35 @@ export const GET = withSuperAdminAuthRequired(async (req) => {
       { status: 500 }
     );
   }
-}); 
+});
+
+const createOrganizationSchema = z.object({
+  name: z.string().min(2, "Organization name must be at least 2 characters"),
+});
+
+export const POST = withSuperAdminAuthRequired(async (req, context) => {
+  try {
+    const body = createOrganizationSchema.parse(await req.json());
+    const actor = await context.session.user;
+
+    const organization = await createOrganization({
+      name: body.name,
+      userId: actor.id,
+    });
+
+    return NextResponse.json({ success: true, organization }, { status: 201 });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 400 }
+      );
+    }
+
+    console.error("Error creating organization:", error);
+    return NextResponse.json(
+      { success: false, error: "Failed to create organization" },
+      { status: 500 }
+    );
+  }
+}, "manage_organizations");

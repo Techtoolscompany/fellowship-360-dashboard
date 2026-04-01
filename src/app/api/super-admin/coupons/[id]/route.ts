@@ -27,7 +27,7 @@ export const PATCH = withSuperAdminAuthRequired(async (req, context) => {
       { status: 500 }
     );
   }
-});
+}, "manage_coupons");
 
 export const DELETE = withSuperAdminAuthRequired(async (req, context) => {
   const id = (await context.params).id as string;
@@ -51,4 +51,4 @@ export const DELETE = withSuperAdminAuthRequired(async (req, context) => {
       { status: 500 }
     );
   }
-}); 
+}, "manage_coupons");

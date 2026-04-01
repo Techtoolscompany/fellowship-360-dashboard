@@ -4,6 +4,9 @@ import { db } from "@/db";
 import { users } from "@/db/schema/user";
 import { eq } from "drizzle-orm";
 import { encryptJson } from "@/lib/encryption/edge-jwt";
+import { resolveAppUrl } from "@/lib/security/app-url";
+import { getClientIp } from "@/lib/security/request";
+import { logSuperAdminAudit } from "@/lib/super-admin/auth";
 
 export const POST = withSuperAdminAuthRequired(async (req, context) => {
   const { id } = (await context.params) as { id: string };
@@ -34,14 +37,36 @@ export const POST = withSuperAdminAuthRequired(async (req, context) => {
       impersonateIntoId: targetUser.id,
       impersonateIntoEmail: targetUser.email,
       impersonator: currentUser.id, // Using the session user's ID
-      expiry: new Date(Date.now() + 1000 * 60 * 30).toISOString(), // 30 minutes
     };
 
-    const token = await encryptJson(impersonationData);
+    const token = await encryptJson(impersonationData, {
+      purpose: "impersonation",
+      expiresIn: "30m",
+    });
+
+    const appUrl = resolveAppUrl(req);
+    if (!appUrl) {
+      return NextResponse.json(
+        { error: "App URL is not configured" },
+        { status: 503 }
+      );
+    }
 
     // Generate sign-in URL with token
-    const signInUrl = new URL(`${process.env.NEXTAUTH_URL}/sign-in`);
+    const signInUrl = new URL("/sign-in", appUrl);
     signInUrl.searchParams.append("impersonateToken", token);
+
+    await logSuperAdminAudit({
+      actorUserId: currentUser.id,
+      actionType: "impersonation_link_created",
+      entityName: "app_user",
+      entityId: targetUser.id,
+      details: {
+        targetUserId: targetUser.id,
+        targetUserEmail: targetUser.email,
+        ip: getClientIp(req),
+      },
+    });
 
     return NextResponse.json({ url: signInUrl.toString() });
   } catch (error) {
@@ -51,4 +76,4 @@ export const POST = withSuperAdminAuthRequired(async (req, context) => {
       { status: 500 }
     );
   }
-});
+}, "impersonate_users");

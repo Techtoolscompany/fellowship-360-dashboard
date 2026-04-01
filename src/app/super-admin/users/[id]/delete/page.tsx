@@ -5,18 +5,15 @@ import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Link from "next/link";
 import useSWR from "swr";
 import { toast } from "sonner";
+import {
+  SuperAdminEmptyState,
+  SuperAdminPageHeader,
+  SuperAdminSurface,
+} from "@/components/super-admin/primitives";
 
 interface User {
   id: string;
@@ -70,47 +67,40 @@ export default function DeleteUserPage() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-[calc(100vh-14rem)]">
-        <div className="text-center">
-          <h2 className="text-lg font-medium">Error loading user</h2>
-          <p className="text-sm text-muted-foreground">
-            Failed to load user details. Please try again.
-          </p>
-          <Button variant="ghost" size="sm" asChild className="mt-4">
+      <SuperAdminEmptyState
+        title="Error loading user"
+        description="Failed to load the user record for deletion review."
+        action={
+          <Button variant="outline" size="sm" asChild>
             <Link href="/super-admin/users">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Users
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to users
             </Link>
           </Button>
-        </div>
-      </div>
+        }
+      />
     );
   }
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-[calc(100vh-14rem)]">
-        <div className="text-center">
-          <h2 className="text-lg font-medium">Loading...</h2>
-          <p className="text-sm text-muted-foreground">
-            Please wait while we load the user details.
-          </p>
-        </div>
-      </div>
+      <SuperAdminEmptyState
+        title="Loading user"
+        description="Pulling the account details needed to confirm a destructive delete."
+      />
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" asChild>
-          <Link href={`/super-admin/users/${id}`}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back
-          </Link>
-        </Button>
-        <h1 className="text-2xl font-bold">Delete User</h1>
-      </div>
+      <SuperAdminPageHeader
+        backHref={`/super-admin/users/${id}`}
+        backLabel="User Details"
+        eyebrow="Danger Zone"
+        eyebrowIcon={AlertTriangle}
+        title="Delete User"
+        description="This action permanently removes the account and can cascade into organization deletion when the user is the owner."
+      />
 
       <Alert variant="destructive">
         <AlertTriangle className="h-4 w-4" />
@@ -125,14 +115,14 @@ export default function DeleteUserPage() {
         </AlertDescription>
       </Alert>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Confirm Deletion</CardTitle>
-          <CardDescription>
-            Please review the information below carefully.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <SuperAdminSurface>
+        <div className="border-b border-slate-200/80 px-6 py-5 dark:border-slate-700">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white">Confirm Deletion</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Review the user record carefully before confirming.
+          </p>
+        </div>
+        <div className="space-y-4 px-6 py-5">
           <div>
             <p className="text-sm font-medium">Email:</p>
             <p className="text-sm">{user?.email}</p>
@@ -157,8 +147,8 @@ export default function DeleteUserPage() {
               className="max-w-md"
             />
           </div>
-        </CardContent>
-        <CardFooter className="flex justify-between">
+        </div>
+        <div className="flex justify-between border-t border-slate-200/80 px-6 py-5 dark:border-slate-700">
           <Button 
             variant="outline" 
             asChild
@@ -177,8 +167,8 @@ export default function DeleteUserPage() {
           >
             {isDeleting ? "Deleting..." : "Delete User"}
           </Button>
-        </CardFooter>
-      </Card>
+        </div>
+      </SuperAdminSurface>
     </div>
   );
-} 
+}

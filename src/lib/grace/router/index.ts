@@ -14,6 +14,17 @@ import { prayerRequests } from "@/db/schema/prayer";
 import type { GraceIntent, GraceRouterInput, GraceRouterOutput, ProposedAction } from "../types";
 import { executePlannedActions } from "./executor";
 import { resolveGeminiApiKey } from "../providers/resolver";
+import {
+  buildEmergencyEscalationDetails,
+  buildEmergencyResponseText,
+  detectEmergencySignal,
+} from "../emergency";
+import { findGraceTool } from "../tools/registry";
+import {
+  estimateModelCostUsd,
+  normalizeAuditUsage,
+  writeGraceAuditStreamSafe,
+} from "../audit-stream";
 
 // ---------------------------------------------------------------------------
 // Zod schema for structured Gemini output
@@ -411,6 +422,7 @@ const toolGuidance = `
 Only propose tools that are appropriate for the actor type and channel. Do not invent tool names.
 Use the entity IDs from the Operational Context to call update tools directly — no guessing IDs.
 If you need to find a contact not in the context, call contacts.search first.
+For staff questions about weekly giving performance, call finance.weeklyReport.
 
 Public-safe tools: churchInfo.search, prayerRequests.create, appointments.checkAvailability, handoff.transfer
 
@@ -449,6 +461,119 @@ export async function runClawRouter(input: GraceRouterInput): Promise<GraceRoute
   const matchedStateContactId =
     typeof state.matchedContactId === "string" ? state.matchedContactId : null;
   const activeContactId = context.contactId ?? matchedStateContactId ?? null;
+  const emergencySignal = detectEmergencySignal(message);
+  const shouldAutoEscalateOnEmergency =
+    context.policy?.autoEscalateOnEmergency !== false;
+
+  if (emergencySignal.isEmergency && shouldAutoEscalateOnEmergency) {
+    const emergencyAction: ProposedAction = {
+      id: crypto.randomUUID(),
+      tool: "handoff.transfer",
+      input: {
+        reason: "deterministic_emergency_auto_escalation",
+        details: buildEmergencyEscalationDetails({
+          message,
+          matchedPatterns: emergencySignal.matchedPatterns,
+        }),
+      },
+      reason:
+        "Deterministic emergency policy triggered escalation without relying on model planning",
+      requiresApproval: false,
+    };
+
+    const execution = await executePlannedActions({
+      actions: [emergencyAction],
+      context,
+      skipApprovals: true,
+    });
+
+    const actionOutcomes = [...(execution.actionOutcomes ?? [])];
+    const escalatedFromPolicyPath = actionOutcomes.some(
+      (outcome) =>
+        outcome.tool === "handoff.transfer" &&
+        (outcome.status === "executed" ||
+          outcome.status === "retried" ||
+          outcome.status === "queued")
+    );
+
+    if (!escalatedFromPolicyPath) {
+      const fallbackTool = findGraceTool("handoff.transfer");
+      const occurredAt = new Date().toISOString();
+
+      if (!fallbackTool) {
+        actionOutcomes.push({
+          actionId: emergencyAction.id,
+          tool: emergencyAction.tool,
+          reason: emergencyAction.reason,
+          requiresApproval: false,
+          status: "failed",
+          error: "Tool not found: handoff.transfer",
+          occurredAt,
+        });
+      } else {
+        try {
+          const result = await fallbackTool.execute(emergencyAction.input, context);
+          actionOutcomes.push({
+            actionId: emergencyAction.id,
+            tool: emergencyAction.tool,
+            reason: emergencyAction.reason,
+            requiresApproval: false,
+            status: result.success ? "executed" : "failed",
+            output: result.output,
+            error: result.error,
+            occurredAt,
+          });
+        } catch (error) {
+          actionOutcomes.push({
+            actionId: emergencyAction.id,
+            tool: emergencyAction.tool,
+            reason: emergencyAction.reason,
+            requiresApproval: false,
+            status: "failed",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Emergency escalation failed",
+            occurredAt,
+          });
+        }
+      }
+    }
+
+    await writeGraceAuditStreamSafe({
+      organizationId: context.organizationId,
+      sessionId: context.sessionId,
+      actorType: context.actorType,
+      channel: context.channel,
+      eventType: "ai_decision",
+      source: "grace_router",
+      status: actionOutcomes.some((outcome) => outcome.status === "failed")
+        ? "error"
+        : "success",
+      intent: "emergency",
+      model: "deterministic_emergency_policy",
+      actionName: "handoff.transfer",
+      metadataJson: {
+        autoEscalated: true,
+        matchedPatterns: emergencySignal.matchedPatterns,
+      },
+    });
+
+    return {
+      response: buildEmergencyResponseText(),
+      intent: "emergency",
+      state: {
+        ...state,
+        urgency: "critical",
+        requestText:
+          typeof state.requestText === "string" && state.requestText.trim().length > 0
+            ? state.requestText
+            : message,
+      },
+      proposedActions: [emergencyAction],
+      actionOutcomes,
+    };
+  }
 
   // Load org context, knowledge, and provider credentials in parallel.
   const [orgConfig, knowledge, operationalContext, geminiApiKey] = await Promise.all([
@@ -482,6 +607,21 @@ export async function runClawRouter(input: GraceRouterInput): Promise<GraceRoute
 
   if (!geminiApiKey) {
     console.error("[Grace] Gemini provider is not configured for organization:", context.organizationId);
+    await writeGraceAuditStreamSafe({
+      organizationId: context.organizationId,
+      sessionId: context.sessionId,
+      actorType: context.actorType,
+      channel: context.channel,
+      eventType: "ai_decision",
+      source: "grace_router",
+      status: "error",
+      intent: "unknown",
+      model: "gemini-2.0-flash",
+      errorText: "missing_gemini_provider_key",
+      metadataJson: {
+        fallbackResponse: true,
+      },
+    });
     return {
       response:
         "I'm temporarily unavailable and unable to process your request right now. " +
@@ -496,16 +636,58 @@ export async function runClawRouter(input: GraceRouterInput): Promise<GraceRoute
   const google = createGoogleGenerativeAI({ apiKey: geminiApiKey });
 
   let object: z.infer<typeof graceOutputSchema>;
+  const llmDecisionStartedAt = Date.now();
   try {
-    ({ object } = await generateObject({
+    const llmResult = await generateObject({
       model: google("gemini-2.0-flash"),
       output: "object",
       system: systemPrompt,
       prompt: message,
       schema: graceOutputSchema,
-    }));
+    });
+    object = llmResult.object;
+
+    const usage = normalizeAuditUsage((llmResult as { usage?: unknown }).usage);
+    await writeGraceAuditStreamSafe({
+      organizationId: context.organizationId,
+      sessionId: context.sessionId,
+      actorType: context.actorType,
+      channel: context.channel,
+      eventType: "ai_decision",
+      source: "grace_router",
+      status: "success",
+      intent: object.intent,
+      model: "gemini-2.0-flash",
+      latencyMs: Date.now() - llmDecisionStartedAt,
+      inputTokens: usage.inputTokens ?? null,
+      outputTokens: usage.outputTokens ?? null,
+      totalTokens: usage.totalTokens ?? null,
+      estimatedCostUsd: estimateModelCostUsd({
+        inputTokens: usage.inputTokens ?? null,
+        outputTokens: usage.outputTokens ?? null,
+      }),
+      metadataJson: {
+        proposedToolCount: (object.proposedTools ?? []).length,
+      },
+    });
   } catch (llmError) {
     console.error("[Grace] Gemini call failed, returning fallback response:", llmError);
+    await writeGraceAuditStreamSafe({
+      organizationId: context.organizationId,
+      sessionId: context.sessionId,
+      actorType: context.actorType,
+      channel: context.channel,
+      eventType: "ai_decision",
+      source: "grace_router",
+      status: "error",
+      intent: "unknown",
+      model: "gemini-2.0-flash",
+      latencyMs: Date.now() - llmDecisionStartedAt,
+      errorText: llmError instanceof Error ? llmError.message : "llm_call_failed",
+      metadataJson: {
+        fallbackResponse: true,
+      },
+    });
     return {
       response:
         "I'm temporarily unavailable and unable to process your request right now. " +

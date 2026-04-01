@@ -63,7 +63,7 @@ describe("grace config API route", () => {
     graceActions.upsertGraceProviderConfig.mockResolvedValueOnce({
       channel: "sms",
       provider: "textbee",
-      mode: "byo",
+      mode: "agency_managed",
       isActive: true,
     });
 
@@ -79,7 +79,7 @@ describe("grace config API route", () => {
             {
               channel: "sms",
               provider: "textbee",
-              mode: "byo",
+              mode: "agency_managed",
               isActive: true,
               configJson: { apiKey: "tb_test", baseUrl: "https://api.textbee.dev" },
             },
@@ -97,7 +97,7 @@ describe("grace config API route", () => {
         {
           channel: "sms",
           provider: "textbee",
-          mode: "byo",
+          mode: "agency_managed",
           isActive: true,
         },
       ],
@@ -111,7 +111,7 @@ describe("grace config API route", () => {
       organizationId: "org_1",
       channel: "sms",
       provider: "textbee",
-      mode: "byo",
+      mode: "agency_managed",
       isActive: true,
       configJson: { apiKey: "tb_test", baseUrl: "https://api.textbee.dev" },
     });
@@ -131,7 +131,7 @@ describe("grace config API route", () => {
             {
               channel: "sms",
               provider: "textbee",
-              mode: "byo",
+              mode: "agency_managed",
               isActive: true,
             },
           ],

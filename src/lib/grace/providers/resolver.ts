@@ -83,7 +83,7 @@ async function getLatestProviderRow(params: {
 
 /**
  * Returns decrypted SMS credentials for the org.
- * BYO orgs get their stored credentials; agency_managed falls back to env vars.
+ * Platform-managed orgs may use per-org stored credentials, with env fallback.
  * Returns null if SMS is disabled or not configured.
  */
 export async function resolveSmsProvider(
@@ -104,22 +104,18 @@ export async function resolveSmsProvider(
 
   if (row?.mode === "disabled") return null;
 
-  if (!row || row.mode === "agency_managed") {
-    const apiKey = getStringOrNull(process.env.TEXTBEE_API_KEY);
-    const baseUrl = getStringOrNull(process.env.TEXTBEE_BASE_URL);
-    return apiKey && baseUrl ? { apiKey, baseUrl } : null;
-  }
+  const config = decryptConfigFields(row?.configJson ?? {}, ["apiKey", "webhookSecret"]);
+  const apiKey = getStringOrNull(config.apiKey) ?? getStringOrNull(process.env.TEXTBEE_API_KEY);
+  const baseUrl =
+    getStringOrNull(config.baseUrl) ?? getStringOrNull(process.env.TEXTBEE_BASE_URL);
 
-  // BYO — decrypt stored secrets
-  const config = decryptConfigFields(row.configJson ?? {}, ["apiKey", "webhookSecret"]);
-  if (!config.apiKey || !config.baseUrl) return null;
-  return { apiKey: config.apiKey, baseUrl: config.baseUrl };
+  return apiKey && baseUrl ? { apiKey, baseUrl } : null;
 }
 
 /**
  * Returns email provider config for the org.
  * Returns { mode: "managed" } when using the platform's shared mailer.
- * Returns { mode: "sendgrid", ... } for BYO SendGrid orgs.
+ * Returns { mode: "sendgrid", ... } when this org has stored managed SendGrid credentials.
  */
 export async function resolveEmailProvider(
   organizationId: string
@@ -137,14 +133,12 @@ export async function resolveEmailProvider(
     channel: "email",
   });
 
-  if (!row || row.mode === "agency_managed" || row.mode === "disabled") {
-    return { mode: "managed" };
-  }
-
-  // BYO SendGrid — decrypt API key
   const config = decryptConfigFields(row.configJson ?? {}, ["apiKey"]);
-  if (!config.apiKey || !config.fromEmail) return { mode: "managed" };
-  return { mode: "sendgrid", apiKey: config.apiKey, fromEmail: config.fromEmail };
+  const apiKey = getStringOrNull(config.apiKey);
+  const fromEmail = getStringOrNull(config.fromEmail);
+
+  if (!apiKey || !fromEmail) return { mode: "managed" };
+  return { mode: "sendgrid", apiKey, fromEmail };
 }
 
 /**
@@ -170,10 +164,9 @@ export async function resolveGeminiApiKey(
 
   if (row?.mode === "disabled") return null;
 
-  if (row?.mode === "byo") {
-    const config = decryptConfigFields(row.configJson ?? {}, ["apiKey"]);
-    return config.apiKey?.trim() ? config.apiKey.trim() : null;
-  }
+  const config = decryptConfigFields(row?.configJson ?? {}, ["apiKey"]);
+  const configuredApiKey = getStringOrNull(config.apiKey);
+  if (configuredApiKey) return configuredApiKey;
 
   const fallback = process.env.GEMINI_API_KEY;
   return getStringOrNull(fallback);
@@ -197,10 +190,9 @@ export async function resolveElevenLabsApiKey(
 
   if (row?.mode === "disabled") return null;
 
-  if (row?.mode === "byo") {
-    const config = decryptConfigFields(row.configJson ?? {}, ["apiKey"]);
-    return getStringOrNull(config.apiKey);
-  }
+  const config = decryptConfigFields(row?.configJson ?? {}, ["apiKey"]);
+  const configuredApiKey = getStringOrNull(config.apiKey);
+  if (configuredApiKey) return configuredApiKey;
 
   return getStringOrNull(process.env.ELEVENLABS_API_KEY);
 }
@@ -226,13 +218,9 @@ export async function resolveProviderWebhookSecret(params: {
 
   if (row?.mode === "disabled") return null;
 
-  if (row?.mode === "byo") {
-    const decrypted = decryptConfigFields(row.configJson ?? {}, ["webhookSecret"]);
-    const webhookSecret = getStringOrNull(decrypted.webhookSecret);
-    if (webhookSecret) return webhookSecret;
-    // If BYO is configured but no webhook secret is present, fail closed.
-    return null;
-  }
+  const decrypted = decryptConfigFields(row?.configJson ?? {}, ["webhookSecret"]);
+  const configuredSecret = getStringOrNull(decrypted.webhookSecret);
+  if (configuredSecret) return configuredSecret;
 
   return getStringOrNull(params.fallbackEnvSecret);
 }

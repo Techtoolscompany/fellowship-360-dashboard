@@ -24,7 +24,7 @@ const updateSchema = z.object({
       z.object({
         channel: z.string(),
         provider: z.string(),
-        mode: z.enum(["agency_managed", "byo", "disabled"]),
+        mode: z.enum(["agency_managed", "disabled"]),
         isActive: z.boolean().optional(),
         configJson: z.record(z.string(), z.unknown()).optional(),
       })

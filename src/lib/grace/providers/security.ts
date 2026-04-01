@@ -7,13 +7,8 @@ type ProviderRule = {
   secret: string[];
 };
 
-const byoAllowedChannels = new Set([
-  "ai",
-  "sms",
+const multiActiveProviderChannels = new Set([
   "voice",
-  "email",
-  "slack",
-  "telegram",
 ]);
 
 const ENCRYPTED_PREFIX = "enc:v1";
@@ -42,6 +37,16 @@ const providerRules: Record<string, ProviderRule> = {
   "email:managed": {
     required: [],
     secret: [],
+  },
+  "messaging:dittofeed": {
+    required: ["workspaceId", "writeKey"],
+    secret: [
+      "writeKey",
+      "adminApiKey",
+      "smsWebhookSecret",
+      "resendApiKey",
+      "resendWebhookKey",
+    ],
   },
 };
 
@@ -135,8 +140,8 @@ export function normalizeAndEncryptProviderConfig(input: {
   };
 }
 
-export function isByoAllowedForChannel(channel: string) {
-  return byoAllowedChannels.has(channel);
+export function allowsMultipleActiveProvidersForChannel(channel: string) {
+  return multiActiveProviderChannels.has(channel);
 }
 
 export function redactProviderConfigForClient(input: {

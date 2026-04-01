@@ -14,6 +14,21 @@ import { serviceAssignmentReplacementSequence } from "./service-assignment-repla
 import { prayerRequestFollowupSequence } from "./prayer-request-followup";
 import { appointmentRemindersNoShowRecovery } from "./appointment-reminders-no-show-recovery";
 import { provisionOrgProviders } from "./provision-org-providers";
+import { financeWeeklyDigest } from "./finance-weekly-digest";
+import { financeWeeklyExceptionAlerts } from "./finance-weekly-exception-alerts";
+import { graceOpsHealthMonitor } from "./grace-ops-health-monitor";
+import {
+  dispatchAutomationsOnContactCreated,
+  dispatchAutomationsOnFirstTimeGuestRequested,
+  dispatchAutomationsOnMissedCall,
+  dispatchAutomationsOnPrayerFollowup,
+} from "./automation-event-dispatcher";
+import {
+  dispatchDailyMinistryOps,
+  dispatchWeeklyMinistryOps,
+  replayAutomationDeadLetterQueue,
+} from "./automation-runtime-schedules";
+import { generateServiceRunRecapsSchedule } from "./service-run-recap-schedule";
 import { INNGEST_EVENTS } from "../events";
 
 export type InngestEvents = {
@@ -127,4 +142,15 @@ export const functions = [
   prayerRequestFollowupSequence,
   appointmentRemindersNoShowRecovery,
   provisionOrgProviders,
+  financeWeeklyDigest,
+  financeWeeklyExceptionAlerts,
+  graceOpsHealthMonitor,
+  dispatchAutomationsOnContactCreated,
+  dispatchAutomationsOnFirstTimeGuestRequested,
+  dispatchAutomationsOnMissedCall,
+  dispatchAutomationsOnPrayerFollowup,
+  dispatchDailyMinistryOps,
+  dispatchWeeklyMinistryOps,
+  replayAutomationDeadLetterQueue,
+  generateServiceRunRecapsSchedule,
 ];

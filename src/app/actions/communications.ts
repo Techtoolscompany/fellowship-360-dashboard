@@ -10,23 +10,85 @@ import {
 } from "@/db/schema";
 import { eq, desc, and, sql, ne } from "drizzle-orm";
 import { requireOrgMembership } from "./utils";
+import {
+  assertConversationStatusTransition,
+  parseConversationLifecycleStatus,
+} from "@/lib/operations/conversations-lifecycle";
+import * as z from "zod";
 
-const CONVERSATION_STATUSES = ["open", "waiting", "resolved", "archived"] as const;
-type ConversationStatus = (typeof CONVERSATION_STATUSES)[number];
-const CONVERSATION_STATUS_SET = new Set<string>(CONVERSATION_STATUSES);
-const CONVERSATION_STATUS_TRANSITIONS: Record<ConversationStatus, Set<ConversationStatus>> = {
-  open: new Set(["waiting", "resolved", "archived"]),
-  waiting: new Set(["open", "resolved", "archived"]),
-  resolved: new Set(["open", "archived"]),
-  archived: new Set(["open"]),
-};
+const CHANNEL_VALUES = ["phone", "sms", "email", "web", "in_person"] as const;
+const MESSAGE_DIRECTION_VALUES = ["inbound", "outbound", "draft"] as const;
+const MESSAGE_SENDER_TYPE_VALUES = ["human", "ai", "system"] as const;
+const BROADCAST_STATUS_VALUES = ["draft", "scheduled", "sending", "sent", "failed"] as const;
 
-function parseConversationStatus(status: string): ConversationStatus {
-  if (!CONVERSATION_STATUS_SET.has(status)) {
-    throw new Error(`Invalid conversation status: ${status}`);
-  }
-  return status as ConversationStatus;
-}
+const organizationIdSchema = z.string().trim().min(1);
+const recordIdSchema = z.string().trim().min(1);
+
+const conversationFiltersSchema = z
+  .object({
+    status: z.string().trim().min(1).optional(),
+    includeArchived: z.boolean().optional(),
+  })
+  .optional();
+
+const createConversationSchema = z.object({
+  contactId: z.string().trim().min(1).optional(),
+  channel: z.enum(CHANNEL_VALUES),
+  subject: z.string().trim().optional(),
+  assigneeId: z.string().trim().min(1).optional(),
+  organizationId: organizationIdSchema,
+});
+
+const addMessageSchema = z.object({
+  conversationId: recordIdSchema,
+  content: z.string().trim().min(1),
+  direction: z.enum(MESSAGE_DIRECTION_VALUES),
+  senderType: z.enum(MESSAGE_SENDER_TYPE_VALUES).optional(),
+  senderId: z.string().trim().min(1).optional(),
+});
+
+const createBroadcastSchema = z.object({
+  title: z.string().trim().min(1),
+  content: z.string().trim().min(1),
+  channel: z.enum(CHANNEL_VALUES),
+  audienceFilter: z.record(z.string(), z.unknown()).optional(),
+  scheduledAt: z.coerce.date().optional(),
+  organizationId: organizationIdSchema,
+});
+
+const updateBroadcastSchema = z.object({
+  title: z.string().trim().min(1).optional(),
+  content: z.string().trim().min(1).optional(),
+  channel: z.enum(CHANNEL_VALUES).optional(),
+});
+
+const updateBroadcastStatusSchema = z.object({
+  id: recordIdSchema,
+  status: z.enum(BROADCAST_STATUS_VALUES),
+  stats: z
+    .object({
+      totalRecipients: z.number().int().nonnegative().optional(),
+      totalDelivered: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
+});
+
+const createTemplateSchema = z.object({
+  name: z.string().trim().min(1),
+  content: z.string().trim().min(1),
+  category: z.string().trim().optional(),
+  channel: z.enum(CHANNEL_VALUES).optional(),
+  variables: z.array(z.string().trim().min(1)).optional(),
+  organizationId: organizationIdSchema,
+});
+
+const updateTemplateSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  content: z.string().trim().min(1).optional(),
+  category: z.string().trim().nullable().optional(),
+  channel: z.enum(CHANNEL_VALUES).nullable().optional(),
+  variables: z.array(z.string().trim().min(1)).nullable().optional(),
+});
 
 async function requireConversationAccess(conversationId: string) {
   const [conversation] = await db
@@ -70,15 +132,17 @@ export async function getConversations(
   orgId: string,
   filters?: { status?: string; includeArchived?: boolean }
 ) {
-  await requireOrgMembership(orgId);
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  const parsedFilters = conversationFiltersSchema.parse(filters);
+  await requireOrgMembership(parsedOrgId);
 
-  if (filters?.status) {
-    const status = parseConversationStatus(filters.status);
+  if (parsedFilters?.status) {
+    const status = parseConversationLifecycleStatus(parsedFilters.status);
     return db
       .select({ conversation: conversations, contact: churchContacts })
       .from(conversations)
       .leftJoin(churchContacts, eq(conversations.contactId, churchContacts.id))
-      .where(and(eq(conversations.organizationId, orgId), eq(conversations.status, status)))
+      .where(and(eq(conversations.organizationId, parsedOrgId), eq(conversations.status, status)))
       .orderBy(desc(conversations.lastMessageAt), desc(conversations.updatedAt));
   }
 
@@ -87,23 +151,24 @@ export async function getConversations(
     .from(conversations)
     .leftJoin(churchContacts, eq(conversations.contactId, churchContacts.id));
 
-  if (filters?.includeArchived) {
+  if (parsedFilters?.includeArchived) {
     return query
-      .where(eq(conversations.organizationId, orgId))
+      .where(eq(conversations.organizationId, parsedOrgId))
       .orderBy(desc(conversations.lastMessageAt), desc(conversations.updatedAt));
   }
 
   return query
-    .where(and(eq(conversations.organizationId, orgId), ne(conversations.status, "archived")))
+    .where(and(eq(conversations.organizationId, parsedOrgId), ne(conversations.status, "archived")))
     .orderBy(desc(conversations.lastMessageAt), desc(conversations.updatedAt));
 }
 
 export async function getConversationMessages(conversationId: string) {
-  await requireConversationAccess(conversationId);
+  const parsedConversationId = recordIdSchema.parse(conversationId);
+  await requireConversationAccess(parsedConversationId);
   return await db
     .select()
     .from(messages)
-    .where(eq(messages.conversationId, conversationId))
+    .where(eq(messages.conversationId, parsedConversationId))
     .orderBy(messages.sentAt);
 }
 
@@ -114,15 +179,16 @@ export async function createConversation(data: {
   assigneeId?: string;
   organizationId: string;
 }) {
-  await requireOrgMembership(data.organizationId);
+  const parsed = createConversationSchema.parse(data);
+  await requireOrgMembership(parsed.organizationId);
   const [conversation] = await db
     .insert(conversations)
     .values({
-      contactId: data.contactId ?? null,
-      channel: data.channel as any,
-      subject: data.subject ?? null,
-      assigneeId: data.assigneeId ?? null,
-      organizationId: data.organizationId,
+      contactId: parsed.contactId ?? null,
+      channel: parsed.channel,
+      subject: parsed.subject ?? null,
+      assigneeId: parsed.assigneeId ?? null,
+      organizationId: parsed.organizationId,
     })
     .returning();
   return conversation;
@@ -135,15 +201,16 @@ export async function addMessage(data: {
   senderType?: string;
   senderId?: string;
 }) {
-  const conversation = await requireConversationAccess(data.conversationId);
+  const parsed = addMessageSchema.parse(data);
+  const conversation = await requireConversationAccess(parsed.conversationId);
   const [message] = await db
     .insert(messages)
     .values({
-      conversationId: data.conversationId,
-      content: data.content,
-      direction: data.direction as any,
-      senderType: (data.senderType as any) ?? "human",
-      senderId: data.senderId ?? null,
+      conversationId: parsed.conversationId,
+      content: parsed.content,
+      direction: parsed.direction,
+      senderType: parsed.senderType ?? "human",
+      senderId: parsed.senderId ?? null,
     })
     .returning();
 
@@ -153,7 +220,7 @@ export async function addMessage(data: {
     .set({ lastMessageAt: new Date(), updatedAt: new Date() })
     .where(
       and(
-        eq(conversations.id, data.conversationId),
+        eq(conversations.id, parsed.conversationId),
         eq(conversations.organizationId, conversation.organizationId)
       )
     );
@@ -165,22 +232,21 @@ export async function updateConversationStatus(
   id: string,
   status: string
 ) {
-  const nextStatus = parseConversationStatus(status);
-  const existing = await requireConversationAccess(id);
-  const currentStatus = parseConversationStatus(existing.status);
+  const parsedId = recordIdSchema.parse(id);
+  const parsedStatus = z.string().trim().min(1).parse(status);
+  const nextStatus = parseConversationLifecycleStatus(parsedStatus);
+  const existing = await requireConversationAccess(parsedId);
+  const currentStatus = parseConversationLifecycleStatus(existing.status);
   if (currentStatus !== nextStatus) {
-    const allowedNextStatuses = CONVERSATION_STATUS_TRANSITIONS[currentStatus];
-    if (!allowedNextStatuses.has(nextStatus)) {
-      throw new Error(
-        `Cannot transition conversation from ${currentStatus} to ${nextStatus}`
-      );
-    }
+    assertConversationStatusTransition(currentStatus, nextStatus);
   }
 
   const [conversation] = await db
     .update(conversations)
-    .set({ status: nextStatus, updatedAt: new Date() } as any)
-    .where(and(eq(conversations.id, id), eq(conversations.organizationId, existing.organizationId)))
+    .set({ status: nextStatus, updatedAt: new Date() })
+    .where(
+      and(eq(conversations.id, parsedId), eq(conversations.organizationId, existing.organizationId))
+    )
     .returning();
   if (!conversation) {
     throw new Error("Conversation not found");
@@ -206,11 +272,12 @@ export async function reopenConversation(id: string) {
 
 // ── Broadcasts ──
 export async function getBroadcasts(orgId: string) {
-  await requireOrgMembership(orgId);
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
   return await db
     .select()
     .from(broadcasts)
-    .where(eq(broadcasts.organizationId, orgId))
+    .where(eq(broadcasts.organizationId, parsedOrgId))
     .orderBy(desc(broadcasts.createdAt));
 }
 
@@ -222,16 +289,17 @@ export async function createBroadcast(data: {
   scheduledAt?: Date;
   organizationId: string;
 }) {
-  await requireOrgMembership(data.organizationId);
+  const parsed = createBroadcastSchema.parse(data);
+  await requireOrgMembership(parsed.organizationId);
   const [broadcast] = await db
     .insert(broadcasts)
     .values({
-      title: data.title,
-      content: data.content,
-      channel: data.channel as any,
-      audienceFilter: data.audienceFilter ?? null,
-      scheduledAt: data.scheduledAt ?? null,
-      organizationId: data.organizationId,
+      title: parsed.title,
+      content: parsed.content,
+      channel: parsed.channel,
+      audienceFilter: parsed.audienceFilter ?? null,
+      scheduledAt: parsed.scheduledAt ?? null,
+      organizationId: parsed.organizationId,
     })
     .returning();
   return broadcast;
@@ -245,11 +313,18 @@ export async function updateBroadcast(
     channel: string;
   }>
 ) {
-  const existing = await requireBroadcastAccess(id);
+  const broadcastId = recordIdSchema.parse(id);
+  const parsed = updateBroadcastSchema.parse(data);
+  const existing = await requireBroadcastAccess(broadcastId);
+  if (Object.keys(parsed).length === 0) {
+    return existing;
+  }
   const [broadcast] = await db
     .update(broadcasts)
-    .set({ ...data } as any)
-    .where(and(eq(broadcasts.id, id), eq(broadcasts.organizationId, existing.organizationId)))
+    .set(parsed)
+    .where(
+      and(eq(broadcasts.id, broadcastId), eq(broadcasts.organizationId, existing.organizationId))
+    )
     .returning();
 
   if (!broadcast) {
@@ -264,15 +339,16 @@ export async function updateBroadcastStatus(
   status: string,
   stats?: { totalRecipients?: number; totalDelivered?: number }
 ) {
-  const existing = await requireBroadcastAccess(id);
+  const parsed = updateBroadcastStatusSchema.parse({ id, status, stats });
+  const existing = await requireBroadcastAccess(parsed.id);
   const [broadcast] = await db
     .update(broadcasts)
     .set({
-      status: status as any,
-      sentAt: status === "sent" ? new Date() : undefined,
-      ...stats,
-    } as any)
-    .where(and(eq(broadcasts.id, id), eq(broadcasts.organizationId, existing.organizationId)))
+      status: parsed.status,
+      sentAt: parsed.status === "sent" ? new Date() : undefined,
+      ...parsed.stats,
+    })
+    .where(and(eq(broadcasts.id, parsed.id), eq(broadcasts.organizationId, existing.organizationId)))
     .returning();
 
   if (!broadcast) {
@@ -283,7 +359,8 @@ export async function updateBroadcastStatus(
 }
 
 export async function triggerBroadcast(id: string) {
-  const broadcast = await requireBroadcastAccess(id);
+  const broadcastId = recordIdSchema.parse(id);
+  const broadcast = await requireBroadcastAccess(broadcastId);
   if (broadcast.channel !== "sms") {
     throw new Error("Only SMS broadcasts are supported in this demo.");
   }
@@ -298,7 +375,7 @@ export async function triggerBroadcast(id: string) {
   } = await import("@/lib/inngest/events");
   const idempotencyKey = buildBroadcastSendIdempotencyKey({
     organizationId: broadcast.organizationId,
-    broadcastId: id,
+    broadcastId,
   });
 
   await inngest.send({
@@ -306,7 +383,7 @@ export async function triggerBroadcast(id: string) {
     name: INNGEST_EVENTS.COMMUNICATIONS_BROADCAST_SEND_REQUESTED,
     data: {
       organizationId: broadcast.organizationId,
-      broadcastId: id,
+      broadcastId,
       idempotencyKey,
     },
   });
@@ -315,10 +392,13 @@ export async function triggerBroadcast(id: string) {
 }
 
 export async function deleteBroadcast(id: string) {
-  const existing = await requireBroadcastAccess(id);
+  const broadcastId = recordIdSchema.parse(id);
+  const existing = await requireBroadcastAccess(broadcastId);
   const [broadcast] = await db
     .delete(broadcasts)
-    .where(and(eq(broadcasts.id, id), eq(broadcasts.organizationId, existing.organizationId)))
+    .where(
+      and(eq(broadcasts.id, broadcastId), eq(broadcasts.organizationId, existing.organizationId))
+    )
     .returning();
 
   if (!broadcast) {
@@ -330,11 +410,12 @@ export async function deleteBroadcast(id: string) {
 
 // ── Templates ──
 export async function getTemplates(orgId: string) {
-  await requireOrgMembership(orgId);
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
   return await db
     .select()
     .from(messageTemplates)
-    .where(eq(messageTemplates.organizationId, orgId))
+    .where(eq(messageTemplates.organizationId, parsedOrgId))
     .orderBy(messageTemplates.name);
 }
 
@@ -346,16 +427,17 @@ export async function createTemplate(data: {
   variables?: string[];
   organizationId: string;
 }) {
-  await requireOrgMembership(data.organizationId);
+  const parsed = createTemplateSchema.parse(data);
+  await requireOrgMembership(parsed.organizationId);
   const [template] = await db
     .insert(messageTemplates)
     .values({
-      name: data.name,
-      content: data.content,
-      category: data.category ?? null,
-      channel: (data.channel as any) ?? null,
-      variables: data.variables ?? null,
-      organizationId: data.organizationId,
+      name: parsed.name,
+      content: parsed.content,
+      category: parsed.category ?? null,
+      channel: parsed.channel ?? null,
+      variables: parsed.variables ?? null,
+      organizationId: parsed.organizationId,
     })
     .returning();
   return template;
@@ -371,11 +453,21 @@ export async function updateTemplate(
     variables: string[] | null;
   }>
 ) {
-  const existing = await requireTemplateAccess(id);
+  const templateId = recordIdSchema.parse(id);
+  const parsed = updateTemplateSchema.parse(data);
+  const existing = await requireTemplateAccess(templateId);
+  if (Object.keys(parsed).length === 0) {
+    return existing;
+  }
   const [template] = await db
     .update(messageTemplates)
-    .set({ ...data, updatedAt: new Date() } as any)
-    .where(and(eq(messageTemplates.id, id), eq(messageTemplates.organizationId, existing.organizationId)))
+    .set({ ...parsed, updatedAt: new Date() })
+    .where(
+      and(
+        eq(messageTemplates.id, templateId),
+        eq(messageTemplates.organizationId, existing.organizationId)
+      )
+    )
     .returning();
 
   if (!template) {
@@ -386,15 +478,19 @@ export async function updateTemplate(
 }
 
 export async function deleteTemplate(id: string) {
-  const existing = await requireTemplateAccess(id);
+  const templateId = recordIdSchema.parse(id);
+  const existing = await requireTemplateAccess(templateId);
   await db
     .delete(messageTemplates)
-    .where(and(eq(messageTemplates.id, id), eq(messageTemplates.organizationId, existing.organizationId)));
+    .where(
+      and(eq(messageTemplates.id, templateId), eq(messageTemplates.organizationId, existing.organizationId))
+    );
 }
 
 // ── Stats ──
 export async function getConversationStats(orgId: string) {
-  await requireOrgMembership(orgId);
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
   const [stats] = await db
     .select({
       total: sql<number>`count(*)`,
@@ -404,12 +500,13 @@ export async function getConversationStats(orgId: string) {
       archived: sql<number>`count(*) filter (where ${conversations.status} = 'archived')`,
     })
     .from(conversations)
-    .where(eq(conversations.organizationId, orgId));
+    .where(eq(conversations.organizationId, parsedOrgId));
   return stats;
 }
 
 export async function getPhoneCalls(orgId: string) {
-  await requireOrgMembership(orgId);
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
   return await db
     .select({
       conversation: conversations,
@@ -440,7 +537,7 @@ export async function getPhoneCalls(orgId: string) {
     .leftJoin(churchContacts, eq(conversations.contactId, churchContacts.id))
     .where(
       and(
-        eq(conversations.organizationId, orgId),
+        eq(conversations.organizationId, parsedOrgId),
         eq(conversations.channel, "phone")
       )
     )

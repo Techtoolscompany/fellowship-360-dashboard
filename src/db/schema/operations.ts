@@ -424,6 +424,9 @@ export const serviceAssignments = pgTable(
     respondedAt: timestamp("responded_at", { mode: "date" }),
     responseChannel: text("response_channel"),
     responseText: text("response_text"),
+    checkedInAt: timestamp("checked_in_at", { mode: "date" }),
+    checkedOutAt: timestamp("checked_out_at", { mode: "date" }),
+    payrollExportedAt: timestamp("payroll_exported_at", { mode: "date" }),
     notes: text("notes"),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()

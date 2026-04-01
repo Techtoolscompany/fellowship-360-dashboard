@@ -25,6 +25,15 @@ function secureNext(): NextResponse {
   return applySecurityHeaders(NextResponse.next());
 }
 
+function buildSignInRedirect(req: NextRequest, callbackPath?: string) {
+  const signInUrl = new URL("/sign-in", req.url);
+  signInUrl.searchParams.set("error", "unauthorized");
+  if (callbackPath) {
+    signInUrl.searchParams.set("callbackUrl", callbackPath);
+  }
+  return applySecurityHeaders(NextResponse.redirect(signInUrl));
+}
+
 export async function proxy(req: NextRequest) {
   // ── Rate limiting for API routes ──
   if (req.nextUrl.pathname.startsWith("/api")) {
@@ -59,14 +68,7 @@ export async function proxy(req: NextRequest) {
       if (req.nextUrl.search) {
         callbackUrl += req.nextUrl.search;
       }
-      return applySecurityHeaders(
-        NextResponse.redirect(
-          new URL(
-            `/sign-in?error=unauthorized&callbackUrl=${encodeURIComponent(callbackUrl)}`,
-            req.url
-          )
-        )
-      );
+      return buildSignInRedirect(req, callbackUrl);
     }
     return secureNext();
   }
@@ -102,24 +104,18 @@ export async function proxy(req: NextRequest) {
   }
 
   if (req.nextUrl.pathname.startsWith("/super-admin")) {
-    const email = session?.user?.email;
-    if (!email) {
-      return applySecurityHeaders(
-        NextResponse.redirect(
-          new URL("/sign-in?error=unauthorized", req.url)
-        )
-      );
+    let callbackUrl = req.nextUrl.pathname;
+    if (req.nextUrl.search) {
+      callbackUrl += req.nextUrl.search;
     }
-    const isSuperAdmin =
-      process.env.SUPER_ADMIN_EMAILS?.split(",").includes(email);
-    const hasAccess = isSuperAdmin && !!email;
+
+    if (!session?.user?.email) {
+      return buildSignInRedirect(req, callbackUrl);
+    }
+    const hasAccess = session.user.superAdmin?.status === "active";
 
     if (!hasAccess) {
-      return applySecurityHeaders(
-        NextResponse.redirect(
-          new URL("/sign-in?error=unauthorized", req.url)
-        )
-      );
+      return buildSignInRedirect(req, callbackUrl);
     }
     // Allow access to super admin pages
     return secureNext();

@@ -11,6 +11,38 @@ import {
 import { eq, asc, and, desc, inArray } from "drizzle-orm";
 import { isFirstTimeGuestStageName } from "@/lib/pipeline/first-time-guest";
 import { auditAction, requireOrgMembership } from "./utils";
+import * as z from "zod";
+
+const organizationIdSchema = z.string().trim().min(1);
+const pipelineItemIdSchema = z.string().trim().min(1);
+const pipelineStageIdSchema = z.string().trim().min(1);
+const pipelinePrioritySchema = z.enum(["low", "medium", "high"]);
+const optionalDateInputSchema = z.union([z.coerce.date(), z.null()]).optional();
+
+const createPipelineItemSchema = z.object({
+  contactId: z.string().trim().min(1),
+  stageId: pipelineStageIdSchema,
+  priority: pipelinePrioritySchema.optional(),
+  assigneeId: z.string().trim().min(1).optional(),
+  notes: z.string().trim().optional(),
+  organizationId: organizationIdSchema,
+});
+
+const updatePipelineItemSchema = z.object({
+  stageId: pipelineStageIdSchema.optional(),
+  order: z.number().int().nonnegative().optional(),
+  priority: pipelinePrioritySchema.optional(),
+  assigneeId: z.string().trim().nullable().optional(),
+  notes: z.string().trim().nullable().optional(),
+  lastContactDate: optionalDateInputSchema,
+  nextActionDate: optionalDateInputSchema,
+});
+
+const movementAuditSchema = z.object({
+  organizationId: organizationIdSchema,
+  itemId: z.string().trim().min(1).optional(),
+  limit: z.number().int().optional(),
+});
 
 function normalizeOptionalDate(value: Date | string | null | undefined): Date | null | undefined {
   if (value === undefined) return undefined;
@@ -96,11 +128,12 @@ async function enqueueFirstTimeGuestAppointment(params: {
 }
 
 export async function getPipelineData(orgId: string) {
-  await requireOrgMembership(orgId);
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
   const stages = await db
     .select()
     .from(pipelineStages)
-    .where(eq(pipelineStages.organizationId, orgId))
+    .where(eq(pipelineStages.organizationId, parsedOrgId))
     .orderBy(asc(pipelineStages.order));
 
   const items = await db
@@ -110,7 +143,7 @@ export async function getPipelineData(orgId: string) {
     })
     .from(pipelineItems)
     .leftJoin(churchContacts, eq(pipelineItems.contactId, churchContacts.id))
-    .where(eq(pipelineItems.organizationId, orgId))
+    .where(eq(pipelineItems.organizationId, parsedOrgId))
     .orderBy(asc(pipelineItems.order));
 
   return { stages, items };
@@ -121,6 +154,9 @@ export async function updateItemStage(
   stageId: string,
   order: number
 ) {
+  const parsedItemId = pipelineItemIdSchema.parse(itemId);
+  const parsedStageId = pipelineStageIdSchema.parse(stageId);
+  const parsedOrder = z.number().int().nonnegative().parse(order);
   const [existingItem] = await db
     .select({
       id: pipelineItems.id,
@@ -130,7 +166,7 @@ export async function updateItemStage(
       order: pipelineItems.order,
     })
     .from(pipelineItems)
-    .where(eq(pipelineItems.id, itemId))
+    .where(eq(pipelineItems.id, parsedItemId))
     .limit(1);
   if (!existingItem) throw new Error("Pipeline item not found");
   const { userId } = await requireOrgMembership(existingItem.organizationId);
@@ -138,17 +174,21 @@ export async function updateItemStage(
   const [stage] = await db
     .select({ id: pipelineStages.id, name: pipelineStages.name })
     .from(pipelineStages)
-    .where(and(eq(pipelineStages.id, stageId), eq(pipelineStages.organizationId, existingItem.organizationId)))
+    .where(
+      and(eq(pipelineStages.id, parsedStageId), eq(pipelineStages.organizationId, existingItem.organizationId))
+    )
     .limit(1);
   if (!stage) throw new Error("Stage not found in this organization");
 
   const [item] = await db
     .update(pipelineItems)
-    .set({ stageId, order, updatedAt: new Date() })
-    .where(and(eq(pipelineItems.id, itemId), eq(pipelineItems.organizationId, existingItem.organizationId)))
+    .set({ stageId: parsedStageId, order: parsedOrder, updatedAt: new Date() })
+    .where(
+      and(eq(pipelineItems.id, parsedItemId), eq(pipelineItems.organizationId, existingItem.organizationId))
+    )
     .returning();
 
-  if (existingItem.stageId !== stageId) {
+  if (existingItem.stageId !== parsedStageId) {
     await enqueueFirstTimeGuestAppointment({
       organizationId: item.organizationId,
       pipelineItemId: item.id,
@@ -168,9 +208,9 @@ export async function updateItemStage(
     entityId: item.id,
     details: {
       fromStageId: existingItem.stageId,
-      toStageId: stageId,
+      toStageId: parsedStageId,
       fromOrder: existingItem.order,
-      toOrder: order,
+      toOrder: parsedOrder,
     },
   });
 
@@ -185,19 +225,24 @@ export async function createPipelineItem(data: {
   notes?: string;
   organizationId: string;
 }) {
-  const { userId } = await requireOrgMembership(data.organizationId);
+  const parsed = createPipelineItemSchema.parse(data);
+  const { userId } = await requireOrgMembership(parsed.organizationId);
 
   const [stage, contact] = await Promise.all([
     db
       .select({ id: pipelineStages.id, name: pipelineStages.name })
       .from(pipelineStages)
-      .where(and(eq(pipelineStages.id, data.stageId), eq(pipelineStages.organizationId, data.organizationId)))
+      .where(
+        and(eq(pipelineStages.id, parsed.stageId), eq(pipelineStages.organizationId, parsed.organizationId))
+      )
       .limit(1)
       .then((rows) => rows[0]),
     db
       .select({ id: churchContacts.id })
       .from(churchContacts)
-      .where(and(eq(churchContacts.id, data.contactId), eq(churchContacts.organizationId, data.organizationId)))
+      .where(
+        and(eq(churchContacts.id, parsed.contactId), eq(churchContacts.organizationId, parsed.organizationId))
+      )
       .limit(1)
       .then((rows) => rows[0]),
   ]);
@@ -208,12 +253,12 @@ export async function createPipelineItem(data: {
   const [item] = await db
     .insert(pipelineItems)
     .values({
-      contactId: data.contactId,
-      stageId: data.stageId,
-      priority: (data.priority as any) ?? "medium",
-      assigneeId: data.assigneeId ?? null,
-      notes: data.notes ?? null,
-      organizationId: data.organizationId,
+      contactId: parsed.contactId,
+      stageId: parsed.stageId,
+      priority: parsed.priority ?? "medium",
+      assigneeId: parsed.assigneeId ?? null,
+      notes: parsed.notes ?? null,
+      organizationId: parsed.organizationId,
     })
     .returning();
 
@@ -256,6 +301,8 @@ export async function updatePipelineItem(
     nextActionDate: Date | string | null;
   }>
 ) {
+  const parsedItemId = pipelineItemIdSchema.parse(itemId);
+  const parsed = updatePipelineItemSchema.parse(data);
   const [existing] = await db
     .select({
       id: pipelineItems.id,
@@ -269,53 +316,50 @@ export async function updatePipelineItem(
       nextActionDate: pipelineItems.nextActionDate,
     })
     .from(pipelineItems)
-    .where(eq(pipelineItems.id, itemId))
+    .where(eq(pipelineItems.id, parsedItemId))
     .limit(1);
   if (!existing) throw new Error("Pipeline item not found");
 
   const { userId } = await requireOrgMembership(existing.organizationId);
-  const wantsMove = data.stageId !== undefined || data.order !== undefined;
+  const wantsMove = parsed.stageId !== undefined || parsed.order !== undefined;
   const wantsOtherFields =
-    data.priority !== undefined ||
-    data.assigneeId !== undefined ||
-    data.notes !== undefined ||
-    data.lastContactDate !== undefined ||
-    data.nextActionDate !== undefined;
+    parsed.priority !== undefined ||
+    parsed.assigneeId !== undefined ||
+    parsed.notes !== undefined ||
+    parsed.lastContactDate !== undefined ||
+    parsed.nextActionDate !== undefined;
 
   if (wantsMove) {
-    if (data.stageId === undefined || data.order === undefined) {
+    if (parsed.stageId === undefined || parsed.order === undefined) {
       throw new Error("stageId and order must be provided together when moving an item");
     }
     if (wantsOtherFields) {
       throw new Error("Move operations must be requested separately from field updates");
     }
-    return updateItemStage(itemId, data.stageId, data.order);
+    return updateItemStage(parsedItemId, parsed.stageId, parsed.order);
   }
 
   const patch: Record<string, unknown> = { updatedAt: new Date() };
 
-  if (data.priority !== undefined) {
-    if (!["low", "medium", "high"].includes(data.priority)) {
-      throw new Error("Invalid priority value");
-    }
-    patch.priority = data.priority;
+  if (parsed.priority !== undefined) {
+    patch.priority = parsed.priority;
   }
 
-  if (data.assigneeId !== undefined) {
-    await assertAssigneeInOrganization(existing.organizationId, data.assigneeId);
-    patch.assigneeId = data.assigneeId;
+  if (parsed.assigneeId !== undefined) {
+    await assertAssigneeInOrganization(existing.organizationId, parsed.assigneeId);
+    patch.assigneeId = parsed.assigneeId;
   }
 
-  if (data.notes !== undefined) {
-    patch.notes = data.notes;
+  if (parsed.notes !== undefined) {
+    patch.notes = parsed.notes;
   }
 
-  if (data.lastContactDate !== undefined) {
-    patch.lastContactDate = normalizeOptionalDate(data.lastContactDate);
+  if (parsed.lastContactDate !== undefined) {
+    patch.lastContactDate = normalizeOptionalDate(parsed.lastContactDate);
   }
 
-  if (data.nextActionDate !== undefined) {
-    patch.nextActionDate = normalizeOptionalDate(data.nextActionDate);
+  if (parsed.nextActionDate !== undefined) {
+    patch.nextActionDate = normalizeOptionalDate(parsed.nextActionDate);
   }
 
   if (Object.keys(patch).length === 1) {
@@ -324,10 +368,10 @@ export async function updatePipelineItem(
 
   const [updated] = await db
     .update(pipelineItems)
-    .set(patch as any)
+    .set(patch)
     .where(
       and(
-        eq(pipelineItems.id, itemId),
+        eq(pipelineItems.id, parsedItemId),
         eq(pipelineItems.organizationId, existing.organizationId)
       )
     )
@@ -342,7 +386,7 @@ export async function updatePipelineItem(
     details: {
       priority: updated.priority,
       assigneeId: updated.assigneeId,
-      notesUpdated: data.notes !== undefined,
+      notesUpdated: parsed.notes !== undefined,
       lastContactDate: updated.lastContactDate?.toISOString() ?? null,
       nextActionDate: updated.nextActionDate?.toISOString() ?? null,
     },
@@ -352,7 +396,8 @@ export async function updatePipelineItem(
 }
 
 export async function seedDefaultStages(orgId: string) {
-  await requireOrgMembership(orgId);
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
   const defaultStages = [
     { name: "First-Time Visitors", color: "#6366f1", order: 0 },
     { name: "Attempted Contact", color: "#f59e0b", order: 1 },
@@ -367,7 +412,7 @@ export async function seedDefaultStages(orgId: string) {
     .values(
       defaultStages.map((s) => ({
         ...s,
-        organizationId: orgId,
+        organizationId: parsedOrgId,
       }))
     )
     .returning();
@@ -375,6 +420,7 @@ export async function seedDefaultStages(orgId: string) {
 }
 
 export async function deletePipelineItem(id: string) {
+  const parsedItemId = pipelineItemIdSchema.parse(id);
   const [existingItem] = await db
     .select({
       id: pipelineItems.id,
@@ -385,20 +431,22 @@ export async function deletePipelineItem(id: string) {
       assigneeId: pipelineItems.assigneeId,
     })
     .from(pipelineItems)
-    .where(eq(pipelineItems.id, id))
+    .where(eq(pipelineItems.id, parsedItemId))
     .limit(1);
   if (!existingItem) return;
   const { userId } = await requireOrgMembership(existingItem.organizationId);
   await db
     .delete(pipelineItems)
-    .where(and(eq(pipelineItems.id, id), eq(pipelineItems.organizationId, existingItem.organizationId)));
+    .where(
+      and(eq(pipelineItems.id, parsedItemId), eq(pipelineItems.organizationId, existingItem.organizationId))
+    );
 
   await auditAction({
     organizationId: existingItem.organizationId,
     userId,
     actionType: "delete",
     entityName: "pipeline_item",
-    entityId: id,
+    entityId: parsedItemId,
     details: {
       stageId: existingItem.stageId,
       contactId: existingItem.contactId,
@@ -413,10 +461,11 @@ export async function getPipelineMovementAudit(input: {
   itemId?: string;
   limit?: number;
 }) {
-  await requireOrgMembership(input.organizationId);
-  const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
+  const parsed = movementAuditSchema.parse(input);
+  await requireOrgMembership(parsed.organizationId);
+  const limit = Math.min(Math.max(parsed.limit ?? 50, 1), 200);
   const clauses = [
-    eq(actionAuditLogs.organizationId, input.organizationId),
+    eq(actionAuditLogs.organizationId, parsed.organizationId),
     eq(actionAuditLogs.entityName, "pipeline_item"),
     inArray(actionAuditLogs.actionType, [
       "create",
@@ -426,8 +475,8 @@ export async function getPipelineMovementAudit(input: {
       "delete",
     ]),
   ];
-  if (input.itemId) {
-    clauses.push(eq(actionAuditLogs.entityId, input.itemId));
+  if (parsed.itemId) {
+    clauses.push(eq(actionAuditLogs.entityId, parsed.itemId));
   }
 
   return db

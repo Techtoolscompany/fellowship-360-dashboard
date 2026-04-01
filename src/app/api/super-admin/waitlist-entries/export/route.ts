@@ -39,4 +39,4 @@ export const GET = withSuperAdminAuthRequired(async () => {
       { status: 500 }
     );
   }
-});
+}, "manage_waitlist");

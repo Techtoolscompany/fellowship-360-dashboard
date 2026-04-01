@@ -4,6 +4,7 @@ import type { GraceActionOutcome, GraceSessionContext, ProposedAction, ToolResul
 import { evaluatePolicy } from "../policy/engine";
 import { queueApproval } from "../policy/approvals";
 import { findGraceTool } from "../tools/registry";
+import { writeGraceAuditStreamSafe } from "../audit-stream";
 
 async function writeAudit(params: {
   organizationId: string;
@@ -64,6 +65,22 @@ export async function executePlannedActions(params: {
         error: errorMessage,
         occurredAt,
       });
+      await writeGraceAuditStreamSafe({
+        organizationId: params.context.organizationId,
+        sessionId: params.context.sessionId,
+        actorType: params.context.actorType,
+        channel: params.context.channel,
+        eventType: "action_execution",
+        source: "grace_executor",
+        status: "blocked",
+        toolName: action.tool,
+        actionName: action.reason,
+        errorText: errorMessage,
+        metadataJson: {
+          actionId: action.id,
+          requiresApproval: action.requiresApproval,
+        },
+      });
       continue;
     }
 
@@ -87,6 +104,22 @@ export async function executePlannedActions(params: {
         output: queuedOutput,
         occurredAt,
       });
+      await writeGraceAuditStreamSafe({
+        organizationId: params.context.organizationId,
+        sessionId: params.context.sessionId,
+        actorType: params.context.actorType,
+        channel: params.context.channel,
+        eventType: "action_execution",
+        source: "grace_executor",
+        status: "queued",
+        toolName: action.tool,
+        actionName: action.reason,
+        metadataJson: {
+          actionId: action.id,
+          approvalId: approval.id,
+          requiresApproval: true,
+        },
+      });
       continue;
     }
 
@@ -102,6 +135,21 @@ export async function executePlannedActions(params: {
         status: "failed",
         error: errorMessage,
         occurredAt,
+      });
+      await writeGraceAuditStreamSafe({
+        organizationId: params.context.organizationId,
+        sessionId: params.context.sessionId,
+        actorType: params.context.actorType,
+        channel: params.context.channel,
+        eventType: "action_execution",
+        source: "grace_executor",
+        status: "error",
+        toolName: action.tool,
+        actionName: action.reason,
+        errorText: errorMessage,
+        metadataJson: {
+          actionId: action.id,
+        },
       });
       continue;
     }
@@ -142,6 +190,24 @@ export async function executePlannedActions(params: {
       output: result.output,
       error: result.error,
       occurredAt,
+    });
+    await writeGraceAuditStreamSafe({
+      organizationId: params.context.organizationId,
+      sessionId: params.context.sessionId,
+      actorType: params.context.actorType,
+      channel: params.context.channel,
+      eventType: "action_execution",
+      source: "grace_executor",
+      status: result.success ? "success" : "error",
+      toolName: action.tool,
+      actionName: action.reason,
+      latencyMs: Date.now() - start,
+      errorText: result.error ?? null,
+      metadataJson: {
+        actionId: action.id,
+        requiresApproval: action.requiresApproval,
+        output: result.output ?? null,
+      },
     });
   }
 

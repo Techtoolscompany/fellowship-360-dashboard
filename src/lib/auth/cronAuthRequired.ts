@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqualString } from "@/lib/security/compare";
+import {
+  isPlaceholderCronPassword,
+  isPlaceholderCronUsername,
+  isProductionEnvironment,
+} from "@/lib/security/production-readiness";
 
 interface CronHandler {
   (
@@ -29,6 +35,17 @@ const cronAuthRequired = (handler: CronHandler) => {
       );
     }
 
+    if (
+      isProductionEnvironment() &&
+      (isPlaceholderCronUsername(CRON_USERNAME) || isPlaceholderCronPassword(CRON_PASSWORD))
+    ) {
+      console.error("[cron] Placeholder cron credentials detected in production — rejecting request");
+      return NextResponse.json(
+        { success: false, error: "Cron authentication is insecurely configured" },
+        { status: 503 }
+      );
+    }
+
     // Authentication check
     const authHeader = req.headers.get("authorization");
     
@@ -46,11 +63,27 @@ const cronAuthRequired = (handler: CronHandler) => {
     try {
       // Decode Basic Auth credentials
       const base64Credentials = authHeader.split(" ")[1];
-      const credentials = Buffer.from(base64Credentials, "base64").toString("ascii");
-      const [username, password] = credentials.split(":");
+      const decodedCredentials = Buffer.from(base64Credentials, "base64").toString("utf8");
+      const delimiterIndex = decodedCredentials.indexOf(":");
+      if (delimiterIndex <= 0) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Invalid credentials format",
+            error: "Username or password is incorrect",
+          },
+          { status: 401, headers: { "WWW-Authenticate": "Basic" } }
+        );
+      }
+
+      const username = decodedCredentials.slice(0, delimiterIndex);
+      const password = decodedCredentials.slice(delimiterIndex + 1);
 
       // Validate credentials
-      if (username !== CRON_USERNAME || password !== CRON_PASSWORD) {
+      if (
+        !timingSafeEqualString(username, CRON_USERNAME) ||
+        !timingSafeEqualString(password, CRON_PASSWORD)
+      ) {
         return NextResponse.json(
           {
             success: false,

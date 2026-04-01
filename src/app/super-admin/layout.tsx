@@ -2,120 +2,223 @@
 
 import React from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard,
-  CreditCard,
-  Users,
-  MessageSquare,
-  LogOut,
+  Activity,
+  Building2,
   ClipboardList,
-  Menu,
-  Building,
-  Ticket,
+  CreditCard,
+  LayoutDashboard,
+  LogOut,
+  MessageSquare,
+  Rocket,
+  ShieldCheck,
   Smartphone,
+  Ticket,
+  Users,
+  UserCog,
 } from "lucide-react";
-import { ThemeSwitcher } from "@/components/theme-switcher";
 import { appConfig } from "@/lib/config";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { usePathname } from "next/navigation";
+import type { SuperAdminPermission } from "@/lib/super-admin/permissions";
+import { superAdminSurfaceClassName } from "@/components/super-admin/primitives";
 
-const navigation = [
-  { name: "Dashboard", href: "/super-admin", icon: LayoutDashboard },
-  { name: "Plans", href: "/super-admin/plans", icon: CreditCard },
-  { name: "Users", href: "/super-admin/users", icon: Users },
-  { name: "Organizations", href: "/super-admin/organizations", icon: Building },
-  { name: "SMS Devices", href: "/super-admin/devices", icon: Smartphone },
-  { name: "Lifetime Deal", href: "/super-admin/coupons", icon: Ticket },
-  { name: "Messages", href: "/super-admin/messages", icon: MessageSquare },
-  { name: "Waitlist", href: "/super-admin/waitlist", icon: ClipboardList },
-  { name: "Logout", href: "/super-admin/logout", icon: LogOut },
+const navigation: Array<{
+  name: string;
+  href: string;
+  icon: typeof LayoutDashboard;
+  detail: string;
+  permission?: SuperAdminPermission;
+}> = [
+  {
+    name: "Overview",
+    href: "/super-admin",
+    icon: LayoutDashboard,
+    detail: "Command center",
+  },
+  {
+    name: "Health Board",
+    href: "/super-admin/health",
+    icon: Activity,
+    detail: "Launch risk",
+  },
+  {
+    name: "Organizations",
+    href: "/super-admin/organizations",
+    icon: Building2,
+    detail: "Church records",
+  },
+  {
+    name: "Bulk Deploy",
+    href: "/super-admin/automations/deploy",
+    icon: Rocket,
+    detail: "Workflow rollout",
+    permission: "deploy_automations",
+  },
+  {
+    name: "SMS Devices",
+    href: "/super-admin/devices",
+    icon: Smartphone,
+    detail: "Gateway control",
+    permission: "manage_devices",
+  },
+  {
+    name: "Users",
+    href: "/super-admin/users",
+    icon: Users,
+    detail: "Admins and access",
+    permission: "manage_users",
+  },
+  {
+    name: "Team",
+    href: "/super-admin/team",
+    icon: UserCog,
+    detail: "Staff permissions",
+    permission: "manage_super_admin_team" as SuperAdminPermission,
+  },
+  {
+    name: "Plans",
+    href: "/super-admin/plans",
+    icon: CreditCard,
+    detail: "Commercial setup",
+    permission: "manage_plans",
+  },
+  {
+    name: "Messages",
+    href: "/super-admin/messages",
+    icon: MessageSquare,
+    detail: "Inbox pressure",
+    permission: "manage_messages",
+  },
+  {
+    name: "Lifetime Deal",
+    href: "/super-admin/coupons",
+    icon: Ticket,
+    detail: "Offers",
+    permission: "manage_coupons",
+  },
+  {
+    name: "Waitlist",
+    href: "/super-admin/waitlist",
+    icon: ClipboardList,
+    detail: "Pipeline",
+    permission: "manage_waitlist",
+  },
 ];
 
 interface SuperAdminLayoutProps {
   children: React.ReactNode;
 }
 
+function routeIsActive(pathname: string, href: string) {
+  if (href === "/super-admin") {
+    return pathname === href;
+  }
+
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 function SuperAdminLayout({ children }: SuperAdminLayoutProps) {
   const pathname = usePathname();
+  const { data: session } = useSession();
+  const permissions = session?.user?.superAdmin?.permissions ?? [];
+  const visibleNavigation = navigation.filter(
+    (item) => !item.permission || permissions.includes(item.permission)
+  );
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Top Navigation */}
-      <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur-sm supports-backdrop-filter:bg-background/60">
-        <div className="flex h-14 items-center px-4 gap-4">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild className="md:hidden">
-              <Button variant="ghost" size="icon">
-                <Menu className="h-5 w-5" />
-                <span className="sr-only">Open menu</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-52">
-              {navigation.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <DropdownMenuItem key={item.name} asChild>
-                    <Link
-                      href={item.href}
-                      className="flex items-center gap-2 cursor-pointer"
-                    >
-                      <Icon className="h-4 w-4" />
-                      {item.name}
-                    </Link>
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <div className="flex flex-1 items-center justify-between">
-            <Link href="/super-admin" className="font-semibold">
-              {appConfig.projectName} Admin Dashboard
-            </Link>
-            <div className="flex items-center gap-4">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(132,204,22,0.08),transparent_30%),linear-gradient(180deg,rgba(248,250,252,0.98),rgba(241,245,249,0.9))] dark:bg-[radial-gradient(circle_at_top,rgba(132,204,22,0.08),transparent_24%),linear-gradient(180deg,rgba(2,6,23,0.98),rgba(2,6,23,0.92))]">
+      <header className="sticky top-0 z-50 border-b border-slate-200/70 bg-background/85 backdrop-blur-xl supports-[backdrop-filter]:bg-background/65 dark:border-slate-800/80">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-3 md:px-6">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/85 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">
+                <ShieldCheck className="h-3.5 w-3.5 text-lime-500" />
+                Platform Control
+              </div>
+              <div className="space-y-0.5">
+                <Link
+                  href="/super-admin"
+                  className="text-base font-black tracking-tight text-slate-900 dark:text-white md:text-lg"
+                >
+                  {appConfig.projectName} Super Admin
+                </Link>
+                <p className="max-w-3xl text-sm text-slate-500 dark:text-slate-300">
+                  Fellowship 360 operating workspace for platform, launch, and internal control work.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-start lg:self-auto">
               <ThemeSwitcher />
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/super-admin/logout">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Log Out
+                </Link>
+              </Button>
             </div>
           </div>
-        </div>
-      </header>
 
-      <div className="flex">
-        {/* Side Navigation - Desktop Only */}
-        <aside className="hidden md:block w-64 border-r border-border/40 bg-background">
-          <nav className="space-y-1 p-4">
-            {navigation.map((item) => {
+          <nav
+            className={cn(
+              superAdminSurfaceClassName,
+              "flex gap-1.5 overflow-x-auto px-2 py-2 scrollbar-hide"
+            )}
+          >
+            {visibleNavigation.map((item) => {
               const Icon = item.icon;
+              const isActive = routeIsActive(pathname, item.href);
+
               return (
                 <Link
-                  key={item.name}
+                  key={item.href}
                   href={item.href}
                   className={cn(
-                    "group flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground",
-                    "transition-colors",
-                    pathname === item.href || (pathname?.startsWith(item.href) && item.href !== "/super-admin") 
-                      ? "bg-accent text-accent-foreground" 
-                      : ""
+                    "group min-w-fit shrink-0 rounded-2xl px-3 py-2 transition-colors duration-200",
+                    isActive
+                      ? "bg-slate-900 text-white shadow-sm dark:bg-white dark:text-slate-900"
+                      : "text-slate-700 hover:bg-slate-100/90 hover:text-slate-900 dark:text-slate-200 dark:hover:bg-slate-800/80 dark:hover:text-white"
                   )}
                 >
-                  <Icon className="mr-3 h-5 w-5" />
-                  {item.name}
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={cn(
+                        "rounded-xl p-2 transition-colors",
+                        isActive
+                          ? "bg-white/10 text-lime-300 dark:bg-slate-900/10 dark:text-slate-900"
+                          : "bg-slate-100 text-slate-500 group-hover:text-slate-900 dark:bg-slate-950/70 dark:text-slate-300 dark:group-hover:text-white"
+                      )}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-black tracking-wide">
+                        {item.name}
+                      </p>
+                      <p
+                        className={cn(
+                          "hidden truncate text-[10px] font-semibold uppercase tracking-[0.16em] md:block",
+                          isActive
+                            ? "text-slate-300 dark:text-slate-600"
+                            : "text-slate-500 dark:text-slate-400"
+                        )}
+                      >
+                        {item.detail}
+                      </p>
+                    </div>
+                  </div>
                 </Link>
               );
             })}
           </nav>
-        </aside>
+        </div>
+      </header>
 
-        {/* Main Content */}
-        <main className="flex-1 w-full">
-          <div className="px-4 py-6">{children}</div>
-        </main>
-      </div>
+      <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6 md:py-7">{children}</main>
     </div>
   );
 }

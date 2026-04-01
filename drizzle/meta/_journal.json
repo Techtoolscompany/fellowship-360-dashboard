@@ -92,6 +92,76 @@
       "when": 1773208800000,
       "tag": "0012_grace_memory",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1773331200000,
+      "tag": "0013_sequence_automation_platform",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1773335400000,
+      "tag": "0014_automation_enrollment_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1773421200000,
+      "tag": "0015_automation_workflow_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1773804600000,
+      "tag": "0016_automation_dead_letter_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1773891000000,
+      "tag": "0017_grace_knowledge_versions_and_staff_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1773896400000,
+      "tag": "0018_grace_audit_stream",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1773932400000,
+      "tag": "0019_organization_role_access_policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1774368000000,
+      "tag": "0020_super_admin_team",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1774375200000,
+      "tag": "0021_dittofeed_sms_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1774436400000,
+      "tag": "0022_sms_gateway_device_auth",
+      "breakpoints": true
     }
   ]
 }

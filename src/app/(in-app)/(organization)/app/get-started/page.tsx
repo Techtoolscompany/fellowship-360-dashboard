@@ -7,8 +7,11 @@ import { toast } from "sonner";
 import useOrganization from "@/lib/organizations/useOrganization";
 import {
   bootstrapSampleData,
+  getGuidedSequenceOnboarding,
   getLaunchReadiness,
+  getProviderHealthChecks,
   installStarterTemplates,
+  startGuidedSequenceOnboarding,
 } from "@/app/actions/onboarding";
 
 type SetupMetrics = {
@@ -50,23 +53,35 @@ type LaunchReadiness = {
   metrics: SetupMetrics;
 };
 
+type ProviderHealthSnapshot = Awaited<ReturnType<typeof getProviderHealthChecks>>;
+type GuidedSequenceSnapshot = Awaited<ReturnType<typeof getGuidedSequenceOnboarding>>;
+
 export default function GetStartedPage() {
   const { organization } = useOrganization();
   const orgId = organization?.id;
   const [loading, setLoading] = useState(true);
   const [readiness, setReadiness] = useState<LaunchReadiness | null>(null);
+  const [providerHealth, setProviderHealth] = useState<ProviderHealthSnapshot | null>(null);
+  const [guidedSequences, setGuidedSequences] = useState<GuidedSequenceSnapshot | null>(null);
   const [installingStarters, setInstallingStarters] = useState(false);
   const [seedingSampleData, setSeedingSampleData] = useState(false);
+  const [startingGuideId, setStartingGuideId] = useState<string | null>(null);
 
   const fetchSetupState = useCallback(async () => {
     if (!orgId) return;
     setLoading(true);
     try {
-      const data = await getLaunchReadiness(orgId);
-      setReadiness(data);
+      const [readinessData, providerHealthData, guidedSequencesData] = await Promise.all([
+        getLaunchReadiness(orgId),
+        getProviderHealthChecks(orgId),
+        getGuidedSequenceOnboarding(orgId),
+      ]);
+      setReadiness(readinessData);
+      setProviderHealth(providerHealthData);
+      setGuidedSequences(guidedSequencesData);
     } catch (error) {
       console.error("Failed to load launch readiness:", error);
-      toast.error("Failed to load launch readiness");
+      toast.error("Failed to load onboarding data");
     } finally {
       setLoading(false);
     }
@@ -93,6 +108,22 @@ export default function GetStartedPage() {
   const completed = readiness?.completedCount ?? 0;
   const totalSteps = readiness?.totalCount ?? setupSteps.length;
   const nextBlockingAction = readiness?.blockingActions[0] ?? null;
+  const providerSummary = providerHealth?.summary ?? {
+    total: 0,
+    healthy: 0,
+    degraded: 0,
+    critical: 0,
+    scorePercent: 0,
+  };
+  const providerChecks = providerHealth?.checks ?? [];
+  const nextProviderAction = providerHealth?.nextAction ?? null;
+  const guidedRows = guidedSequences?.guides ?? [];
+  const guidedSummary = guidedSequences?.summary ?? {
+    templateInstalledCount: 0,
+    builderDraftCount: 0,
+    total: 0,
+  };
+  const nextGuideId = guidedSequences?.nextGuideId ?? null;
 
   const wizardSteps = useMemo(
     () =>
@@ -135,6 +166,29 @@ export default function GetStartedPage() {
       toast.error(error instanceof Error ? error.message : "Failed to bootstrap sample data");
     } finally {
       setSeedingSampleData(false);
+    }
+  };
+
+  const handleStartGuidedSequence = async (blueprintId: string) => {
+    if (!orgId) return;
+    setStartingGuideId(blueprintId);
+    try {
+      const result = await startGuidedSequenceOnboarding({
+        organizationId: orgId,
+        blueprintId,
+        installTemplate: true,
+      });
+      toast.success(`${result.blueprintTitle} guide is ready`, {
+        description: result.builderCreated
+          ? "Builder draft created and linked template checked."
+          : "Existing builder draft reused and template checked.",
+      });
+      await fetchSetupState();
+    } catch (error) {
+      console.error("Failed to start guided sequence:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to start guided sequence");
+    } finally {
+      setStartingGuideId(null);
     }
   };
 
@@ -308,6 +362,180 @@ export default function GetStartedPage() {
             </div>
           </div>
 
+          <div className="bg-white dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-800 p-6">
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                  Provider Health Checks
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Runtime health for AI, SMS, email, and voice with guided remediation links.
+                </p>
+              </div>
+              <span className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-black text-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                {providerSummary.scorePercent}% healthy
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <HealthPill label="Total" value={providerSummary.total} tone="slate" />
+              <HealthPill label="Healthy" value={providerSummary.healthy} tone="emerald" />
+              <HealthPill label="Degraded" value={providerSummary.degraded} tone="amber" />
+              <HealthPill label="Critical" value={providerSummary.critical} tone="rose" />
+            </div>
+
+            {nextProviderAction ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 mb-4 dark:border-amber-800 dark:bg-amber-950/20">
+                <p className="text-[11px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                  Recommended Next Fix
+                </p>
+                <p className="text-sm font-bold text-slate-900 dark:text-white mt-1">
+                  {nextProviderAction.title}
+                </p>
+                <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+                  {nextProviderAction.summary}
+                </p>
+              </div>
+            ) : null}
+
+            <div className="space-y-3">
+              {providerChecks.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40">
+                  Provider checks are not available yet.
+                </div>
+              ) : (
+                providerChecks.map((check) => (
+                  <div
+                    key={check.key}
+                    className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-bold text-slate-900 dark:text-white">
+                            {check.title}
+                          </p>
+                          <span className={statusBadgeClass(check.status)}>{check.status}</span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1">{check.summary}</p>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Runtime: {check.runtime.errors}/{check.runtime.events} errors (
+                          {check.runtime.errorRatePercent}%)
+                        </p>
+                      </div>
+                      <Link
+                        href={check.remediation.href}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] font-black text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                      >
+                        {check.remediation.label}
+                        <span className="material-symbols-outlined text-[12px]">arrow_forward</span>
+                      </Link>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-800 p-6">
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                  Teach Me This Sequence
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Guided onboarding creates a builder draft and checks template installation.
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-slate-500">
+                  Templates installed:{" "}
+                  <span className="font-black text-slate-900 dark:text-white">
+                    {guidedSummary.templateInstalledCount}/{guidedSummary.total}
+                  </span>
+                </p>
+                <p className="text-xs text-slate-500">
+                  Builder drafts:{" "}
+                  <span className="font-black text-slate-900 dark:text-white">
+                    {guidedSummary.builderDraftCount}/{guidedSummary.total}
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {guidedRows.map((guide) => {
+                const isStarting = startingGuideId === guide.id;
+                const isRecommended = guide.id === nextGuideId;
+                return (
+                  <div
+                    key={guide.id}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                        {guide.title}
+                      </h4>
+                      {isRecommended ? (
+                        <span className="rounded-full bg-[#84cc16]/20 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-[#65a30d]">
+                          Next
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">{guide.summary}</p>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span
+                        className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-wide ${
+                          guide.templateInstalled
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                            : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                        }`}
+                      >
+                        {guide.templateInstalled ? "Template Ready" : "Template Pending"}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-wide ${
+                          guide.builderWorkflowId
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                            : "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
+                        }`}
+                      >
+                        {guide.builderWorkflowId ? "Builder Draft Ready" : "No Draft Yet"}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 space-y-1">
+                      {guide.checklist.map((item) => (
+                        <p key={item} className="text-[11px] text-slate-600 dark:text-slate-300">
+                          • {item}
+                        </p>
+                      ))}
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleStartGuidedSequence(guide.id)}
+                        disabled={Boolean(startingGuideId)}
+                        className="inline-flex items-center gap-2 rounded-lg bg-[#84cc16] px-3 py-2 text-[11px] font-black text-slate-950 disabled:opacity-60"
+                      >
+                        {isStarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                        {guide.builderWorkflowId ? "Refresh Guided Draft" : "Teach Me This Sequence"}
+                      </button>
+                      <Link
+                        href="/app/automations"
+                        className="text-[11px] font-black text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                      >
+                        Open Automations
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <MiniCard label="Contacts" value={metrics.contacts} icon="groups" href="/app/contacts" />
             <MiniCard
@@ -357,5 +585,41 @@ function MiniCard({
         <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">{label}</p>
       </div>
     </Link>
+  );
+}
+
+function statusBadgeClass(status: "healthy" | "degraded" | "critical") {
+  if (status === "healthy") {
+    return "rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
+  }
+  if (status === "critical") {
+    return "rounded-full bg-rose-100 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-rose-700 dark:bg-rose-900/30 dark:text-rose-300";
+  }
+  return "rounded-full bg-amber-100 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-amber-700 dark:bg-amber-900/30 dark:text-amber-300";
+}
+
+function HealthPill({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "slate" | "emerald" | "amber" | "rose";
+}) {
+  const toneClass =
+    tone === "emerald"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-300"
+      : tone === "amber"
+        ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300"
+        : tone === "rose"
+          ? "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/40 dark:bg-rose-900/20 dark:text-rose-300"
+          : "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300";
+
+  return (
+    <div className={`rounded-xl border p-3 ${toneClass}`}>
+      <p className="text-[11px] uppercase tracking-wide">{label}</p>
+      <p className="text-lg font-black">{value}</p>
+    </div>
   );
 }

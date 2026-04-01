@@ -7,17 +7,18 @@ import sendMail from "@/lib/email/sendMail";
 import { appConfig } from "@/lib/config";
 import { db } from "@/db";
 import { users } from "@/db/schema/user";
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { rateLimitKeyed } from "@/lib/grace/channels/webhooks";
+import { getClientIp } from "@/lib/security/request";
+import { resolveAppUrl } from "@/lib/security/app-url";
 
 interface ResetPasswordToken {
   email: string;
-  expiry: string;
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+    const ip = getClientIp(request);
     if (!(await rateLimitKeyed(`auth:reset-password:${ip}`, 5, 15 * 60_000))) {
       return NextResponse.json({ error: "Too many requests" }, { status: 429 });
     }
@@ -33,41 +34,50 @@ export async function POST(request: NextRequest) {
     }
 
     const { email } = validation.data;
+    const normalizedEmail = email.trim().toLowerCase();
 
     // Check if user exists and has a password (password-based account)
     const existingUser = await db
       .select()
       .from(users)
-      .where(eq(users.email, email))
+      .where(sql`lower(${users.email}) = ${normalizedEmail}`)
       .limit(1)
       .then((users) => users[0]);
 
+    const appUrl = resolveAppUrl(request);
+    if (!appUrl) {
+      console.error("[reset-password-request] App URL not configured");
+      return NextResponse.json(
+        { error: "Authentication is temporarily unavailable" },
+        { status: 503 }
+      );
+    }
 
     // Always return success to prevent email enumeration
     // But only send email if user exists and has password auth enabled
     if (existingUser && appConfig.auth?.enablePasswordAuth) {
       // Create reset token
-      const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
       const resetToken: ResetPasswordToken = {
-        email,
-        expiry: expiresAt.toISOString(),
+        email: normalizedEmail,
       };
 
-      const token = await encryptJson(resetToken);
+      const token = await encryptJson(resetToken, {
+        purpose: "reset-password",
+        expiresIn: "30m",
+      });
 
       // Generate reset password URL
-      const resetPasswordUrl = new URL(
-        `${process.env.NEXTAUTH_URL}/reset-password/confirm`
-      );
+      const resetPasswordUrl = new URL("/reset-password/confirm", appUrl);
       resetPasswordUrl.searchParams.append("token", token);
 
       // Send email
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
       const html = await render(
         ResetPasswordEmail({ url: resetPasswordUrl.toString(), expiresAt })
       );
 
       await sendMail(
-        email,
+        normalizedEmail,
         `Reset your ${appConfig.projectName} password`,
         html
       );
@@ -86,4 +96,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
