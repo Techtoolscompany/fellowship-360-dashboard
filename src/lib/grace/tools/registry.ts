@@ -46,6 +46,34 @@ function parseOptionalInputDate(value: unknown, label: string): Date | undefined
   return parsed;
 }
 
+function normalizeOptionalTextInput(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return String(value).trim();
+}
+
+function parseOptionalNonNegativeInt(value: unknown, label: string): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
+  }
+  return parsed;
+}
+
+function parseOptionalBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return undefined;
+}
+
 async function ensurePrayerEscalationTask(params: {
   organizationId: string;
   requestId: string;
@@ -701,6 +729,136 @@ const memoryWrite: GraceTool = {
         memoryId: created.id,
         memoryType: created.memoryType,
         contactId: created.contactId,
+      },
+    };
+  },
+};
+
+const onboardingProfileUpdate: GraceTool = {
+  name: "onboarding.profile.update",
+  allowedChannels: ["in_app"],
+  async execute(input, ctx) {
+    const churchName = normalizeOptionalTextInput(input.churchName ?? input.orgName);
+    const denomination = normalizeOptionalTextInput(
+      input.denomination ?? input.churchDenomination
+    );
+    const city = normalizeOptionalTextInput(input.city ?? input.churchCity);
+    const website = normalizeOptionalTextInput(input.website ?? input.orgWebsite);
+    const industry = normalizeOptionalTextInput(input.industry);
+    const howDidYouHearAboutUs = normalizeOptionalTextInput(input.howDidYouHearAboutUs);
+    const primaryContactName = normalizeOptionalTextInput(input.primaryContactName);
+    const primaryContactEmail = normalizeOptionalTextInput(input.primaryContactEmail);
+    const primaryContactPhone = normalizeOptionalTextInput(input.primaryContactPhone);
+    const primaryGoal = normalizeOptionalTextInput(input.primaryGoal ?? input.goal);
+    const notes = normalizeOptionalTextInput(input.notes);
+    const orgTypeRaw =
+      input.orgType !== undefined && input.orgType !== null ? String(input.orgType) : undefined;
+    const orgType:
+      | "startup"
+      | "enterprise"
+      | "agency"
+      | "individual"
+      | undefined =
+      orgTypeRaw === "startup" ||
+      orgTypeRaw === "enterprise" ||
+      orgTypeRaw === "agency" ||
+      orgTypeRaw === "individual"
+        ? orgTypeRaw
+        : undefined;
+    const teamSize = parseOptionalNonNegativeInt(input.teamSize, "teamSize");
+    const averageWeeklyAttendance = parseOptionalNonNegativeInt(
+      input.averageWeeklyAttendance ?? input.attendance,
+      "averageWeeklyAttendance"
+    );
+    const onboardingDone = parseOptionalBoolean(input.onboardingDone);
+
+    const payload = {
+      organizationId: ctx.organizationId,
+      ...(churchName !== undefined ? { churchName } : {}),
+      ...(denomination !== undefined ? { denomination } : {}),
+      ...(city !== undefined ? { city } : {}),
+      ...(website !== undefined ? { website } : {}),
+      ...(orgType !== undefined ? { orgType } : {}),
+      ...(teamSize !== undefined ? { teamSize } : {}),
+      ...(averageWeeklyAttendance !== undefined ? { averageWeeklyAttendance } : {}),
+      ...(industry !== undefined ? { industry } : {}),
+      ...(howDidYouHearAboutUs !== undefined ? { howDidYouHearAboutUs } : {}),
+      ...(primaryContactName !== undefined ? { primaryContactName } : {}),
+      ...(primaryContactEmail !== undefined ? { primaryContactEmail } : {}),
+      ...(primaryContactPhone !== undefined ? { primaryContactPhone } : {}),
+      ...(primaryGoal !== undefined ? { primaryGoal } : {}),
+      ...(notes !== undefined ? { notes } : {}),
+      ...(onboardingDone !== undefined ? { onboardingDone } : {}),
+    };
+
+    if (Object.keys(payload).length === 1) {
+      return { success: false, error: "At least one onboarding field is required" };
+    }
+
+    const { updateOrganizationOnboardingProfile } = await import("@/app/actions/onboarding");
+    const updated = await updateOrganizationOnboardingProfile(payload);
+
+    return {
+      success: true,
+      output: {
+        churchName: updated.churchName,
+        onboardingDone: updated.onboardingDone,
+        updatedFields: updated.updatedFields,
+      },
+    };
+  },
+};
+
+const onboardingInstallStarterTemplates: GraceTool = {
+  name: "onboarding.installStarterTemplates",
+  allowedChannels: ["in_app"],
+  async execute(_input, ctx) {
+    const { installStarterTemplates } = await import("@/app/actions/onboarding");
+    const result = await installStarterTemplates(ctx.organizationId);
+    return { success: true, output: result };
+  },
+};
+
+const onboardingBootstrapSampleData: GraceTool = {
+  name: "onboarding.bootstrapSampleData",
+  allowedChannels: ["in_app"],
+  async execute(_input, ctx) {
+    const { bootstrapSampleData } = await import("@/app/actions/onboarding");
+    const result = await bootstrapSampleData(ctx.organizationId);
+    return { success: true, output: result };
+  },
+};
+
+const onboardingStartGuidedSequence: GraceTool = {
+  name: "onboarding.startGuidedSequence",
+  allowedChannels: ["in_app"],
+  async execute(input, ctx) {
+    const blueprintId = normalizeOptionalTextInput(input.blueprintId ?? input.sequenceId);
+    if (!blueprintId) {
+      return { success: false, error: "blueprintId is required" };
+    }
+
+    const installTemplate =
+      parseOptionalBoolean(input.installTemplate) === undefined
+        ? true
+        : Boolean(parseOptionalBoolean(input.installTemplate));
+
+    const { startGuidedSequenceOnboarding } = await import("@/app/actions/onboarding");
+    const result = await startGuidedSequenceOnboarding({
+      organizationId: ctx.organizationId,
+      blueprintId,
+      installTemplate,
+    });
+
+    return {
+      success: true,
+      output: {
+        blueprintId: result.blueprintId,
+        blueprintTitle: result.blueprintTitle,
+        builderWorkflowId: result.builderWorkflowId,
+        templateWorkflowId: result.templateWorkflowId,
+        templateInstalled: result.templateInstalled,
+        templateAlreadyInstalled: result.templateAlreadyInstalled,
       },
     };
   },
@@ -2089,6 +2247,10 @@ export const graceTools: GraceTool[] = [
   handoffTransfer,
   tasksCreate,
   memoryWrite,
+  onboardingProfileUpdate,
+  onboardingInstallStarterTemplates,
+  onboardingBootstrapSampleData,
+  onboardingStartGuidedSequence,
   serviceRunsCreateFromTemplate,
   serviceRunsAutoStaff,
   serviceAssignmentsSendOfferSMS,
@@ -2136,4 +2298,94 @@ export const graceTools: GraceTool[] = [
 
 export function findGraceTool(name: string): GraceTool | undefined {
   return graceTools.find((tool) => tool.name === name);
+}
+
+// ---------------------------------------------------------------------------
+// Agency Tier Classification
+// ---------------------------------------------------------------------------
+// 🟢 autonomous: Grace executes immediately (routine church operations)
+// 🟡 suggest:    Grace proposes and waits for staff confirmation
+// 🔴 always_ask: Hard-blocked until explicit approval
+// ---------------------------------------------------------------------------
+
+import type { AgencyTier } from "../types";
+
+const AGENCY_TIER_MAP: Record<string, AgencyTier> = {
+  // 🟢 AUTONOMOUS — routine operations Grace handles on her own
+  // Read/search tools (no side effects)
+  "contacts.search": "autonomous",
+  "contacts.findDuplicates": "autonomous",
+  "tasks.search": "autonomous",
+  "appointments.search": "autonomous",
+  "appointments.checkAvailability": "autonomous",
+  "calls.search": "autonomous",
+  "pipeline.search": "autonomous",
+  "pipeline.audit": "autonomous",
+  "conversations.search": "autonomous",
+  "finance.weeklyReport": "autonomous",
+  "churchInfo.search": "autonomous",
+
+  // Internal CRM housekeeping
+  "tasks.create": "autonomous",
+  "tasks.update": "autonomous",
+  "tasks.complete": "autonomous",
+  "memory.write": "autonomous",
+  "contacts.upsert": "autonomous",
+  "contacts.update": "autonomous",
+  "prayerRequests.create": "autonomous",
+  "prayerRequests.update": "autonomous",
+  "staff.alert": "autonomous",
+  "handoff.transfer": "autonomous",
+  "pipelines.addToStage": "autonomous",
+  "pipeline.moveStage": "autonomous",
+  "pipeline.updateItem": "autonomous",
+  "conversations.setStatus": "autonomous",
+  "conversations.waiting": "autonomous",
+  "conversations.resolve": "autonomous",
+  "conversations.archive": "autonomous",
+  "conversations.reopen": "autonomous",
+  "calls.update": "autonomous",
+  "calls.escalate": "autonomous",
+
+  // Routine outreach (visitor follow-ups, thank-you texts, volunteer staffing)
+  "messages.sendSMS": "autonomous",
+  "messages.sendEmail": "autonomous",
+  "appointments.book": "autonomous",
+  "serviceRuns.createFromTemplate": "autonomous",
+  "serviceRuns.autoStaff": "autonomous",
+  "serviceAssignments.sendOfferSMS": "autonomous",
+  "volunteers.create": "autonomous",
+  "volunteerShifts.create": "autonomous",
+
+  // Onboarding tools
+  "onboarding.profile.update": "autonomous",
+  "onboarding.installStarterTemplates": "autonomous",
+  "onboarding.bootstrapSampleData": "autonomous",
+  "onboarding.startGuidedSequence": "autonomous",
+
+  // 🟡 SUGGEST — Grace proposes, staff confirms
+  "volunteers.update": "suggest",
+  "volunteerShifts.update": "suggest",
+  "appointments.setStatus": "suggest",
+  "appointments.reschedule": "suggest",
+  "ministries.addMember": "suggest",
+  "contacts.restore": "suggest",
+
+  // 🔴 ALWAYS ASK — high-impact, blocked until explicit approval
+  "contacts.archive": "always_ask",
+  "contacts.delete": "always_ask",
+  "contacts.merge": "always_ask",
+  "appointments.delete": "always_ask",
+  "appointments.cancel": "always_ask",
+  "pipeline.deleteItem": "always_ask",
+  "volunteers.delete": "always_ask",
+  "volunteerShifts.delete": "always_ask",
+};
+
+export function resolveAgencyTier(toolName: string): AgencyTier {
+  // Check tool-level override first
+  const tool = findGraceTool(toolName);
+  if (tool?.agencyTier) return tool.agencyTier;
+  // Fall back to centralized map
+  return AGENCY_TIER_MAP[toolName] ?? "suggest";
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import withSuperAdminAuthRequired from "@/lib/auth/withSuperAdminAuthRequired";
@@ -11,6 +11,7 @@ import {
   normalizeAndEncryptProviderConfig,
   redactProviderConfigForClient,
 } from "@/lib/grace/providers/security";
+import { getSmsGatewayProviderCandidates, isSmsGatewayProvider } from "@/lib/sms-gateway/provider";
 
 const updateIntegrationSchema = z.object({
   smsDeviceId: z.string().nullable().optional(),
@@ -109,7 +110,7 @@ export const PATCH = withSuperAdminAuthRequired(async (req, context) => {
 
     const body = updateIntegrationSchema.parse(await req.json());
 
-    if (body.smsDeviceId !== undefined) {
+  if (body.smsDeviceId !== undefined) {
       if (body.smsDeviceId) {
         const [targetDevice] = await db
           .select({
@@ -148,7 +149,10 @@ export const PATCH = withSuperAdminAuthRequired(async (req, context) => {
             and(
               eq(providerConfigs.organizationId, id),
               eq(providerConfigs.channel, "sms"),
-              eq(providerConfigs.provider, "textbee")
+              inArray(
+                providerConfigs.provider,
+                getSmsGatewayProviderCandidates()
+              )
             )
           );
       } else {
@@ -160,6 +164,10 @@ export const PATCH = withSuperAdminAuthRequired(async (req, context) => {
     }
 
     if (body.provider) {
+      const providerCandidates =
+        body.provider.channel === "sms" && isSmsGatewayProvider(body.provider.provider)
+          ? getSmsGatewayProviderCandidates(body.provider.provider)
+          : [body.provider.provider];
       const [existing] = await db
         .select()
         .from(providerConfigs)
@@ -167,7 +175,9 @@ export const PATCH = withSuperAdminAuthRequired(async (req, context) => {
           and(
             eq(providerConfigs.organizationId, id),
             eq(providerConfigs.channel, body.provider.channel),
-            eq(providerConfigs.provider, body.provider.provider)
+            providerCandidates.length === 1
+              ? eq(providerConfigs.provider, providerCandidates[0]!)
+              : inArray(providerConfigs.provider, providerCandidates)
           )
         )
         .limit(1);

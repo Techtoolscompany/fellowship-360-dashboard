@@ -14,46 +14,20 @@ import {
   isVoiceWeeklyFinanceSummaryQuery,
   resolveVoiceWeeklyFinanceRange,
 } from "@/lib/finances/voice-query";
+import { extractGraceAudioUpload } from "@/lib/grace/audio-upload";
 import {
-  resolveElevenLabsApiKey,
   resolveGeminiApiKey,
 } from "@/lib/grace/providers/resolver";
+import { buildGraceVoiceTranscriptionMessages } from "@/lib/grace/voice-transcription";
 import { eq } from "drizzle-orm";
+import { synthesizeSpeechWithGemini } from "@/lib/grace/gemini-tts";
 
 const bodySchema = z.object({
   audioData: z.string().min(1, "Audio data is required"),
+  audioMimeType: z.string().optional(),
   sessionId: z.string().optional(),
+  originSurface: z.enum(["onboarding"]).optional(),
 });
-
-async function synthesizeSpeech(text: string, apiKey: string) {
-  const voiceId = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
-  const response = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "xi-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        text,
-        model_id: "eleven_turbo_v2_5",
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
-        },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(`ElevenLabs API returned ${response.status}`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  const base64Audio = Buffer.from(arrayBuffer).toString("base64");
-  return `data:audio/mp3;base64,${base64Audio}`;
-}
 
 export const POST = withOrganizationAuthRequired(async (req, context) => {
   try {
@@ -71,49 +45,32 @@ export const POST = withOrganizationAuthRequired(async (req, context) => {
       return NextResponse.json({ error: "Grace AI is disabled for this organization." }, { status: 503 });
     }
 
-    const [geminiKey, elevenLabsKey] = await Promise.all([
-      resolveGeminiApiKey(organization.id),
-      resolveElevenLabsApiKey(organization.id),
-    ]);
+    const geminiKey = await resolveGeminiApiKey(organization.id);
 
     if (!geminiKey) {
       return NextResponse.json(
-        { error: "Gemini is not configured for this organization." },
-        { status: 400 }
-      );
-    }
-    if (!elevenLabsKey) {
-      return NextResponse.json(
-        { error: "ElevenLabs voice is not configured for this organization." },
-        { status: 400 }
+        {
+          error:
+            "Grace AI is not configured for this organization yet. Finish onboarding to enable chat and voice.",
+        },
+        { status: 503 }
       );
     }
 
-    const base64Audio = body.audioData.includes(",")
-      ? body.audioData.split(",")[1]
-      : body.audioData;
+    const { base64Data: base64Audio, mimeType: audioMimeType } = extractGraceAudioUpload({
+      audioData: body.audioData,
+      declaredMimeType: body.audioMimeType,
+    });
 
     const googleAI = createGoogleGenerativeAI({ apiKey: geminiKey });
     const { text: transcript } = await generateText({
-      model: googleAI("gemini-1.5-pro-latest"),
+      model: googleAI("gemini-2.5-flash"),
       system:
         "Transcribe the spoken audio exactly. Return plain text only with no commentary, markdown, or labels.",
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: "Transcribe this church staff voice note.",
-            },
-            {
-              type: "file",
-              data: base64Audio,
-              mimeType: "audio/webm",
-            } as never,
-          ],
-        },
-      ],
+      messages: buildGraceVoiceTranscriptionMessages({
+        base64Audio,
+        audioMediaType: audioMimeType,
+      }),
     });
 
     const normalizedTranscript = transcript.trim();
@@ -130,7 +87,25 @@ export const POST = withOrganizationAuthRequired(async (req, context) => {
       message: normalizedTranscript,
       sessionId: body.sessionId,
       userId: user.id,
+      originSurface: body.originSurface,
     });
+
+    if (result.availabilityStatus) {
+      return NextResponse.json(
+        {
+          error: result.availabilityMessage ?? result.response,
+          transcript: normalizedTranscript,
+          replyText: result.response,
+          sessionId: result.sessionId,
+          proposedActionsCount: result.proposedActions.length,
+          actionOutcomes: result.actionOutcomes,
+          actionOutcomesCount: result.actionOutcomes.length,
+          intent: result.intent,
+          availabilityStatus: result.availabilityStatus,
+        },
+        { status: 503 }
+      );
+    }
 
     let replyText = result.response;
     const reportFromAction = extractWeeklyGivingReportFromActionOutcomes(
@@ -155,9 +130,12 @@ export const POST = withOrganizationAuthRequired(async (req, context) => {
 
     let audioUrl: string;
     try {
-      audioUrl = await synthesizeSpeech(replyText, elevenLabsKey);
+      audioUrl = await synthesizeSpeechWithGemini({
+        apiKey: geminiKey,
+        text: replyText,
+      });
     } catch (error) {
-      console.error("ElevenLabs TTS generation failed:", error);
+      console.error("Gemini TTS generation failed:", error);
       return NextResponse.json(
         { error: "Unable to generate GRACE voice response right now. Please try again." },
         { status: 502 }

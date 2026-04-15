@@ -27,9 +27,9 @@ export default function ErrorPage({
           <Button onClick={reset}>Try again</Button>
           <Button
             variant="outline"
-            onClick={() => window.location.assign("/app/grace?tab=command")}
+            onClick={() => window.location.assign("/app/grace?tab=home")}
           >
-            Go to Command Center
+            Go to Grace
           </Button>
         </div>
       </div>

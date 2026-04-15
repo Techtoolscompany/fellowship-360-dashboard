@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db";
-import { donations, pledges, churchContacts } from "@/db/schema";
+import { donations, pledges, churchContacts, graceFollowupProposals, tasks } from "@/db/schema";
 import { eq, desc, and, gte, lte, sql, count } from "drizzle-orm";
 import { auditAction } from "./utils";
 import * as z from "zod";
@@ -9,6 +9,8 @@ import { organizations } from "@/db/schema/organization";
 import sendMail from "@/lib/email/sendMail";
 import { computeWeeklyGivingReport } from "@/lib/finances/weekly-report";
 import { requireOrganizationSectionAccess } from "@/lib/access/section-guard";
+import { compatibleChurchContactSelect } from "@/lib/contacts/projection";
+import { getOrCreateGraceSession } from "@/lib/grace/runtime";
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat("en-US", {
@@ -87,6 +89,93 @@ async function deliverDonationReceipt(params: {
   return { sent: true as const };
 }
 
+async function queueDonorCareFollowup(params: {
+  organizationId: string;
+  contactId: string;
+  reason: "first_time_giver" | "lapsed_giver_recovery";
+  subject: string;
+  messageText: string;
+  taskTitle: string;
+  taskDescription: string;
+  dedupeDays: number;
+}) {
+  const dedupeStart = new Date(Date.now() - params.dedupeDays * 24 * 60 * 60 * 1000);
+
+  const [[contact], [existingProposal]] = await Promise.all([
+    db
+      .select({
+        id: churchContacts.id,
+        firstName: churchContacts.firstName,
+        lastName: churchContacts.lastName,
+        email: churchContacts.email,
+        phone: churchContacts.phone,
+      })
+      .from(churchContacts)
+      .where(
+        and(
+          eq(churchContacts.organizationId, params.organizationId),
+          eq(churchContacts.id, params.contactId)
+        )
+      )
+      .limit(1),
+    db
+      .select({ id: graceFollowupProposals.id })
+      .from(graceFollowupProposals)
+      .where(
+        and(
+          eq(graceFollowupProposals.organizationId, params.organizationId),
+          eq(graceFollowupProposals.contactId, params.contactId),
+          eq(graceFollowupProposals.reason, params.reason),
+          eq(graceFollowupProposals.status, "pending"),
+          gte(graceFollowupProposals.createdAt, dedupeStart)
+        )
+      )
+      .limit(1),
+  ]);
+
+  if (!contact || existingProposal) {
+    return;
+  }
+
+  const recipient = contact.phone?.trim() || contact.email?.trim() || null;
+  if (!recipient) {
+    await db.insert(tasks).values({
+      organizationId: params.organizationId,
+      title: params.taskTitle,
+      description: params.taskDescription,
+      priority: "high",
+      status: "todo",
+      dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    });
+    return;
+  }
+
+  const session = await getOrCreateGraceSession({
+    organizationId: params.organizationId,
+    channel: "in_app",
+    actorType: "system",
+    contactId: params.contactId,
+  });
+
+  await db.insert(graceFollowupProposals).values({
+    organizationId: params.organizationId,
+    sessionId: session.id,
+    contactId: params.contactId,
+    actorType: "system",
+    channel: "in_app",
+    proposedChannel: contact.phone?.trim() ? "sms" : "email",
+    recipient,
+    subject: params.subject,
+    messageText: params.messageText,
+    reason: params.reason,
+    status: "pending",
+    metadataJson: {
+      workflow: "donor_care",
+      reason: params.reason,
+    },
+  });
+}
+
 // ── Donations ──
 const DONATIONS_PAGE_SIZE = 50;
 
@@ -110,7 +199,7 @@ export async function getDonations(
 
   const [rows, [{ total }]] = await Promise.all([
     db
-      .select({ donation: donations, contact: churchContacts })
+      .select({ donation: donations, contact: compatibleChurchContactSelect })
       .from(donations)
       .leftJoin(churchContacts, eq(donations.contactId, churchContacts.id))
       .where(conditions)
@@ -191,6 +280,58 @@ export async function createDonation(data: {
       console.error("Failed to send donation receipt:", error);
       // Non-blocking for donation creation. Receipt can be resent manually.
     }
+
+    try {
+      const [[contact], [org], [donorStats]] = await Promise.all([
+        db
+          .select({
+            firstName: churchContacts.firstName,
+            lastName: churchContacts.lastName,
+          })
+          .from(churchContacts)
+          .where(
+            and(
+              eq(churchContacts.id, donation.contactId),
+              eq(churchContacts.organizationId, parsed.organizationId)
+            )
+          )
+          .limit(1),
+        db
+          .select({ name: organizations.name })
+          .from(organizations)
+          .where(eq(organizations.id, parsed.organizationId))
+          .limit(1),
+        db
+          .select({ donationCount: count() })
+          .from(donations)
+          .where(
+            and(
+              eq(donations.organizationId, parsed.organizationId),
+              eq(donations.contactId, donation.contactId)
+            )
+          ),
+      ]);
+
+      const firstName = contact?.firstName?.trim() || "friend";
+      const donorName = `${contact?.firstName ?? ""} ${contact?.lastName ?? ""}`.trim() || "this donor";
+      const churchName = org?.name || "your church";
+      const donationCount = Number(donorStats?.donationCount ?? 0);
+
+      if (donationCount === 1) {
+        await queueDonorCareFollowup({
+          organizationId: parsed.organizationId,
+          contactId: donation.contactId,
+          reason: "first_time_giver",
+          subject: "First-time giver follow-up suggested",
+          messageText: `Hi ${firstName}, thank you for your first gift to ${churchName}. We are grateful for your generosity and would love to know how we can pray for you this week.`,
+          taskTitle: `First-time giver follow-up: ${donorName}`,
+          taskDescription: `A first-time giver was recorded but no SMS or email recipient is available. Please reach out personally within 24 hours.\nDonation ID: ${donation.id}`,
+          dedupeDays: 14,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to queue donor care follow-up:", error);
+    }
   }
 
   return donation;
@@ -244,7 +385,7 @@ export async function getPledges(orgId: string) {
     section: "finance",
   });
   return await db
-    .select({ pledge: pledges, contact: churchContacts })
+    .select({ pledge: pledges, contact: compatibleChurchContactSelect })
     .from(pledges)
     .leftJoin(churchContacts, eq(pledges.contactId, churchContacts.id))
     .where(eq(pledges.organizationId, orgId))

@@ -46,3 +46,10 @@ next-env.d.ts
 
 # standalone vendor repos
 /vendors/fellowship360-gateway
+
+# Android workspace artifacts
+/apps/fellowship-sms-gateway-android/.gradle/
+/apps/fellowship-sms-gateway-android/.idea/
+/apps/fellowship-sms-gateway-android/app/build/
+/apps/fellowship-sms-gateway-android/build/
+/apps/fellowship-sms-gateway-android/local.properties

@@ -11,7 +11,8 @@ import {
   DEFAULT_AUTOMATION_COMPLIANCE_POLICY,
   type AutomationDefinition,
 } from "@/lib/automations/types";
-import { getAutomationTemplateByKey } from "@/lib/automations/templates";
+import { normalizeAutomationDefinition } from "@/lib/automations/editor";
+import { getResolvedAutomationTemplateByKey } from "@/lib/automations/template-registry";
 import { validateAutomationDefinition } from "@/lib/automations/validation";
 import type {
   BulkTemplateDeployOrgResult,
@@ -30,26 +31,16 @@ type DeployActor = {
   email?: string | null;
 };
 
-type TemplateDefinition = NonNullable<ReturnType<typeof getAutomationTemplateByKey>>;
+type TemplateDefinition = NonNullable<
+  Awaited<ReturnType<typeof getResolvedAutomationTemplateByKey>>
+>;
 
 function cloneDefinition(definition: AutomationDefinition): AutomationDefinition {
   return JSON.parse(JSON.stringify(definition));
 }
 
 function normalizeDefinition(definition: AutomationDefinition): AutomationDefinition {
-  const cloned = cloneDefinition(definition);
-  const normalizedNodes = cloned.nodes.map((node) => ({
-    ...node,
-    description: node.description ?? null,
-    config: node.config ?? {},
-    nextIds: Array.from(new Set((node.nextIds ?? []).filter(Boolean))),
-  }));
-
-  return {
-    version: cloned.version,
-    startNodeId: cloned.startNodeId ?? normalizedNodes.find((node) => node.type === "trigger")?.id,
-    nodes: normalizedNodes,
-  };
+  return normalizeAutomationDefinition(cloneDefinition(definition));
 }
 
 function uniqueOrganizationIds(ids: string[]) {
@@ -201,20 +192,83 @@ export async function deployAutomationTemplateToOrganization(params: {
       .limit(1);
 
     if (existing) {
-      const status = "already_installed" as const;
+      if (params.skipIfInstalled) {
+        const status = "already_installed" as const;
+        await writeAuditEntry({
+          organizationId: params.organizationId,
+          actor: params.actor,
+          templateKey: params.template.key,
+          skipIfInstalled: params.skipIfInstalled,
+          status,
+          workflowId: existing.id,
+        });
+
+        return {
+          organizationId: params.organizationId,
+          status,
+          workflowId: existing.id,
+        };
+      }
+
+      const normalized = normalizeDefinition(params.template.definition);
+      const validationErrors = validateAutomationDefinition(normalized);
+
+      if (validationErrors.length > 0) {
+        const error = `Template ${params.template.name} is invalid: ${validationErrors.join(" ")}`;
+        await writeAuditEntry({
+          organizationId: params.organizationId,
+          actor: params.actor,
+          templateKey: params.template.key,
+          skipIfInstalled: params.skipIfInstalled,
+          status: "failed",
+          error,
+        });
+        return {
+          organizationId: params.organizationId,
+          status: "failed",
+          error,
+        };
+      }
+
+      const [updated] = await db
+        .update(automationWorkflows)
+        .set({
+          name: params.template.name,
+          description: params.template.description,
+          status: "published",
+          triggerEvent: params.template.triggerEvent,
+          definitionJson: normalized,
+          validationErrors: [],
+          updatedAt: new Date(),
+          lastValidatedAt: new Date(),
+          publishedAt: new Date(),
+        })
+        .where(eq(automationWorkflows.id, existing.id))
+        .returning();
+
+      if (!updated) {
+        throw new Error("Failed to update installed template");
+      }
+
+      await createWorkflowVersionSnapshot({
+        organizationId: params.organizationId,
+        workflow: updated,
+        publishedByUserId: params.actor.userId,
+      });
+
       await writeAuditEntry({
         organizationId: params.organizationId,
         actor: params.actor,
         templateKey: params.template.key,
         skipIfInstalled: params.skipIfInstalled,
-        status,
-        workflowId: existing.id,
+        status: "updated",
+        workflowId: updated.id,
       });
 
       return {
         organizationId: params.organizationId,
-        status,
-        workflowId: existing.id,
+        status: "updated",
+        workflowId: updated.id,
       };
     }
 
@@ -344,7 +398,9 @@ export async function deployAutomationTemplateBatch(input: {
   actor: DeployActor;
 }): Promise<BulkTemplateDeployResult> {
   const parsed = bulkTemplateDeployRequestSchema.parse(input.request);
-  const template = getAutomationTemplateByKey(parsed.templateKey);
+  const template = await getResolvedAutomationTemplateByKey(parsed.templateKey, {
+    includeDrafts: true,
+  });
 
   if (!template) {
     throw new Error("Automation template not found");

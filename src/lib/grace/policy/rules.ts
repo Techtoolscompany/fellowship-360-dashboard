@@ -1,29 +1,14 @@
 import type { GraceChannel } from "../types";
 
 export const highRiskTools = new Set([
-  "contacts.upsert",
-  "appointments.book",
-  "messages.sendSMS",
-  "messages.sendEmail",
-  "tasks.create",
-  "serviceRuns.createFromTemplate",
-  "serviceRuns.autoStaff",
-  "serviceAssignments.sendOfferSMS",
   "contacts.archive",
-  "contacts.restore",
   "contacts.delete",
   "contacts.merge",
-  "volunteers.create",
-  "volunteers.update",
-  "volunteers.delete",
-  "volunteerShifts.create",
-  "volunteerShifts.update",
-  "volunteerShifts.delete",
-  "appointments.setStatus",
-  "appointments.reschedule",
-  "appointments.delete",
   "appointments.cancel",
+  "appointments.delete",
   "pipeline.deleteItem",
+  "volunteers.delete",
+  "volunteerShifts.delete",
 ]);
 
 // Public-safe tool set: no direct outbound sends, no arbitrary record edits
@@ -46,6 +31,10 @@ const staffTools = new Set([
   "staff.alert",
   "handoff.transfer",
   "tasks.create",
+  "onboarding.profile.update",
+  "onboarding.installStarterTemplates",
+  "onboarding.bootstrapSampleData",
+  "onboarding.startGuidedSequence",
   "memory.write",
   "serviceRuns.createFromTemplate",
   "serviceRuns.autoStaff",

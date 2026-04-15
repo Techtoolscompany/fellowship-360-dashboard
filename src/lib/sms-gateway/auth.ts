@@ -89,25 +89,23 @@ export async function issueSmsGatewayEnrollmentToken(params: {
   const expiresAt = new Date(now.getTime() + expiresInMinutes * 60 * 1000);
   const enrollment = createGatewayToken(ENROLLMENT_TOKEN_PREFIX);
 
-  await db.transaction(async (tx) => {
-    await tx
-      .delete(smsDeviceEnrollmentTokens)
-      .where(
-        and(
-          eq(smsDeviceEnrollmentTokens.deviceId, params.deviceId),
-          isNull(smsDeviceEnrollmentTokens.consumedAt)
-        )
-      );
+  await db
+    .delete(smsDeviceEnrollmentTokens)
+    .where(
+      and(
+        eq(smsDeviceEnrollmentTokens.deviceId, params.deviceId),
+        isNull(smsDeviceEnrollmentTokens.consumedAt)
+      )
+    );
 
-    await tx.insert(smsDeviceEnrollmentTokens).values({
-      deviceId: params.deviceId,
-      organizationId: params.organizationId ?? null,
-      tokenId: enrollment.tokenId,
-      tokenHash: enrollment.tokenHash,
-      expiresAt,
-      metadataJson: params.metadataJson,
-      createdAt: now,
-    });
+  await db.insert(smsDeviceEnrollmentTokens).values({
+    deviceId: params.deviceId,
+    organizationId: params.organizationId ?? null,
+    tokenId: enrollment.tokenId,
+    tokenHash: enrollment.tokenHash,
+    expiresAt,
+    metadataJson: params.metadataJson,
+    createdAt: now,
   });
 
   return {
@@ -129,75 +127,87 @@ export async function consumeSmsGatewayEnrollmentToken(params: {
     throw new SmsGatewayAuthError(401, "Invalid enrollment token");
   }
 
-  return db.transaction(async (tx) => {
-    const [enrollment] = await tx
-      .select()
-      .from(smsDeviceEnrollmentTokens)
-      .where(eq(smsDeviceEnrollmentTokens.tokenId, parsed.tokenId))
-      .limit(1);
+  const [enrollment] = await db
+    .select()
+    .from(smsDeviceEnrollmentTokens)
+    .where(eq(smsDeviceEnrollmentTokens.tokenId, parsed.tokenId))
+    .limit(1);
 
-    if (!enrollment) {
-      throw new SmsGatewayAuthError(401, "Enrollment token not found");
-    }
+  if (!enrollment) {
+    throw new SmsGatewayAuthError(401, "Enrollment token not found");
+  }
 
-    if (!timingSafeEqualString(enrollment.tokenHash, hashGatewayToken(parsed.normalizedToken))) {
-      throw new SmsGatewayAuthError(401, "Invalid enrollment token");
-    }
+  if (!timingSafeEqualString(enrollment.tokenHash, hashGatewayToken(parsed.normalizedToken))) {
+    throw new SmsGatewayAuthError(401, "Invalid enrollment token");
+  }
 
-    if (enrollment.consumedAt) {
-      throw new SmsGatewayAuthError(409, "Enrollment token has already been used");
-    }
+  if (enrollment.consumedAt) {
+    throw new SmsGatewayAuthError(409, "Enrollment token has already been used");
+  }
 
-    const now = new Date();
-    if (enrollment.expiresAt.getTime() <= now.getTime()) {
-      throw new SmsGatewayAuthError(410, "Enrollment token has expired");
-    }
+  const now = new Date();
+  if (enrollment.expiresAt.getTime() <= now.getTime()) {
+    throw new SmsGatewayAuthError(410, "Enrollment token has expired");
+  }
 
-    const [device] = await tx
-      .select()
-      .from(smsDevices)
-      .where(eq(smsDevices.id, enrollment.deviceId))
-      .limit(1);
+  const [device] = await db
+    .select()
+    .from(smsDevices)
+    .where(eq(smsDevices.id, enrollment.deviceId))
+    .limit(1);
 
-    if (!device) {
-      throw new SmsGatewayAuthError(404, "Device not found for enrollment token");
-    }
+  if (!device) {
+    throw new SmsGatewayAuthError(404, "Device not found for enrollment token");
+  }
 
-    const authToken = createGatewayToken(DEVICE_TOKEN_PREFIX);
-    const nextDeviceName = normalizeText(params.deviceName) ?? device.deviceName;
-    const phoneNumber = normalizeText(params.phoneNumber) ?? device.phoneNumber;
-    const fcmToken = normalizeText(params.fcmToken) ?? device.fcmToken;
+  const [claimedEnrollment] = await db
+    .update(smsDeviceEnrollmentTokens)
+    .set({ consumedAt: now })
+    .where(
+      and(
+        eq(smsDeviceEnrollmentTokens.id, enrollment.id),
+        isNull(smsDeviceEnrollmentTokens.consumedAt)
+      )
+    )
+    .returning({ id: smsDeviceEnrollmentTokens.id });
 
-    const [updatedDevice] = await tx
-      .update(smsDevices)
-      .set({
-        deviceName: nextDeviceName,
-        phoneNumber,
-        fcmToken,
-        authTokenId: authToken.tokenId,
-        authTokenHash: authToken.tokenHash,
-        authTokenIssuedAt: now,
-        authTokenLastUsedAt: now,
-        authTokenRevokedAt: null,
-        enrolledAt: device.enrolledAt ?? now,
-        statusJson: params.statusJson ?? device.statusJson,
-        isActive: true,
-        lastSeenAt: now,
-        updatedAt: now,
-      })
-      .where(eq(smsDevices.id, device.id))
-      .returning();
+  if (!claimedEnrollment) {
+    throw new SmsGatewayAuthError(409, "Enrollment token has already been used");
+  }
 
-    await tx
-      .update(smsDeviceEnrollmentTokens)
-      .set({ consumedAt: now })
-      .where(eq(smsDeviceEnrollmentTokens.id, enrollment.id));
+  const authToken = createGatewayToken(DEVICE_TOKEN_PREFIX);
+  const nextDeviceName = normalizeText(params.deviceName) ?? device.deviceName;
+  const phoneNumber = normalizeText(params.phoneNumber) ?? device.phoneNumber;
+  const fcmToken = normalizeText(params.fcmToken) ?? device.fcmToken;
 
-    return {
-      device: updatedDevice,
-      authToken: authToken.token,
-    };
-  });
+  const [updatedDevice] = await db
+    .update(smsDevices)
+    .set({
+      deviceName: nextDeviceName,
+      phoneNumber,
+      fcmToken,
+      authTokenId: authToken.tokenId,
+      authTokenHash: authToken.tokenHash,
+      authTokenIssuedAt: now,
+      authTokenLastUsedAt: now,
+      authTokenRevokedAt: null,
+      enrolledAt: device.enrolledAt ?? now,
+      statusJson: params.statusJson ?? device.statusJson,
+      isActive: true,
+      lastSeenAt: now,
+      updatedAt: now,
+    })
+    .where(eq(smsDevices.id, device.id))
+    .returning();
+
+  if (!updatedDevice) {
+    throw new SmsGatewayAuthError(404, "Device not found for enrollment token");
+  }
+
+  return {
+    device: updatedDevice,
+    authToken: authToken.token,
+  };
 }
 
 export async function authenticateSmsGatewayDeviceToken(token: string) {

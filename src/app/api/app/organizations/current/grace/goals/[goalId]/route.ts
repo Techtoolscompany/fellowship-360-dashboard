@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import withOrganizationAuthRequired from "@/lib/auth/withOrganizationAuthRequired";
 import { OrganizationRole } from "@/db/schema/organization";
 import { getGraceGoalWithSteps } from "@/app/actions/operations";
+import { buildGraceWorkflowCardView } from "@/lib/grace/workflow-summary";
 
 export const GET = withOrganizationAuthRequired(async (_req, context) => {
   const params = await context.params;
@@ -16,7 +17,11 @@ export const GET = withOrganizationAuthRequired(async (_req, context) => {
 
   try {
     const goal = await getGraceGoalWithSteps(goalId);
-    return NextResponse.json({ success: true, ...goal });
+    return NextResponse.json({
+      success: true,
+      ...goal,
+      workflow: buildGraceWorkflowCardView(goal.goal, { steps: goal.steps }),
+    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to load grace goal";

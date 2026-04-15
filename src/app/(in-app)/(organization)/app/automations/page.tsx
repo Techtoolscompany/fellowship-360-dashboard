@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useOrganization from "@/lib/organizations/useOrganization";
 import {
@@ -20,14 +20,15 @@ import {
 } from "@/app/actions/automations";
 import { getBroadcasts } from "@/app/actions/communications";
 import {
-  AUTOMATION_NODE_TYPES,
   DEFAULT_AUTOMATION_COMPLIANCE_POLICY,
   type AutomationDefinition,
-  type AutomationNode,
-  type AutomationNodeType,
 } from "@/lib/automations/types";
-import { createBuilderStarterDefinition } from "@/lib/automations/templates";
+import {
+  createBuilderStarterDefinition,
+  normalizeAutomationDefinition,
+} from "@/lib/automations/editor";
 import { validateAutomationDefinition } from "@/lib/automations/validation";
+import { AutomationWorkflowEditor } from "@/components/automations/AutomationWorkflowEditor";
 
 type TemplateSummary = Awaited<ReturnType<typeof getAutomationTemplates>>[number];
 type WorkflowRow = Awaited<ReturnType<typeof getAutomationWorkflows>>[number];
@@ -63,7 +64,7 @@ const MODE_TABS: Array<{ id: AutomationModeTab; label: string; description: stri
   {
     id: "builder",
     label: "Builder Mode",
-    description: "Design custom trigger-delay-condition-action-stop flows.",
+    description: "Design custom journeys with waits, branches, and publish controls.",
   },
 ];
 
@@ -72,48 +73,6 @@ function formatDateTime(value: Date | string | null | undefined) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleString();
-}
-
-function normalizeDefinition(value: unknown): AutomationDefinition {
-  const fallback = createBuilderStarterDefinition();
-  if (!value || typeof value !== "object") {
-    return fallback;
-  }
-
-  const raw = value as Partial<AutomationDefinition>;
-  if (!Array.isArray(raw.nodes) || raw.nodes.length === 0) {
-    return fallback;
-  }
-
-  const nodes: AutomationNode[] = raw.nodes
-    .filter((node): node is AutomationNode => {
-      return Boolean(node && typeof node === "object" && node.id && node.type && node.label);
-    })
-    .map((node) => ({
-      id: node.id,
-      type: AUTOMATION_NODE_TYPES.includes(node.type) ? node.type : "action",
-      label: node.label,
-      description: node.description ?? null,
-      config: node.config ?? {},
-      nextIds: Array.isArray(node.nextIds)
-        ? Array.from(new Set(node.nextIds.filter((nextId) => typeof nextId === "string")))
-        : [],
-    }));
-
-  if (nodes.length === 0) {
-    return fallback;
-  }
-
-  const triggerNode = nodes.find((node) => node.type === "trigger");
-  return {
-    version: Number(raw.version ?? 1),
-    startNodeId: raw.startNodeId ?? triggerNode?.id ?? nodes[0]?.id,
-    nodes,
-  };
-}
-
-function nextNodeId(type: AutomationNodeType) {
-  return `${type}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
 export default function AutomationsPage() {
@@ -150,6 +109,7 @@ export default function AutomationsPage() {
     createBuilderStarterDefinition()
   );
   const [draftPolicy, setDraftPolicy] = useState(DEFAULT_AUTOMATION_COMPLIANCE_POLICY);
+  const builderEditorRef = useRef<HTMLDivElement | null>(null);
 
   const refreshData = useCallback(async () => {
     if (!organizationId) return;
@@ -263,7 +223,7 @@ export default function AutomationsPage() {
     setDraftName(selectedBuilderWorkflow.name);
     setDraftDescription(selectedBuilderWorkflow.description ?? "");
     setDraftTriggerEvent(selectedBuilderWorkflow.triggerEvent ?? "");
-    setDraftDefinition(normalizeDefinition(selectedBuilderWorkflow.definitionJson));
+    setDraftDefinition(normalizeAutomationDefinition(selectedBuilderWorkflow.definitionJson));
     setDraftPolicy({
       quietHoursEnabled: Boolean(selectedBuilderWorkflow.quietHoursEnabled),
       quietHoursStart: selectedBuilderWorkflow.quietHoursStart ?? "21:00",
@@ -275,6 +235,21 @@ export default function AutomationsPage() {
     });
     setEnrollmentPreview(null);
   }, [selectedBuilderWorkflow]);
+
+  useEffect(() => {
+    if (activeTab !== "builder" || !selectedBuilderWorkflow) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      builderEditorRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab, selectedBuilderWorkflow]);
 
   const handleInstallTemplate = useCallback(
     async (templateKey: string) => {
@@ -318,7 +293,7 @@ export default function AutomationsPage() {
         definition: createBuilderStarterDefinition(),
       });
       toast.success("Builder workflow created", {
-        description: "Start editing nodes, then publish when validation is clean.",
+        description: "Start editing steps, then publish when validation is clean.",
       });
       await refreshData();
       setSelectedBuilderWorkflowId(created.id);
@@ -330,81 +305,6 @@ export default function AutomationsPage() {
       setBusyKey(null);
     }
   }, [organizationId, builderWorkflows.length, refreshData]);
-
-  const updateNode = useCallback((nodeId: string, patch: Partial<AutomationNode>) => {
-    setDraftDefinition((current) => ({
-      ...current,
-      nodes: current.nodes.map((node) =>
-        node.id === nodeId
-          ? {
-              ...node,
-              ...patch,
-            }
-          : node
-      ),
-    }));
-  }, []);
-
-  const deleteNode = useCallback((nodeId: string) => {
-    setDraftDefinition((current) => {
-      const remaining = current.nodes.filter((node) => node.id !== nodeId);
-      const patched = remaining.map((node) => ({
-        ...node,
-        nextIds: (node.nextIds ?? []).filter((nextId) => nextId !== nodeId),
-      }));
-      const fallbackStart = patched.find((node) => node.type === "trigger")?.id ?? patched[0]?.id;
-      return {
-        ...current,
-        startNodeId: current.startNodeId === nodeId ? fallbackStart : current.startNodeId,
-        nodes: patched,
-      };
-    });
-  }, []);
-
-  const addNode = useCallback((type: AutomationNodeType) => {
-    const node: AutomationNode = {
-      id: nextNodeId(type),
-      type,
-      label:
-        type === "trigger"
-          ? "New trigger"
-          : type === "delay"
-            ? "Delay"
-            : type === "condition"
-              ? "Condition"
-              : type === "action"
-                ? "Action"
-                : "Stop",
-      nextIds: [],
-      config: {},
-    };
-
-    setDraftDefinition((current) => {
-      const hasTrigger = current.nodes.some((existing) => existing.type === "trigger");
-      if (type === "trigger" && hasTrigger) {
-        toast.error("Only one trigger node is allowed");
-        return current;
-      }
-
-      const nodes = [...current.nodes, node];
-      return {
-        ...current,
-        startNodeId: current.startNodeId ?? (type === "trigger" ? node.id : current.startNodeId),
-        nodes,
-      };
-    });
-  }, []);
-
-  const updateNodeConfig = useCallback(
-    (node: AutomationNode, patch: Record<string, unknown>) => {
-      const nextConfig = {
-        ...(node.config ?? {}),
-        ...patch,
-      };
-      updateNode(node.id, { config: nextConfig });
-    },
-    [updateNode]
-  );
 
   const runEnrollmentCheck = useCallback(async () => {
     if (!organizationId || !selectedBuilderWorkflowId) return;
@@ -614,7 +514,7 @@ export default function AutomationsPage() {
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Automations</h1>
         <p className="text-sm text-slate-600 max-w-3xl">
           Sequence platform for launch workflows. Install built-in templates or design custom
-          node flows with validation and publish controls.
+          journeys with validation, publish controls, and test runs.
         </p>
       </header>
 
@@ -643,6 +543,23 @@ export default function AutomationsPage() {
         >
           {busyKey === "create-builder" ? "Creating..." : "New Builder Workflow"}
         </button>
+      </section>
+
+      <section className="rounded-xl border border-sky-200 bg-sky-50 p-4">
+        <p className="text-sm font-semibold text-sky-900">How to build a workflow here</p>
+        <div className="mt-2 grid gap-2 text-xs text-sky-900 md:grid-cols-3">
+          <div className="rounded-lg border border-sky-100 bg-white/80 px-3 py-2">
+            Open <span className="font-semibold">Builder Mode</span> to create workflows from
+            scratch.
+          </div>
+          <div className="rounded-lg border border-sky-100 bg-white/80 px-3 py-2">
+            Click <span className="font-semibold">New Builder Workflow</span>, then choose a
+            trigger and add steps in order.
+          </div>
+          <div className="rounded-lg border border-sky-100 bg-white/80 px-3 py-2">
+            Save the draft, then publish and use the test runner at the bottom to execute it.
+          </div>
+        </div>
       </section>
 
       {workflowAnalytics ? (
@@ -741,6 +658,11 @@ export default function AutomationsPage() {
               <p className="mt-1 text-xs text-slate-500">
                 One-click install creates a runnable, published workflow using safe defaults.
               </p>
+              <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                Need something custom instead of a starter? Switch to
+                <span className="font-semibold text-slate-900"> Builder Mode</span> and use
+                <span className="font-semibold text-slate-900"> New Builder Workflow</span>.
+              </div>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -750,7 +672,19 @@ export default function AutomationsPage() {
 
                 return (
                   <article key={template.key} className="rounded-xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-semibold uppercase text-slate-500">{template.category}</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase text-slate-500">
+                        {template.category}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                          {template.source === "managed" ? "Managed" : "System"}
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                          {STATUS_LABELS[template.status] ?? template.status}
+                        </span>
+                      </div>
+                    </div>
                     <h3 className="mt-1 text-sm font-semibold text-slate-900">{template.name}</h3>
                     <p className="mt-2 text-xs text-slate-600">{template.description}</p>
 
@@ -759,7 +693,7 @@ export default function AutomationsPage() {
                         <span className="font-medium text-slate-700">Trigger:</span> {template.triggerEvent}
                       </p>
                       <p>
-                        <span className="font-medium text-slate-700">Nodes:</span> {template.nodeCount}
+                        <span className="font-medium text-slate-700">Steps:</span> {template.nodeCount}
                       </p>
                       <p>
                         <span className="font-medium text-slate-700">Channels:</span>{" "}
@@ -858,368 +792,154 @@ export default function AutomationsPage() {
           <aside className="rounded-xl border border-slate-200 bg-white p-4">
             <h2 className="text-sm font-semibold text-slate-900">Builder Workflows</h2>
             <p className="mt-1 text-xs text-slate-500">
-              Build custom node graphs and publish after validation.
+              Build custom follow-up journeys and publish after validation.
             </p>
+
+            <button
+              type="button"
+              className="mt-4 w-full rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+              onClick={handleCreateBuilderWorkflow}
+              disabled={busyKey === "create-builder"}
+            >
+              {busyKey === "create-builder" ? "Creating..." : "Create Custom Workflow"}
+            </button>
 
             <div className="mt-4 space-y-2">
               {builderWorkflows.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-500">
-                  No builder workflows yet.
+                <div className="rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-500 space-y-2">
+                  <p className="font-semibold text-slate-700">No builder workflows yet.</p>
+                  <p>Start with a blank custom workflow, then set the trigger and add steps.</p>
                 </div>
               ) : (
-                builderWorkflows.map((workflow) => (
-                  <button
-                    key={workflow.id}
-                    type="button"
-                    className={`w-full rounded-lg border px-3 py-2 text-left ${
-                      selectedBuilderWorkflowId === workflow.id
-                        ? "border-lime-500 bg-lime-50"
-                        : "border-slate-200 hover:border-slate-300"
-                    }`}
-                    onClick={() => setSelectedBuilderWorkflowId(workflow.id)}
-                  >
-                    <p className="text-sm font-semibold text-slate-900">{workflow.name}</p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {STATUS_LABELS[workflow.status] ?? workflow.status}
-                    </p>
-                  </button>
-                ))
+                builderWorkflows.map((workflow) => {
+                  const isSelected = selectedBuilderWorkflowId === workflow.id;
+
+                  return (
+                    <button
+                      key={workflow.id}
+                      type="button"
+                      className={`w-full rounded-lg border px-3 py-2 text-left ${
+                        isSelected
+                          ? "border-lime-500 bg-lime-50"
+                          : "border-slate-200 hover:border-slate-300"
+                      }`}
+                      onClick={() => setSelectedBuilderWorkflowId(workflow.id)}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{workflow.name}</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {STATUS_LABELS[workflow.status] ?? workflow.status}
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                          {isSelected ? "Editing" : "Open Editor"}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })
               )}
             </div>
+
+            {builderWorkflows.length > 0 ? (
+              <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                Select a workflow to edit it. On smaller screens, the editor opens below this list.
+              </div>
+            ) : null}
           </aside>
 
           <div className="space-y-4">
             {!selectedBuilderWorkflow ? (
               <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-sm text-slate-500">
-                Create a builder workflow to start editing nodes.
+                <p className="font-semibold text-slate-800">Create your first custom workflow</p>
+                <div className="mt-3 space-y-2 text-xs text-slate-600">
+                  <p>1. Click <span className="font-semibold text-slate-900">Create Custom Workflow</span>.</p>
+                  <p>2. Choose a common trigger or enter your own event key.</p>
+                  <p>3. Add messages, waits, conditions, tasks, and a stop step.</p>
+                  <p>4. Save, publish, and use the test runner to execute it.</p>
+                </div>
+                <button
+                  type="button"
+                  className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                  onClick={handleCreateBuilderWorkflow}
+                  disabled={busyKey === "create-builder"}
+                >
+                  {busyKey === "create-builder" ? "Creating..." : "Create Custom Workflow"}
+                </button>
               </div>
             ) : (
               <>
-                <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <label className="space-y-1 text-xs text-slate-600">
-                      Workflow name
-                      <input
-                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                        value={draftName}
-                        onChange={(event) => setDraftName(event.target.value)}
-                      />
-                    </label>
-                    <label className="space-y-1 text-xs text-slate-600">
-                      Trigger event key
-                      <input
-                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                        value={draftTriggerEvent}
-                        onChange={(event) => setDraftTriggerEvent(event.target.value)}
-                        placeholder="example: contacts.created.v1"
-                      />
-                    </label>
+                <div ref={builderEditorRef} className="space-y-4">
+                  <div className="rounded-xl border border-lime-200 bg-lime-50 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-lime-950">
+                          Editing: {selectedBuilderWorkflow.name}
+                        </p>
+                        <p className="mt-1 text-xs text-lime-900">
+                          Update the trigger, edit the outline steps below, then save or publish.
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                          STATUS_BADGES[selectedBuilderWorkflow.status] ??
+                          "bg-white text-slate-700"
+                        }`}
+                      >
+                        {STATUS_LABELS[selectedBuilderWorkflow.status] ??
+                          selectedBuilderWorkflow.status}
+                      </span>
+                    </div>
                   </div>
 
-                  <label className="space-y-1 text-xs text-slate-600 block">
-                    Description
-                    <textarea
-                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                      value={draftDescription}
-                      onChange={(event) => setDraftDescription(event.target.value)}
-                      rows={2}
-                    />
-                  </label>
-
-                  <div className="grid gap-4 md:grid-cols-7">
-                    <label className="text-xs text-slate-600 space-y-1">
-                      Enrollment mode
-                      <select
-                        className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
-                        value={draftPolicy.enrollmentMode}
-                        onChange={(event) =>
-                          setDraftPolicy((current) => ({
-                            ...current,
-                            enrollmentMode: event.target.value as
-                              | "every_trigger"
-                              | "once_per_contact"
-                              | "cooldown",
-                          }))
-                        }
-                      >
-                        <option value="every_trigger">Every trigger</option>
-                        <option value="once_per_contact">Once per contact</option>
-                        <option value="cooldown">Cooldown re-entry</option>
-                      </select>
-                    </label>
-                    <label className="text-xs text-slate-600 space-y-1">
-                      Cooldown (minutes)
-                      <input
-                        className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
-                        type="number"
-                        min={1}
-                        value={draftPolicy.reentryCooldownMinutes}
-                        onChange={(event) =>
-                          setDraftPolicy((current) => ({
-                            ...current,
-                            reentryCooldownMinutes: Number(event.target.value || 1),
-                          }))
-                        }
-                      />
-                    </label>
-                    <label className="text-xs text-slate-600 space-y-1">
-                      Quiet hours
-                      <select
-                        className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
-                        value={draftPolicy.quietHoursEnabled ? "on" : "off"}
-                        onChange={(event) =>
-                          setDraftPolicy((current) => ({
-                            ...current,
-                            quietHoursEnabled: event.target.value === "on",
-                          }))
-                        }
-                      >
-                        <option value="on">Enabled</option>
-                        <option value="off">Disabled</option>
-                      </select>
-                    </label>
-                    <label className="text-xs text-slate-600 space-y-1">
-                      Quiet start
-                      <input
-                        className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
-                        value={draftPolicy.quietHoursStart}
-                        onChange={(event) =>
-                          setDraftPolicy((current) => ({
-                            ...current,
-                            quietHoursStart: event.target.value,
-                          }))
-                        }
-                        placeholder="21:00"
-                      />
-                    </label>
-                    <label className="text-xs text-slate-600 space-y-1">
-                      Quiet end
-                      <input
-                        className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
-                        value={draftPolicy.quietHoursEnd}
-                        onChange={(event) =>
-                          setDraftPolicy((current) => ({
-                            ...current,
-                            quietHoursEnd: event.target.value,
-                          }))
-                        }
-                        placeholder="08:00"
-                      />
-                    </label>
-                    <label className="text-xs text-slate-600 space-y-1">
-                      Daily send cap
-                      <input
-                        className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
-                        type="number"
-                        min={1}
-                        value={draftPolicy.dailySendCap}
-                        onChange={(event) =>
-                          setDraftPolicy((current) => ({
-                            ...current,
-                            dailySendCap: Number(event.target.value || 1),
-                          }))
-                        }
-                      />
-                    </label>
-                    <label className="text-xs text-slate-600 space-y-1">
-                      Respect opt-out
-                      <select
-                        className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
-                        value={draftPolicy.respectOptOut ? "yes" : "no"}
-                        onChange={(event) =>
-                          setDraftPolicy((current) => ({
-                            ...current,
-                            respectOptOut: event.target.value === "yes",
-                          }))
-                        }
-                      >
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                      </select>
-                    </label>
-                  </div>
+                  <AutomationWorkflowEditor
+                    editorId={selectedBuilderWorkflow.id}
+                    name={draftName}
+                    description={draftDescription}
+                    triggerEvent={draftTriggerEvent}
+                    definition={draftDefinition}
+                    validationErrors={builderValidationErrors}
+                    onNameChange={setDraftName}
+                    onDescriptionChange={setDraftDescription}
+                    onTriggerEventChange={setDraftTriggerEvent}
+                    onDefinitionChange={setDraftDefinition}
+                    policy={draftPolicy}
+                    onPolicyChange={setDraftPolicy}
+                    broadcastOptions={broadcasts.map((broadcast) => ({
+                      id: broadcast.id,
+                      title: broadcast.title,
+                    }))}
+                  />
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h3 className="text-sm font-semibold text-slate-900">Node Editor</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {AUTOMATION_NODE_TYPES.map((nodeType) => (
-                        <button
-                          key={nodeType}
-                          type="button"
-                          className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                          onClick={() => addNode(nodeType)}
-                        >
-                          + {nodeType}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    {draftDefinition.nodes.map((node) => {
-                      const actionType = String(
-                        (node.config as Record<string, unknown> | undefined)?.actionType ??
-                          "generic"
-                      );
-                      const selectedBroadcastId = String(
-                        (node.config as Record<string, unknown> | undefined)?.broadcastId ?? ""
-                      );
-                      return (
-                      <article key={node.id} className="rounded-lg border border-slate-200 p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase text-slate-700">
-                            {node.type}
-                          </span>
-                          <button
-                            type="button"
-                            className="text-xs font-semibold text-red-600 disabled:text-slate-400"
-                            onClick={() => deleteNode(node.id)}
-                            disabled={node.type === "trigger" && draftDefinition.nodes.filter((item) => item.type === "trigger").length === 1}
-                          >
-                            Remove
-                          </button>
-                        </div>
-
-                        <div className="mt-3 grid gap-3 md:grid-cols-2">
-                          <label className="space-y-1 text-xs text-slate-600">
-                            Label
-                            <input
-                              className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                              value={node.label}
-                              onChange={(event) =>
-                                updateNode(node.id, {
-                                  label: event.target.value,
-                                })
-                              }
-                            />
-                          </label>
-
-                          <label className="space-y-1 text-xs text-slate-600">
-                            Description
-                            <input
-                              className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                              value={node.description ?? ""}
-                              onChange={(event) =>
-                                updateNode(node.id, {
-                                  description: event.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                        </div>
-
-                        {node.type === "action" ? (
-                          <div className="mt-3 grid gap-3 md:grid-cols-2">
-                            <label className="space-y-1 text-xs text-slate-600">
-                              Action type
-                              <select
-                                className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                                value={actionType}
-                                onChange={(event) =>
-                                  updateNodeConfig(node, {
-                                    actionType: event.target.value,
-                                    ...(event.target.value !== "broadcast_send"
-                                      ? { broadcastId: null }
-                                      : {}),
-                                  })
-                                }
-                              >
-                                <option value="generic">Generic action</option>
-                                <option value="send_sms">Send SMS</option>
-                                <option value="send_email">Send Email</option>
-                                <option value="create_task">Create Task</option>
-                                <option value="broadcast_send">Queue broadcast send</option>
-                              </select>
-                            </label>
-
-                            <label className="space-y-1 text-xs text-slate-600">
-                              Broadcast
-                              <select
-                                className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                                value={selectedBroadcastId}
-                                onChange={(event) =>
-                                  updateNodeConfig(node, {
-                                    broadcastId: event.target.value || null,
-                                  })
-                                }
-                                disabled={actionType !== "broadcast_send"}
-                              >
-                                <option value="">Select broadcast...</option>
-                                {broadcasts.map((broadcast) => (
-                                  <option key={broadcast.id} value={broadcast.id}>
-                                    {broadcast.title}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          </div>
-                        ) : null}
-
-                        <label className="mt-3 block space-y-1 text-xs text-slate-600">
-                          Next node IDs (comma separated)
-                          <input
-                            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                            value={(node.nextIds ?? []).join(",")}
-                            onChange={(event) => {
-                              const nextIds = event.target.value
-                                .split(",")
-                                .map((value) => value.trim())
-                                .filter(Boolean);
-                              updateNode(node.id, { nextIds });
-                            }}
-                            placeholder="node_a,node_b"
-                          />
-                        </label>
-
-                        <p className="mt-2 text-[11px] text-slate-400">Node ID: {node.id}</p>
-                      </article>
-                    )})}
-                  </div>
-
-                  {builderValidationErrors.length > 0 ? (
-                    <div className="rounded-lg border border-red-200 bg-red-50 p-3">
-                      <p className="text-xs font-semibold text-red-700">Publish blockers</p>
-                      <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-red-700">
-                        {builderValidationErrors.map((error) => (
-                          <li key={error}>{error}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : (
-                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-700">
-                      Workflow graph is valid and publish-ready.
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    onClick={saveBuilderDraft}
+                    disabled={busyKey === "save-builder"}
+                  >
+                    {busyKey === "save-builder" ? "Saving..." : "Save Draft"}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md bg-lime-600 px-3 py-2 text-xs font-semibold text-white hover:bg-lime-500 disabled:bg-lime-300"
+                    onClick={publishBuilder}
+                    disabled={busyKey === "publish-builder" || builderValidationErrors.length > 0}
+                  >
+                    {busyKey === "publish-builder" ? "Publishing..." : "Publish"}
+                  </button>
+                  {selectedBuilderWorkflow.status === "published" ? (
                     <button
                       type="button"
                       className="rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                      onClick={saveBuilderDraft}
-                      disabled={busyKey === "save-builder"}
+                      onClick={() => updateWorkflowStatus(selectedBuilderWorkflow.id, "paused")}
                     >
-                      {busyKey === "save-builder" ? "Saving..." : "Save Draft"}
+                      Pause
                     </button>
-                    <button
-                      type="button"
-                      className="rounded-md bg-lime-600 px-3 py-2 text-xs font-semibold text-white hover:bg-lime-500 disabled:bg-lime-300"
-                      onClick={publishBuilder}
-                      disabled={busyKey === "publish-builder" || builderValidationErrors.length > 0}
-                    >
-                      {busyKey === "publish-builder" ? "Publishing..." : "Publish"}
-                    </button>
-                    {selectedBuilderWorkflow.status === "published" ? (
-                      <button
-                        type="button"
-                        className="rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                        onClick={() => updateWorkflowStatus(selectedBuilderWorkflow.id, "paused")}
-                      >
-                        Pause
-                      </button>
-                    ) : null}
-                  </div>
+                  ) : null}
+                </div>
 
                   <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-3">
                     <div className="flex items-center justify-between gap-2">
@@ -1326,7 +1046,6 @@ export default function AutomationsPage() {
                       </div>
                     ) : null}
                   </div>
-                </div>
 
                 <div className="rounded-xl border border-slate-200 bg-white p-4">
                   <h3 className="text-sm font-semibold text-slate-900">Run Log Feed</h3>

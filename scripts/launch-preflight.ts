@@ -69,11 +69,11 @@ async function run() {
   const authSecret = requireAnyEnv("Auth secret", ["AUTH_SECRET", "NEXTAUTH_SECRET"]);
   requireAnyEnv("App URL", ["AUTH_URL", "NEXTAUTH_URL", "NEXT_PUBLIC_APP_URL"]);
   const sessionSecret = requireAnyEnv("Session secret", ["SESSION_SECRET", "AUTH_SECRET"]);
+  requireAnyEnv("Gemini API key", ["GEMINI_API_KEY"]);
   requireAnyEnv("Provider encryption key", [
     "GRACE_PROVIDER_ENCRYPTION_KEY",
     "AUTH_SECRET",
   ]);
-  requireAnyEnv("ElevenLabs API key", ["ELEVENLABS_API_KEY"]);
   requireAnyEnv("Automation system token", [
     "AUTOMATION_SYSTEM_TOKEN",
     "INNGEST_EVENT_KEY",

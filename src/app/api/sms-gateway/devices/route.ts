@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { organizations } from "@/db/schema/organization";
@@ -10,6 +10,7 @@ import {
   issueSmsGatewayEnrollmentToken,
   SmsGatewayAuthError,
 } from "@/lib/sms-gateway/auth";
+import { getSmsGatewayProviderCandidates } from "@/lib/sms-gateway/provider";
 import { timingSafeEqualString } from "@/lib/security/compare";
 
 /**
@@ -78,7 +79,7 @@ async function activateSmsProviderForOrganization(organizationId: string) {
       and(
         eq(providerConfigs.organizationId, organizationId),
         eq(providerConfigs.channel, "sms"),
-        eq(providerConfigs.provider, "textbee")
+        inArray(providerConfigs.provider, getSmsGatewayProviderCandidates())
       )
     );
 }

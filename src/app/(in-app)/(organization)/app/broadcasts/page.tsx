@@ -6,8 +6,7 @@ export default function BroadcastsPage() {
       initialTab="broadcasts"
       eyebrow="Messaging Hub"
       title="Broadcasts"
-      description="Launch and manage journeys, templates, broadcasts, and deliveries from the shared Dittofeed workspace."
+      description="Launch and manage SMS-first broadcasts, journeys, templates, and deliveries from the shared messaging workspace. Email and voice broadcasts remain out of beta scope."
     />
   );
 }
-

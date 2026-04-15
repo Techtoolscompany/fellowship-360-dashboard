@@ -10,6 +10,7 @@ import {
 import { organizations } from "./organization";
 import { users } from "./user";
 import { serviceRuns } from "./operations";
+import { churchContacts } from "./church-contacts";
 
 export const graceGoalTypeEnum = pgEnum("grace_goal_type", [
   "service_staffing",
@@ -49,6 +50,19 @@ export const graceGoals = pgTable(
     goalType: graceGoalTypeEnum("goal_type").notNull().default("custom"),
     status: graceGoalStatusEnum("status").notNull().default("queued"),
     sourceChannel: text("source_channel").notNull().default("in_app"),
+    workflowKey: text("workflow_key").notNull().default("legacy_goal"),
+    workflowVersion: integer("workflow_version").notNull().default(1),
+    triggerSource: text("trigger_source").notNull().default("legacy"),
+    triggerChannel: text("trigger_channel").notNull().default("in_app"),
+    subjectContactId: text("subject_contact_id").references(() => churchContacts.id, {
+      onDelete: "set null",
+    }),
+    subjectEntityType: text("subject_entity_type"),
+    subjectEntityId: text("subject_entity_id"),
+    correlationKey: text("correlation_key"),
+    policyMode: text("policy_mode").notNull().default("confirm_once"),
+    lastDecisionSummary: text("last_decision_summary"),
+    nextCheckpointAt: timestamp("next_checkpoint_at", { mode: "date" }),
     objectiveText: text("objective_text").notNull(),
     serviceRunId: text("service_run_id").references(() => serviceRuns.id, {
       onDelete: "set null",
@@ -77,6 +91,21 @@ export const graceGoals = pgTable(
     orgTypeIdx: index("grace_goal_org_type_idx").on(
       table.organizationId,
       table.goalType
+    ),
+    orgWorkflowStatusIdx: index("grace_goal_org_workflow_status_idx").on(
+      table.organizationId,
+      table.workflowKey,
+      table.status
+    ),
+    orgWorkflowSubjectIdx: index("grace_goal_org_workflow_subject_idx").on(
+      table.organizationId,
+      table.workflowKey,
+      table.subjectEntityType,
+      table.subjectEntityId
+    ),
+    orgCorrelationIdx: index("grace_goal_org_correlation_idx").on(
+      table.organizationId,
+      table.correlationKey
     ),
     runStatusIdx: index("grace_goal_run_status_idx").on(
       table.serviceRunId,

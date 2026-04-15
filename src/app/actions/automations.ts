@@ -22,9 +22,13 @@ import {
 } from "@/lib/automations/types";
 import {
   createBuilderStarterDefinition,
-  getAutomationTemplateByKey,
-  getAutomationTemplateCatalog,
-} from "@/lib/automations/templates";
+  normalizeAutomationDefinition,
+} from "@/lib/automations/editor";
+import { startAutomationWorkflowRun } from "@/lib/automations/runtime-execution";
+import {
+  getResolvedAutomationTemplateByKey,
+  listAutomationLibraryTemplates,
+} from "@/lib/automations/template-registry";
 import { validateAutomationDefinition } from "@/lib/automations/validation";
 import { evaluateEnrollmentPolicy, isWithinQuietHours } from "@/lib/automations/policy";
 import {
@@ -153,22 +157,7 @@ const COMMUNICATION_ACTION_TYPES = new Set([
 ]);
 
 function normalizeDefinition(definition: AutomationDefinition): AutomationDefinition {
-  const normalizedNodes = definition.nodes.map((node) => {
-    const nextIds = Array.from(new Set((node.nextIds ?? []).filter(Boolean)));
-    return {
-      ...node,
-      nextIds,
-      description: node.description ?? null,
-      config: node.config ?? {},
-    };
-  });
-
-  return {
-    version: definition.version,
-    startNodeId:
-      definition.startNodeId ?? normalizedNodes.find((node) => node.type === "trigger")?.id,
-    nodes: normalizedNodes,
-  };
+  return normalizeAutomationDefinition(definition);
 }
 
 function getWorkflowPolicySnapshot(
@@ -623,7 +612,8 @@ async function queueAutomationBroadcastAction(params: {
 }
 
 export async function getAutomationTemplates() {
-  return getAutomationTemplateCatalog().map((template) => ({
+  const templates = await listAutomationLibraryTemplates();
+  return templates.map((template) => ({
     key: template.key,
     name: template.name,
     description: template.description,
@@ -631,6 +621,9 @@ export async function getAutomationTemplates() {
     triggerEvent: template.triggerEvent,
     recommendedChannels: template.recommendedChannels,
     nodeCount: template.definition.nodes.length,
+    source: template.source,
+    status: template.status,
+    updatedAt: template.updatedAt ?? null,
   }));
 }
 
@@ -759,7 +752,7 @@ export async function installAutomationTemplate(input: {
     .parse(input);
 
   const session = await requireOrgMembership(parsed.organizationId, "admin");
-  const template = getAutomationTemplateByKey(parsed.templateKey);
+  const template = await getResolvedAutomationTemplateByKey(parsed.templateKey);
 
   if (!template) {
     throw new Error("Automation template not found");
@@ -1212,9 +1205,6 @@ async function executeAutomationWorkflowRun(input: ExecuteAutomationRunInput) {
     throw new Error("Only published workflows can be triggered");
   }
 
-  const definition = normalizeDefinition(
-    automationDefinitionSchema.parse(input.workflow.definitionJson as AutomationDefinition)
-  );
   const now = new Date();
 
   const enrollment = await evaluateEnrollmentState({
@@ -1295,200 +1285,15 @@ async function executeAutomationWorkflowRun(input: ExecuteAutomationRunInput) {
     };
   }
 
-  const nodesById = new Map(definition.nodes.map((node) => [node.id, node]));
-  const startNodeId =
-    definition.startNodeId ??
-    definition.nodes.find((node) => node.type === "trigger")?.id;
-
-  if (!startNodeId || !nodesById.has(startNodeId)) {
-    throw new Error("Workflow start node is invalid");
-  }
-
-  const [createdRun] = await db
-    .insert(automationWorkflowRuns)
-    .values({
-      organizationId: input.organizationId,
-      workflowId: input.workflow.id,
-      contactId: input.contactId ?? null,
-      status: "entered",
-      currentNodeId: startNodeId,
-      currentNodeType: "trigger",
-      metadataJson: {
-        source: input.source,
-        metadata: input.metadata ?? {},
-      },
-    })
-    .returning();
-
-  const trace: Array<Record<string, unknown>> = [];
-  const pushTrace = (entry: Record<string, unknown>) => {
-    trace.push({ at: new Date().toISOString(), ...entry });
-  };
-
-  let status: "running" | "completed" | "failed" | "exited" = "running";
-  let currentNodeId: string | null = startNodeId;
-  let lastError: string | null = null;
-
-  try {
-    for (let step = 0; step < 60; step += 1) {
-      if (!currentNodeId) {
-        status = "exited";
-        pushTrace({ event: "exit", reason: "missing_next_node" });
-        break;
-      }
-
-      const node = nodesById.get(currentNodeId);
-      if (!node) {
-        throw new Error(`Node \"${currentNodeId}\" no longer exists`);
-      }
-
-      await db
-        .update(automationWorkflowRuns)
-        .set({
-          status: "running",
-          currentNodeId: node.id,
-          currentNodeType: node.type,
-          updatedAt: new Date(),
-        })
-        .where(eq(automationWorkflowRuns.id, createdRun.id));
-
-      pushTrace({
-        event: "node_enter",
-        nodeId: node.id,
-        nodeType: node.type,
-      });
-
-      if (node.type === "stop") {
-        status = "completed";
-        pushTrace({ event: "stop", nodeId: node.id });
-        break;
-      }
-
-      const nextIds = node.nextIds ?? [];
-      let nextNodeId: string | null = nextIds[0] ?? null;
-
-      if (node.type === "condition") {
-        const config = getNodeConfig(node);
-        const branchIndex =
-          typeof config.branchIndex === "number" && Number.isFinite(config.branchIndex)
-            ? Math.max(0, Math.floor(config.branchIndex))
-            : 0;
-        nextNodeId = nextIds[branchIndex] ?? nextIds[0] ?? null;
-        pushTrace({
-          event: "condition_branch",
-          nodeId: node.id,
-          branchIndex,
-          selectedNextNodeId: nextNodeId,
-        });
-      }
-
-      if (node.type === "action") {
-        const config = getNodeConfig(node);
-        const actionType = String(config.actionType ?? "generic");
-
-        if (
-          COMMUNICATION_ACTION_TYPES.has(actionType) &&
-          isWithinQuietHours({
-            now,
-            quietHoursEnabled: input.workflow.quietHoursEnabled,
-            quietHoursStart: input.workflow.quietHoursStart,
-            quietHoursEnd: input.workflow.quietHoursEnd,
-          })
-        ) {
-          status = "exited";
-          pushTrace({
-            event: "action_skipped",
-            nodeId: node.id,
-            actionType,
-            reason: "quiet_hours_active",
-          });
-          break;
-        }
-
-        if (actionType === "broadcast_send") {
-          const broadcastId = String(config.broadcastId ?? "").trim();
-          if (!broadcastId) {
-            throw new Error(`Action node ${node.id} is missing broadcastId`);
-          }
-
-          const queued = await queueAutomationBroadcastAction({
-            organizationId: input.organizationId,
-            workflowId: input.workflow.id,
-            runId: createdRun.id,
-            nodeId: node.id,
-            broadcastId,
-          });
-
-          pushTrace({
-            event: "action_queued",
-            nodeId: node.id,
-            actionType,
-            broadcastId: queued.broadcastId,
-            idempotencyKey: queued.idempotencyKey,
-          });
-        } else {
-          pushTrace({ event: "action_executed", nodeId: node.id, actionType });
-        }
-      }
-
-      if (!nextNodeId) {
-        status = "exited";
-        pushTrace({ event: "exit", reason: "node_has_no_next", nodeId: node.id });
-        break;
-      }
-
-      currentNodeId = nextNodeId;
-    }
-
-    if (status === "running") {
-      status = "failed";
-      lastError = "step_limit_reached";
-      pushTrace({ event: "error", reason: "step_limit_reached" });
-    }
-  } catch (error) {
-    status = "failed";
-    lastError = error instanceof Error ? error.message : "workflow_execution_failed";
-    pushTrace({ event: "error", reason: lastError });
-  }
-
-  const [updatedRun] = await db
-    .update(automationWorkflowRuns)
-    .set({
-      status,
-      currentNodeId: currentNodeId ?? undefined,
-      currentNodeType: currentNodeId ? nodesById.get(currentNodeId)?.type : undefined,
-      lastError,
-      metadataJson: {
-        source: input.source,
-        metadata: input.metadata ?? {},
-        enrollment,
-        trace,
-      },
-      updatedAt: new Date(),
-      completedAt: status === "completed" ? new Date() : null,
-      exitedAt: status === "exited" ? new Date() : null,
-    })
-    .where(eq(automationWorkflowRuns.id, createdRun.id))
-    .returning();
-
-  let deadLetterId: string | null = null;
-  if (status === "failed") {
-    const deadLetter = await writeDeadLetter({
-      organizationId: input.organizationId,
-      workflowId: input.workflow.id,
-      runId: updatedRun.id,
-      contactId: input.contactId ?? undefined,
-      source: input.source,
-      triggerEvent:
-        typeof input.metadata?.triggerEvent === "string"
-          ? input.metadata.triggerEvent
-          : input.workflow.triggerEvent,
-      metadata: input.metadata ?? {},
-      errorMessage: lastError ?? "workflow_execution_failed",
-      deadLetterId: input.deadLetterId,
-    });
-    deadLetterId = deadLetter?.id ?? null;
-  }
+  const createdRun = await startAutomationWorkflowRun({
+    organizationId: input.organizationId,
+    workflow: input.workflow,
+    contactId: input.contactId,
+    metadata: input.metadata,
+    enrollment,
+    source: input.source,
+    deadLetterId: input.deadLetterId,
+  });
 
   if (input.auditUserId) {
     await auditAction({
@@ -1496,12 +1301,11 @@ async function executeAutomationWorkflowRun(input: ExecuteAutomationRunInput) {
       userId: input.auditUserId,
       actionType: "trigger",
       entityName: "automation_workflow_run",
-      entityId: updatedRun.id,
+      entityId: createdRun.id,
       details: {
         workflowId: input.workflow.id,
-        status,
+        status: createdRun.status,
         contactId: input.contactId ?? null,
-        reason: lastError,
         source: input.source,
       },
     });
@@ -1510,34 +1314,35 @@ async function executeAutomationWorkflowRun(input: ExecuteAutomationRunInput) {
   await writeGraceAuditStreamSafe({
     organizationId: input.organizationId,
     workflowId: input.workflow.id,
-    workflowRunId: updatedRun.id,
+    workflowRunId: createdRun.id,
     eventType: "workflow_execution",
     source: "automation_runtime",
-    status:
-      status === "failed"
-        ? "error"
-        : status === "exited"
-          ? "skipped"
-          : "success",
+    status: "success",
     actorType: "system",
-    actionName: "automation_workflow_run",
-    errorText: lastError,
+    actionName: "automation_workflow_run_queued",
     metadataJson: {
       workflowId: input.workflow.id,
       source: input.source,
-      runStatus: status,
-      deadLetterId,
-      traceLength: trace.length,
+      runStatus: createdRun.status,
+      deadLetterId: input.deadLetterId ?? null,
+      queued: true,
+      enrollment,
       contactId: input.contactId ?? null,
     },
   });
 
   return {
     skipped: false as const,
-    run: updatedRun,
-    trace,
+    run: createdRun,
+    trace: [
+      {
+        at: new Date().toISOString(),
+        event: "run_queued",
+        runId: createdRun.id,
+      },
+    ],
     enrollment,
-    deadLetterId,
+    deadLetterId: input.deadLetterId ?? null,
   };
 }
 
@@ -1687,20 +1492,10 @@ async function replayDeadLetterRow(
     };
   }
 
-  if (result.run.status === "failed") {
-    return {
-      replayed: false as const,
-      skipped: false as const,
-      reason: result.run.lastError ?? "replay_failed",
-      runId: result.run.id,
-      deadLetterId: result.deadLetterId ?? deadLetter.id,
-    };
-  }
-
   await markDeadLetterReplayed({
     deadLetterId: deadLetter.id,
     organizationId: deadLetter.organizationId,
-    note: `replay_${result.run.status}`,
+    note: "replay_queued",
   });
 
   return {

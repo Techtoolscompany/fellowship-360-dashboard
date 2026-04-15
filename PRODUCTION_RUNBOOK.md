@@ -50,6 +50,7 @@ Avoid breaking schema changes unless necessary. If a migration needs reverting:
 
 ## ✅ Daily Launch Checklist Checks
 
+- Start with `docs/PREFLIGHT_CLEARANCE_CHECKLIST.md` and keep it green.
 - [ ] Database migrated successfully (Migrations `0005` to `0009` included).
 - [ ] `.env` keys populated for Gemini, Stripe, FCM (`FCM_SERVER_URL`, `FCM_SERVER_KEY`), and webhook secrets.
 - [ ] Vercel Environment Variables matches local `.env` required keys.

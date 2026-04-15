@@ -7,12 +7,20 @@ import { requireOrgMembership } from "./utils";
 import {
   buildPrayerEscalationTaskMarker,
   buildPrayerEscalationTaskTitle,
+  isPrayerRequestActive,
   normalizePrayerStatus,
   resolvePrayerRouting,
   type PrayerStatus,
   type PrayerUrgency,
 } from "@/lib/prayer/routing";
 import { derivePrayerLifecycleEffects } from "@/lib/operations/prayer-lifecycle";
+import {
+  buildPrayerCareCorrelationKey,
+  ensurePrayerCareWorkflowGoal,
+  markPrayerCareWorkflowKickoffConfirmed,
+  updatePrayerCareWorkflowGoal,
+  PRAYER_CARE_WORKFLOW_KEY,
+} from "@/lib/grace/workflows/prayer-care";
 import * as z from "zod";
 
 const ACTIVE_TASK_STATUSES: Array<"todo" | "in_progress"> = ["todo", "in_progress"];
@@ -161,6 +169,21 @@ async function enqueuePrayerFollowupSequence(params: {
   }
 }
 
+function buildPrayerCareWorkflowSummary(params: {
+  content: string;
+  status: PrayerStatus;
+  urgency: PrayerUrgency;
+  assignedTeam: string;
+}) {
+  const urgencyLabel =
+    params.urgency === "critical"
+      ? "critical"
+      : params.urgency === "urgent"
+        ? "urgent"
+        : "normal";
+  return `Prayer care workflow ${params.status} for ${params.assignedTeam} (${urgencyLabel}): ${params.content}`;
+}
+
 export async function getPrayerRequests(
   orgId: string,
   filters?: { status?: string; urgency?: string }
@@ -198,7 +221,7 @@ export async function createPrayerRequest(data: {
   organizationId: string;
 }) {
   const parsed = createPrayerRequestSchema.parse(data);
-  await requireOrgMembership(parsed.organizationId);
+  const { userId } = await requireOrgMembership(parsed.organizationId);
   const routing = resolvePrayerRouting({
     content: parsed.content,
     urgency: parsed.urgency,
@@ -233,6 +256,34 @@ export async function createPrayerRequest(data: {
     });
   }
 
+  const prayerWorkflow = await ensurePrayerCareWorkflowGoal({
+    organizationId: request.organizationId,
+    requestId: request.id,
+    sourceChannel: "in_app",
+    triggerSource: "prayer_request.create",
+    status: "new",
+    urgency: routing.urgency,
+    assignedTeam: routing.assignedTeam,
+    content: request.content,
+    contactId: request.contactId ?? null,
+    objectiveText: buildPrayerCareWorkflowSummary({
+      content: request.content,
+      status: "new",
+      urgency: routing.urgency,
+      assignedTeam: routing.assignedTeam,
+    }),
+    requestedByUserId: userId,
+    lastDecisionSummary: "Prayer request created and queued for Grace follow-up.",
+    nextCheckpointAt: request.createdAt ?? new Date(),
+  });
+
+  await markPrayerCareWorkflowKickoffConfirmed({
+    goalId: prayerWorkflow.goal.id,
+    organizationId: request.organizationId,
+    summary: "Staff created the prayer request and confirmed Grace should follow up.",
+    source: PRAYER_CARE_WORKFLOW_KEY,
+  });
+
   await enqueuePrayerFollowupSequence({
     organizationId: request.organizationId,
     requestId: request.id,
@@ -264,6 +315,7 @@ export async function updatePrayerRequest(
     .select({
       id: prayerRequests.id,
       organizationId: prayerRequests.organizationId,
+      contactId: prayerRequests.contactId,
       content: prayerRequests.content,
       contactName: prayerRequests.contactName,
       status: prayerRequests.status,
@@ -275,7 +327,7 @@ export async function updatePrayerRequest(
     .where(eq(prayerRequests.id, prayerRequestId))
     .limit(1);
   if (!existing) throw new Error("Prayer request not found");
-  await requireOrgMembership(existing.organizationId);
+  const { userId } = await requireOrgMembership(existing.organizationId);
 
   const normalized = { ...parsed } as Record<string, unknown>;
   if (typeof normalized.isAnonymous === "boolean") {
@@ -318,6 +370,80 @@ export async function updatePrayerRequest(
       urgency: routing.urgency,
       content: request.content,
       assignedTeam: routing.assignedTeam,
+    });
+  }
+
+  if (isPrayerRequestActive(resolvedStatus)) {
+    const prayerWorkflow = await ensurePrayerCareWorkflowGoal({
+      organizationId: request.organizationId,
+      requestId: request.id,
+      sourceChannel: "in_app",
+      triggerSource: "prayer_request.update",
+      status: resolvedStatus,
+      urgency: routing.urgency,
+      assignedTeam: routing.assignedTeam,
+      content: request.content,
+      contactId: request.contactId ?? existing.contactId ?? null,
+      objectiveText: buildPrayerCareWorkflowSummary({
+        content: request.content,
+        status: resolvedStatus,
+        urgency: routing.urgency,
+        assignedTeam: routing.assignedTeam,
+      }),
+      requestedByUserId: userId,
+      lastDecisionSummary: `Prayer request updated to ${resolvedStatus} and remains active.`,
+      nextCheckpointAt: new Date(Date.now() + 15 * 60 * 1000),
+    });
+
+    await updatePrayerCareWorkflowGoal({
+      goalId: prayerWorkflow.goal.id,
+      organizationId: request.organizationId,
+      status: "waiting",
+      requestId: request.id,
+      summary: `Prayer request ${resolvedStatus} remains active and is awaiting Grace follow-up.`,
+      nextCheckpointAt: new Date(Date.now() + 15 * 60 * 1000),
+      resultJson: {
+        prayerRequestStatus: resolvedStatus,
+        urgency: routing.urgency,
+        assignedTeam: routing.assignedTeam,
+        correlationKey: buildPrayerCareCorrelationKey(request.id),
+      },
+    });
+  } else {
+    const existingWorkflow = await ensurePrayerCareWorkflowGoal({
+      organizationId: request.organizationId,
+      requestId: request.id,
+      sourceChannel: "in_app",
+      triggerSource: "prayer_request.update",
+      status: resolvedStatus,
+      urgency: routing.urgency,
+      assignedTeam: routing.assignedTeam,
+      content: request.content,
+      contactId: request.contactId ?? existing.contactId ?? null,
+      objectiveText: buildPrayerCareWorkflowSummary({
+        content: request.content,
+        status: resolvedStatus,
+        urgency: routing.urgency,
+        assignedTeam: routing.assignedTeam,
+      }),
+      requestedByUserId: userId,
+      lastDecisionSummary: `Prayer request updated to ${resolvedStatus}.`,
+      nextCheckpointAt: null,
+    });
+
+    await updatePrayerCareWorkflowGoal({
+      goalId: existingWorkflow.goal.id,
+      organizationId: request.organizationId,
+      status: "completed",
+      requestId: request.id,
+      summary: `Prayer request resolved with status ${resolvedStatus}.`,
+      nextCheckpointAt: null,
+      resultJson: {
+        prayerRequestStatus: resolvedStatus,
+        urgency: routing.urgency,
+        assignedTeam: routing.assignedTeam,
+        correlationKey: buildPrayerCareCorrelationKey(request.id),
+      },
     });
   }
 

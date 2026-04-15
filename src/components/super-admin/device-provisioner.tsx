@@ -83,15 +83,32 @@ export function SuperAdminDeviceProvisioner({
         }),
       });
 
-      const payload = (await response.json()) as DeviceProvisionResponse & {
+      const responseText = await response.text();
+      let payload: (DeviceProvisionResponse & {
         error?: string;
-      };
+      }) | null = null;
+
+      if (responseText.trim()) {
+        try {
+          payload = JSON.parse(responseText) as DeviceProvisionResponse & {
+            error?: string;
+          };
+        } catch {
+          payload = null;
+        }
+      }
+
       if (response.status === 401 || response.status === 403) {
         redirectToSuperAdminSignIn();
         return;
       }
       if (!response.ok) {
-        throw new Error(payload.error || "Failed to provision device");
+        throw new Error(
+          payload?.error || `Failed to provision device (${response.status})`
+        );
+      }
+      if (!payload?.device) {
+        throw new Error("Unexpected server response while creating device");
       }
 
       toast.success("Device created");

@@ -2,6 +2,9 @@ export const INNGEST_EVENTS = {
   TEST_HELLO_WORLD_REQUESTED: "test.hello-world.requested.v1",
   GRACE_LEAD_RECEIVED: "grace.lead.received.v1",
   CONTACT_CREATED: "contacts.created.v1",
+  CONTACT_MEMBER_CREATED: "contacts.member.created.v1",
+  APPOINTMENT_SCHEDULED: "appointments.scheduled.v1",
+  VOLUNTEER_CREATED: "volunteers.created.v1",
   GRACE_FIRST_TIME_GUEST_APPOINTMENT_REQUESTED:
     "grace.guest.first-time-appointment.requested.v1",
   COMMUNICATIONS_BROADCAST_SEND_REQUESTED: "communications.broadcast.send.requested.v1",
@@ -11,6 +14,7 @@ export const INNGEST_EVENTS = {
     "grace.service.assignment.replacement.requested.v1",
   GRACE_PRAYER_REQUEST_FOLLOWUP_REQUESTED: "grace.prayer-request.followup.requested.v1",
   ORG_CREATED: "org.created.v1",
+  AUTOMATION_WORKFLOW_RUN_REQUESTED: "automation.workflow.run.requested.v1",
 } as const;
 
 export type InngestEventName = (typeof INNGEST_EVENTS)[keyof typeof INNGEST_EVENTS];
@@ -64,6 +68,34 @@ export function buildContactCreatedIdempotencyKey(params: {
   contactId: string;
 }) {
   return hashParts("contact", [params.organizationId, params.contactId]);
+}
+
+export function buildContactMemberCreatedIdempotencyKey(params: {
+  organizationId: string;
+  contactId: string;
+  memberStatus: "member" | "leader";
+  occurredAt: string;
+}) {
+  return hashParts("contact-member", [
+    params.organizationId,
+    params.contactId,
+    params.memberStatus,
+    params.occurredAt,
+  ]);
+}
+
+export function buildAppointmentScheduledIdempotencyKey(params: {
+  organizationId: string;
+  appointmentId: string;
+}) {
+  return hashParts("appointment-scheduled", [params.organizationId, params.appointmentId]);
+}
+
+export function buildVolunteerCreatedIdempotencyKey(params: {
+  organizationId: string;
+  volunteerId: string;
+}) {
+  return hashParts("volunteer-created", [params.organizationId, params.volunteerId]);
 }
 
 export function buildFirstTimeGuestAppointmentIdempotencyKey(params: {
@@ -150,4 +182,16 @@ export function buildOrgCreatedIdempotencyKey(params: {
   organizationId: string;
 }) {
   return hashParts("org-created", [params.organizationId]);
+}
+
+export function buildAutomationWorkflowRunExecutionIdempotencyKey(params: {
+  organizationId: string;
+  workflowId: string;
+  runId: string;
+}) {
+  return hashParts("automation-run", [
+    params.organizationId,
+    params.workflowId,
+    params.runId,
+  ]);
 }

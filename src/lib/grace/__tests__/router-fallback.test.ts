@@ -20,6 +20,7 @@ queryMock.limit = vi.fn(() => queryMock);
 vi.mock("@/db", () => ({
   db: {
     select: vi.fn(() => queryMock),
+    insert: vi.fn(() => ({ values: vi.fn().mockResolvedValue(undefined) })),
   },
 }));
 
@@ -64,9 +65,10 @@ describe("runClawRouter — Gemini fallback", () => {
   });
 
   it("returns a successful response when Gemini succeeds", async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(generateObject).mockResolvedValueOnce({
       object: {
+        reasoning: "User is asking about service times. I can answer directly.",
+        continueThinking: false,
         intent: "info_request",
         response: "We hold services every Sunday at 10am.",
         proposedTools: [],

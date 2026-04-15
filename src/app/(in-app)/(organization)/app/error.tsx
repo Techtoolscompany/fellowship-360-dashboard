@@ -25,9 +25,9 @@ export default function InAppError({
           <Button onClick={reset}>Retry</Button>
           <Button
             variant="outline"
-            onClick={() => window.location.assign("/app/grace?tab=command")}
+            onClick={() => window.location.assign("/app/grace?tab=home")}
           >
-            Command Center
+            Grace
           </Button>
         </div>
       </div>

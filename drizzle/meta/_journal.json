@@ -162,6 +162,34 @@
       "when": 1774436400000,
       "tag": "0022_sms_gateway_device_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1775001600000,
+      "tag": "0023_managed_automation_template_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1775088000000,
+      "tag": "0024_beta_people_attendance",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1775529600000,
+      "tag": "0025_grace_workflow_runtime",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1776038400000,
+      "tag": "0026_grace_proactive_mode_and_policy_cleanup",
+      "breakpoints": true
     }
   ]
 }

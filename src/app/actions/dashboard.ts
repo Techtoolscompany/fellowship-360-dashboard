@@ -11,13 +11,116 @@ import {
   pipelineItems,
   pipelineStages,
   donations,
+  attendanceEntries,
+  attendanceSessions,
+  graceFollowupProposals,
+  graceHandoffs,
+  serviceAssignments,
+  serviceRuns,
 } from "@/db/schema";
-import { eq, sql, desc, count, sum, or, and, gte, lte } from "drizzle-orm";
-import { subDays, startOfWeek, endOfWeek, format } from "date-fns";
+import { eq, sql, desc, count, sum, or, and, gte, lte, asc } from "drizzle-orm";
+import { startOfWeek, endOfWeek } from "date-fns";
 import { requireOrgMembership } from "./utils";
 import * as z from "zod";
 
 const organizationIdSchema = z.string().trim().min(1);
+const SETUP_REQUIRED_CODES = new Set(["42P01", "42703"]);
+
+type WeeklyCountRow = {
+  date: Date;
+  count: number | string | null;
+};
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String((error as { message?: unknown }).message ?? "");
+  }
+
+  return "";
+}
+
+function getErrorCode(error: unknown) {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    return String((error as { code?: unknown }).code ?? "");
+  }
+
+  return "";
+}
+
+function isSetupRequiredError(error: unknown, identifierPattern: RegExp) {
+  const message = getErrorMessage(error);
+  if (!message || !identifierPattern.test(message)) {
+    return false;
+  }
+
+  const code = getErrorCode(error);
+  return (
+    SETUP_REQUIRED_CODES.has(code) ||
+    /relation\s+".+"\s+does not exist/i.test(message) ||
+    /column\s+".+"\s+does not exist/i.test(message) ||
+    /column\s+.+\s+does not exist/i.test(message)
+  );
+}
+
+function isAttendanceSetupRequiredError(error: unknown) {
+  return isSetupRequiredError(error, /\battendance_(entry|session)\b/i);
+}
+
+function isServiceCheckinSetupRequiredError(error: unknown) {
+  return isSetupRequiredError(error, /\bservice_(assignment|run)\b/i);
+}
+
+async function getWeeklyAttendanceRows(
+  organizationId: string,
+  weekStart: Date,
+  weekEnd: Date
+): Promise<WeeklyCountRow[]> {
+  return db
+    .select({
+      date: attendanceSessions.occurredAt,
+      count: count(),
+    })
+    .from(attendanceEntries)
+    .innerJoin(attendanceSessions, eq(attendanceEntries.sessionId, attendanceSessions.id))
+    .where(
+      and(
+        eq(attendanceEntries.organizationId, organizationId),
+        gte(attendanceSessions.occurredAt, weekStart),
+        lte(attendanceSessions.occurredAt, weekEnd),
+        or(eq(attendanceEntries.status, "present"), eq(attendanceEntries.status, "served"))
+      )
+    )
+    .groupBy(attendanceSessions.occurredAt)
+    .orderBy(attendanceSessions.occurredAt);
+}
+
+async function getWeeklyServiceAttendanceRows(
+  organizationId: string,
+  weekStart: Date,
+  weekEnd: Date
+): Promise<WeeklyCountRow[]> {
+  return db
+    .select({
+      date: serviceRuns.serviceAt,
+      count: count(),
+    })
+    .from(serviceAssignments)
+    .innerJoin(serviceRuns, eq(serviceAssignments.serviceRunId, serviceRuns.id))
+    .where(
+      and(
+        eq(serviceAssignments.organizationId, organizationId),
+        gte(serviceRuns.serviceAt, weekStart),
+        lte(serviceRuns.serviceAt, weekEnd),
+        sql`${serviceAssignments.checkedInAt} is not null`
+      )
+    )
+    .groupBy(serviceRuns.serviceAt)
+    .orderBy(serviceRuns.serviceAt);
+}
 
 /**
  * Aggregated dashboard data for the Grace AI + Ministry dashboards
@@ -111,36 +214,41 @@ export async function getGraceDashboardData(orgId: string) {
     .orderBy(pipelineStages.order)
     .limit(4);
 
-  // Weekly attendance from appointments (last 7 days)
+  // Weekly attendance from first-class attendance plus service check-ins.
   const now = new Date();
   const weekStart = startOfWeek(now);
   const weekEnd = endOfWeek(now);
-  
-  const weeklyAttendance = await db.select({
-    date: appointments.dateTime,
-    count: count(),
-  }).from(appointments)
-    .where(
-      and(
-        eq(appointments.organizationId, parsedOrgId),
-        gte(appointments.dateTime, weekStart),
-        lte(appointments.dateTime, weekEnd)
-      )
-    )
-    .groupBy(appointments.dateTime)
-    .orderBy(appointments.dateTime);
+
+  const [weeklyAttendance, weeklyServiceAttendance] = await Promise.all([
+    getWeeklyAttendanceRows(parsedOrgId, weekStart, weekEnd).catch((error) => {
+      if (isAttendanceSetupRequiredError(error)) {
+        return [];
+      }
+
+      throw error;
+    }),
+    getWeeklyServiceAttendanceRows(parsedOrgId, weekStart, weekEnd).catch((error) => {
+      if (isServiceCheckinSetupRequiredError(error)) {
+        return [];
+      }
+
+      throw error;
+    }),
+  ]);
 
   // Format attendance by day of week
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const attendanceByDay = daysOfWeek.map((day, index) => {
-    const dayData = weeklyAttendance.find(a => {
-      const d = new Date(a.date);
-      return d.getDay() === index;
-    });
+    const combinedCount =
+      weeklyAttendance
+        .filter((entry) => new Date(entry.date).getDay() === index)
+        .reduce((sum, entry) => sum + Number(entry.count ?? 0), 0) +
+      weeklyServiceAttendance
+        .filter((entry) => new Date(entry.date).getDay() === index)
+        .reduce((sum, entry) => sum + Number(entry.count ?? 0), 0);
     return {
       day,
-      // Never fabricate analytics data; show zero when no records exist.
-      count: Number(dayData?.count ?? 0),
+      count: combinedCount,
     };
   });
 
@@ -279,5 +387,287 @@ export async function getGraceDashboardData(orgId: string) {
     },
     recentBroadcasts,
     activities: activities.slice(0, 6),
+  };
+}
+
+type StaffCareQueueItem = {
+  id: string;
+  source:
+    | "prayer_request"
+    | "conversation"
+    | "task"
+    | "appointment"
+    | "grace_followup"
+    | "grace_handoff";
+  title: string;
+  detail: string;
+  status: string;
+  priority: "low" | "medium" | "high" | "urgent";
+  dueAt: Date | null;
+  contactId: string | null;
+  contactName: string | null;
+  href: string;
+  createdAt: Date;
+  ownerId: string | null;
+  overdue: boolean;
+};
+
+const PRIORITY_RANK: Record<StaffCareQueueItem["priority"], number> = {
+  urgent: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+};
+
+function formatContactName(contact: { firstName: string | null; lastName: string | null } | null) {
+  if (!contact) return null;
+  const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim();
+  return fullName || null;
+}
+
+export async function getStaffCareQueue(orgId: string) {
+  const parsedOrgId = organizationIdSchema.parse(orgId);
+  await requireOrgMembership(parsedOrgId);
+  const now = new Date();
+  const soonWindow = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+
+  const [
+    prayerRows,
+    conversationRows,
+    taskRows,
+    appointmentRows,
+    followupRows,
+    handoffRows,
+  ] = await Promise.all([
+    db
+      .select({
+        request: prayerRequests,
+        contact: {
+          id: churchContacts.id,
+          firstName: churchContacts.firstName,
+          lastName: churchContacts.lastName,
+        },
+      })
+      .from(prayerRequests)
+      .leftJoin(churchContacts, eq(prayerRequests.contactId, churchContacts.id))
+      .where(
+        and(
+          eq(prayerRequests.organizationId, parsedOrgId),
+          or(eq(prayerRequests.status, "new"), eq(prayerRequests.status, "praying"))
+        )
+      )
+      .orderBy(desc(prayerRequests.updatedAt))
+      .limit(20),
+    db
+      .select({
+        conversation: conversations,
+        contact: {
+          id: churchContacts.id,
+          firstName: churchContacts.firstName,
+          lastName: churchContacts.lastName,
+        },
+      })
+      .from(conversations)
+      .leftJoin(churchContacts, eq(conversations.contactId, churchContacts.id))
+      .where(
+        and(
+          eq(conversations.organizationId, parsedOrgId),
+          or(eq(conversations.status, "open"), eq(conversations.status, "waiting"))
+        )
+      )
+      .orderBy(desc(conversations.lastMessageAt), desc(conversations.updatedAt))
+      .limit(20),
+    db
+      .select()
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.organizationId, parsedOrgId),
+          or(eq(tasks.status, "todo"), eq(tasks.status, "in_progress")),
+          lte(tasks.dueDate, now)
+        )
+      )
+      .orderBy(desc(tasks.priority), asc(tasks.dueDate))
+      .limit(20),
+    db
+      .select({
+        appointment: appointments,
+        contact: {
+          id: churchContacts.id,
+          firstName: churchContacts.firstName,
+          lastName: churchContacts.lastName,
+        },
+      })
+      .from(appointments)
+      .leftJoin(churchContacts, eq(appointments.contactId, churchContacts.id))
+      .where(
+        and(
+          eq(appointments.organizationId, parsedOrgId),
+          or(eq(appointments.status, "scheduled"), eq(appointments.status, "confirmed")),
+          lte(appointments.dateTime, soonWindow)
+        )
+      )
+      .orderBy(appointments.dateTime)
+      .limit(20),
+    db
+      .select({
+        proposal: graceFollowupProposals,
+        contact: {
+          id: churchContacts.id,
+          firstName: churchContacts.firstName,
+          lastName: churchContacts.lastName,
+        },
+      })
+      .from(graceFollowupProposals)
+      .leftJoin(churchContacts, eq(graceFollowupProposals.contactId, churchContacts.id))
+      .where(
+        and(
+          eq(graceFollowupProposals.organizationId, parsedOrgId),
+          eq(graceFollowupProposals.status, "pending")
+        )
+      )
+      .orderBy(desc(graceFollowupProposals.createdAt))
+      .limit(20),
+    db
+      .select({
+        handoff: graceHandoffs,
+        contact: {
+          id: churchContacts.id,
+          firstName: churchContacts.firstName,
+          lastName: churchContacts.lastName,
+        },
+      })
+      .from(graceHandoffs)
+      .leftJoin(churchContacts, eq(graceHandoffs.contactId, churchContacts.id))
+      .where(
+        and(
+          eq(graceHandoffs.organizationId, parsedOrgId),
+          or(eq(graceHandoffs.status, "open"), eq(graceHandoffs.status, "acknowledged"))
+        )
+      )
+      .orderBy(desc(graceHandoffs.createdAt))
+      .limit(20),
+  ]);
+
+  const items: StaffCareQueueItem[] = [
+    ...prayerRows.map(({ request, contact }): StaffCareQueueItem => ({
+      id: `prayer:${request.id}`,
+      source: "prayer_request" as const,
+      title: request.contactName || formatContactName(contact) || "Prayer request",
+      detail: request.content,
+      status: request.status,
+      priority:
+        request.urgency === "critical"
+          ? "urgent"
+          : request.urgency === "urgent"
+            ? "high"
+            : "medium",
+      dueAt: null,
+      contactId: request.contactId ?? contact?.id ?? null,
+      contactName: request.contactName || formatContactName(contact),
+      href: "/app/grace?tab=home",
+      createdAt: request.updatedAt ?? request.createdAt,
+      ownerId: null,
+      overdue: request.urgency === "critical",
+    })),
+    ...conversationRows.map(({ conversation, contact }): StaffCareQueueItem => ({
+      id: `conversation:${conversation.id}`,
+      source: "conversation" as const,
+      title: formatContactName(contact) || conversation.subject || "Conversation follow-up",
+      detail: conversation.subject || `${conversation.channel} conversation requires response`,
+      status: conversation.status,
+      priority: conversation.status === "waiting" ? "high" : "medium",
+      dueAt: conversation.lastMessageAt ?? conversation.updatedAt ?? conversation.createdAt,
+      contactId: conversation.contactId ?? contact?.id ?? null,
+      contactName: formatContactName(contact),
+      href: `/app/grace?tab=care&conversationId=${conversation.id}`,
+      createdAt: conversation.updatedAt ?? conversation.createdAt,
+      ownerId: conversation.assigneeId ?? null,
+      overdue:
+        new Date(
+          conversation.lastMessageAt ?? conversation.updatedAt ?? conversation.createdAt
+        ).getTime() <=
+        now.getTime() - 24 * 60 * 60 * 1000,
+    })),
+    ...taskRows.map((task): StaffCareQueueItem => ({
+      id: `task:${task.id}`,
+      source: "task" as const,
+      title: task.title,
+      detail: task.description ?? "Manual follow-up task",
+      status: task.status,
+      priority: task.priority,
+      dueAt: task.dueDate ?? null,
+      contactId: null,
+      contactName: null,
+      href: "/app/tasks",
+      createdAt: task.updatedAt ?? task.createdAt,
+      ownerId: task.assigneeId ?? null,
+      overdue: Boolean(task.dueDate && new Date(task.dueDate).getTime() < now.getTime()),
+    })),
+    ...appointmentRows.map(({ appointment, contact }): StaffCareQueueItem => ({
+      id: `appointment:${appointment.id}`,
+      source: "appointment" as const,
+      title: appointment.title,
+      detail: formatContactName(contact) || appointment.type || "Pending appointment",
+      status: appointment.status,
+      priority: new Date(appointment.dateTime).getTime() < now.getTime() ? "high" : "medium",
+      dueAt: appointment.dateTime,
+      contactId: appointment.contactId ?? contact?.id ?? null,
+      contactName: formatContactName(contact),
+      href: "/app/calendar",
+      createdAt: appointment.createdAt,
+      ownerId: appointment.staffId ?? null,
+      overdue: new Date(appointment.dateTime).getTime() < now.getTime(),
+    })),
+    ...followupRows.map(({ proposal, contact }): StaffCareQueueItem => ({
+      id: `proposal:${proposal.id}`,
+      source: "grace_followup" as const,
+      title: formatContactName(contact) || proposal.subject || "Grace follow-up proposal",
+      detail: proposal.reason || proposal.messageText,
+      status: proposal.status,
+      priority:
+        proposal.reason?.includes("urgent") || proposal.reason?.includes("critical")
+          ? "high"
+          : "medium",
+      dueAt: proposal.createdAt,
+      contactId: proposal.contactId ?? contact?.id ?? null,
+      contactName: formatContactName(contact),
+      href: "/app/grace?tab=workflow",
+      createdAt: proposal.createdAt,
+      ownerId: proposal.approvedByUserId ?? null,
+      overdue: new Date(proposal.createdAt).getTime() <= now.getTime() - 24 * 60 * 60 * 1000,
+    })),
+    ...handoffRows.map(({ handoff, contact }): StaffCareQueueItem => ({
+      id: `handoff:${handoff.id}`,
+      source: "grace_handoff" as const,
+      title: formatContactName(contact) || handoff.reason.replaceAll("_", " "),
+      detail: handoff.summaryText ?? handoff.assignedTeam ?? "Human follow-up required",
+      status: handoff.status,
+      priority: handoff.status === "open" ? "high" : "medium",
+      dueAt: handoff.createdAt,
+      contactId: handoff.contactId ?? contact?.id ?? null,
+      contactName: formatContactName(contact),
+      href: "/app/grace?tab=workflow",
+      createdAt: handoff.createdAt,
+      ownerId: null,
+      overdue: new Date(handoff.createdAt).getTime() <= now.getTime() - 24 * 60 * 60 * 1000,
+    })),
+  ]
+    .sort((a, b) => {
+      const priorityDelta = PRIORITY_RANK[b.priority] - PRIORITY_RANK[a.priority];
+      if (priorityDelta !== 0) return priorityDelta;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    })
+    .slice(0, 40);
+
+  return {
+    generatedAt: now,
+    counts: {
+      total: items.length,
+      overdue: items.filter((item) => item.overdue).length,
+      urgent: items.filter((item) => item.priority === "urgent").length,
+      high: items.filter((item) => item.priority === "high").length,
+    },
+    items,
   };
 }

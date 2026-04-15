@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
   const updateWhere = vi.fn(() => ({ returning: updateReturning }));
   const updateSet = vi.fn(() => ({ where: updateWhere }));
   const update = vi.fn(() => ({ set: updateSet }));
+  const insert = vi.fn();
 
   const requireOrgMembership = vi.fn();
 
@@ -22,6 +23,7 @@ const mocks = vi.hoisted(() => {
     updateSet,
     updateWhere,
     updateReturning,
+    insert,
     requireOrgMembership,
   };
 });
@@ -30,6 +32,7 @@ vi.mock("@/db", () => ({
   db: {
     select: mocks.select,
     update: mocks.update,
+    insert: mocks.insert,
   },
 }));
 
@@ -37,7 +40,7 @@ vi.mock("../utils", () => ({
   requireOrgMembership: mocks.requireOrgMembership,
 }));
 
-import { updateConversationStatus } from "../communications";
+import { createBroadcast, updateConversationStatus } from "../communications";
 
 describe("communications actions", () => {
   beforeEach(() => {
@@ -105,5 +108,19 @@ describe("communications actions", () => {
     });
     expect(mocks.update).toHaveBeenCalledTimes(1);
     expect(mocks.updateReturning).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects non-SMS broadcast creation in beta scope", async () => {
+    await expect(
+      createBroadcast({
+        organizationId: "org_1",
+        title: "Email Blast",
+        content: "Hello church",
+        channel: "email",
+      })
+    ).rejects.toThrow("Beta broadcasts are SMS-only. Choose SMS for this broadcast.");
+
+    expect(mocks.requireOrgMembership).toHaveBeenCalledWith("org_1");
+    expect(mocks.insert).not.toHaveBeenCalled();
   });
 });

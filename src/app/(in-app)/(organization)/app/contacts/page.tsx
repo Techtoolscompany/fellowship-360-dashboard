@@ -10,7 +10,13 @@ import { toast } from "sonner";
 import { CreateContactDialog } from "@/components/dialogs/CreateContactDialog";
 import { ImportContactsDialog } from "@/components/dialogs/ImportContactsDialog";
 import useOrganization from "@/lib/organizations/useOrganization";
-import { getContacts, archiveContact, restoreContact } from "@/app/actions/contacts";
+import {
+  getContacts,
+  archiveContact,
+  restoreContact,
+  findPotentialDuplicateContacts,
+  mergeContacts,
+} from "@/app/actions/contacts";
 import {
   getMemberStatusLabel,
   getMemberStatusPluralLabel,
@@ -60,6 +66,9 @@ export default function ContactsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
+  const [duplicateGroups, setDuplicateGroups] = useState<any[]>([]);
+  const [duplicatesLoading, setDuplicatesLoading] = useState(false);
+  const [mergeBusyKey, setMergeBusyKey] = useState<string | null>(null);
 
   const fetchContacts = useCallback(async (p = page) => {
     if (!orgId) return;
@@ -89,6 +98,23 @@ export default function ContactsPage() {
     const t = setTimeout(() => fetchContacts(page), 300);
     return () => clearTimeout(t);
   }, [fetchContacts, page]);
+
+  const fetchDuplicateGroups = useCallback(async () => {
+    if (!orgId) return;
+    setDuplicatesLoading(true);
+    try {
+      const groups = await findPotentialDuplicateContacts(orgId);
+      setDuplicateGroups(groups.slice(0, 6));
+    } catch (error) {
+      console.error("Failed to load duplicate groups:", error);
+    } finally {
+      setDuplicatesLoading(false);
+    }
+  }, [orgId]);
+
+  useEffect(() => {
+    void fetchDuplicateGroups();
+  }, [fetchDuplicateGroups]);
 
   const handleArchiveToggle = async (id: string, currentlyInactive: boolean) => {
     const confirmed = confirm(
@@ -124,6 +150,40 @@ export default function ContactsPage() {
     a.download = `contacts-${new Date().toISOString().slice(0,10)}.csv`;
     a.click();
     toast.success("Exported successfully");
+  };
+
+  const handleMergeGroup = async (group: any) => {
+    if (group.reason === "name") {
+      toast.error("Name-only matches need manual review before merge");
+      return;
+    }
+
+    const [primary, ...duplicates] = group.contacts;
+    if (!primary || duplicates.length === 0) {
+      return;
+    }
+
+    const confirmed = confirm(
+      `Merge ${duplicates.length} duplicate contact${duplicates.length === 1 ? "" : "s"} into ${primary.firstName} ${primary.lastName}?`
+    );
+    if (!confirmed) return;
+
+    setMergeBusyKey(group.key);
+    try {
+      for (const duplicate of duplicates) {
+        await mergeContacts({
+          primaryContactId: primary.id,
+          duplicateContactId: duplicate.id,
+        });
+      }
+      toast.success("Duplicate contacts merged");
+      await Promise.all([fetchContacts(), fetchDuplicateGroups()]);
+    } catch (error) {
+      console.error("Failed to merge duplicate group:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to merge duplicate group");
+    } finally {
+      setMergeBusyKey(null);
+    }
   };
 
   const filtered = contacts;
@@ -187,6 +247,74 @@ export default function ContactsPage() {
           </div>
         ))}
       </div>
+
+      {(duplicatesLoading || duplicateGroups.length > 0) && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/20 p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">Duplicate Review Queue</h2>
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+                Review likely duplicate contacts before imports turn into long-term data debt.
+              </p>
+            </div>
+            <button
+              onClick={() => void fetchDuplicateGroups()}
+              className="px-3 py-2 rounded-lg border border-amber-200 dark:border-amber-800 text-xs font-bold text-amber-800 dark:text-amber-200 hover:bg-amber-100/70 dark:hover:bg-amber-900/30 transition-colors"
+            >
+              Refresh Review
+            </button>
+          </div>
+
+          {duplicatesLoading ? (
+            <div className="flex items-center gap-2 text-sm text-amber-800 dark:text-amber-200">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Scanning for duplicate groups...
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {duplicateGroups.map((group) => {
+                const primary = group.contacts[0];
+                const autoMergeAllowed = group.reason !== "name";
+                return (
+                  <div
+                    key={`${group.reason}:${group.key}`}
+                    className="rounded-xl border border-amber-200/70 dark:border-amber-900/40 bg-white/70 dark:bg-slate-900/40 p-4"
+                  >
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                            {group.reason} match
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            Keep {primary.firstName} {primary.lastName} as primary
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-700 dark:text-slate-300 mt-2">
+                          {group.contacts
+                            .map((contact: any) => `${contact.firstName} ${contact.lastName}`)
+                            .join(" • ")}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => void handleMergeGroup(group)}
+                        disabled={!autoMergeAllowed || mergeBusyKey === group.key}
+                        className="px-3 py-2 rounded-lg bg-amber-600 text-white text-xs font-bold hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {mergeBusyKey === group.key
+                          ? "Merging..."
+                          : autoMergeAllowed
+                            ? "Merge Group"
+                            : "Manual Review"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
@@ -411,7 +539,9 @@ export default function ContactsPage() {
         open={showImportModal}
         onOpenChange={setShowImportModal}
         organizationId={orgId ?? ""}
-        onSuccess={fetchContacts}
+        onSuccess={async () => {
+          await Promise.all([fetchContacts(), fetchDuplicateGroups()]);
+        }}
       />
     </div>
   );

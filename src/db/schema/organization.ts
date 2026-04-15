@@ -26,6 +26,14 @@ export const onboardingDataSchema = z.object({
   teamSize: z.number().default(0),
   industry: z.string().default(""),
   howDidYouHearAboutUs: z.string().default(""),
+  churchDenomination: z.string().default(""),
+  churchCity: z.string().default(""),
+  primaryContactName: z.string().default(""),
+  primaryContactEmail: z.string().default(""),
+  primaryContactPhone: z.string().default(""),
+  averageWeeklyAttendance: z.number().default(0),
+  primaryGoal: z.string().default(""),
+  notes: z.string().default(""),
 });
 
 export type OnboardingData = z.infer<typeof onboardingDataSchema>;

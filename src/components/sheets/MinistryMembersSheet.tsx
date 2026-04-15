@@ -65,7 +65,7 @@ export function MinistryMembersSheet({
     resolver: zodResolver(addMemberSchema),
     defaultValues: {
       contactId: "",
-      role: "Member",
+      role: "member",
     },
   });
 
@@ -123,6 +123,12 @@ export function MinistryMembersSheet({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-xl overflow-y-auto bg-slate-50/50 dark:bg-slate-950 p-0 border-l border-slate-200 dark:border-slate-800">
+        <SheetHeader className="sr-only">
+          <SheetTitle>{ministryName || "Ministry members"}</SheetTitle>
+          <SheetDescription>
+            Manage members assigned to this ministry.
+          </SheetDescription>
+        </SheetHeader>
         
         {/* Sticky Header Hero Section */}
         <div className="sticky top-0 z-10">
@@ -200,7 +206,7 @@ export function MinistryMembersSheet({
                         <FormLabel className="text-xs font-bold text-slate-500 uppercase tracking-wide">Role</FormLabel>
                         <FormControl>
                           <Input 
-                            placeholder="e.g. Leader, Volunteer, Member" 
+                            placeholder="leader, co_leader, member, or volunteer" 
                             {...field} 
                             className="bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus:ring-lime-500/20 focus:border-lime-500" 
                           />

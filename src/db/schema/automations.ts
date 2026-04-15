@@ -12,6 +12,10 @@ import {
 import { organizations } from "./organization";
 import { churchContacts } from "./church-contacts";
 import { users } from "./user";
+import type {
+  AutomationRecommendedChannel,
+  AutomationTemplateCategory,
+} from "@/lib/automations/types";
 
 export const automationModeEnum = pgEnum("automation_mode", ["template", "builder"]);
 
@@ -126,6 +130,58 @@ export const automationWorkflows = pgTable(
       table.organizationId,
       table.templateKey,
       table.mode
+    ),
+  })
+);
+
+export const automationTemplateCatalog = pgTable(
+  "automation_template_catalog",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    category: text("category")
+      .$type<AutomationTemplateCategory>()
+      .notNull()
+      .default("Follow-Up"),
+    status: automationStatusEnum("status").notNull().default("draft"),
+    triggerEvent: text("trigger_event").notNull().default(""),
+    recommendedChannels: jsonb("recommended_channels")
+      .$type<AutomationRecommendedChannel[]>()
+      .notNull()
+      .default(["sms"]),
+    definitionJson: jsonb("definition_json")
+      .$type<AutomationDefinitionPayload>()
+      .notNull()
+      .default({ version: 1, nodes: [] }),
+    validationErrors: jsonb("validation_errors").$type<string[]>().notNull().default([]),
+    createdByUserId: text("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    publishedByUserId: text("published_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    publishedAt: timestamp("published_at", { mode: "date" }),
+    lastValidatedAt: timestamp("last_validated_at", { mode: "date" }),
+  },
+  (table) => ({
+    keyUnique: uniqueIndex("automation_template_catalog_key_uidx").on(table.key),
+    statusIdx: index("automation_template_catalog_status_idx").on(table.status, table.updatedAt),
+    publishedIdx: index("automation_template_catalog_published_idx").on(
+      table.status,
+      table.publishedAt
     ),
   })
 );

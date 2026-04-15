@@ -6,6 +6,7 @@ export * from "./user";
 export * from "./plans";
 export * from "./paypal";
 export * from "./church-contacts";
+export * from "./attendance";
 export * from "./pipeline";
 export * from "./communications";
 export * from "./ministries";

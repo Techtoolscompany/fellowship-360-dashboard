@@ -11,6 +11,8 @@ import {
 import { eq, asc, and, desc, inArray } from "drizzle-orm";
 import { isFirstTimeGuestStageName } from "@/lib/pipeline/first-time-guest";
 import { auditAction, requireOrgMembership } from "./utils";
+import { compatibleChurchContactSelect } from "@/lib/contacts/projection";
+import { createOrReuseGuestFollowupGoal } from "@/lib/grace/workflows/guest-followup";
 import * as z from "zod";
 
 const organizationIdSchema = z.string().trim().min(1);
@@ -72,7 +74,7 @@ async function assertAssigneeInOrganization(organizationId: string, assigneeId: 
   }
 }
 
-async function enqueueFirstTimeGuestAppointment(params: {
+export async function enqueueFirstTimeGuestAppointment(params: {
   organizationId: string;
   pipelineItemId: string;
   contactId: string;
@@ -80,6 +82,7 @@ async function enqueueFirstTimeGuestAppointment(params: {
   stageName: string;
   trigger: "created" | "stage_changed";
   occurredAt: Date;
+  requestedByUserId?: string | null;
 }) {
   if (!isFirstTimeGuestStageName(params.stageName)) {
     return;
@@ -102,20 +105,46 @@ async function enqueueFirstTimeGuestAppointment(params: {
       occurredAt: occurredAtIso,
     });
 
-    await inngest.send({
-      id: idempotencyKey,
-      name: INNGEST_EVENTS.GRACE_FIRST_TIME_GUEST_APPOINTMENT_REQUESTED,
-      data: {
-        organizationId: params.organizationId,
+    const objectiveText = `Follow up with first-time guest from ${params.stageName} for pipeline item ${params.pipelineItemId}.`;
+    const workflow = await createOrReuseGuestFollowupGoal({
+      organizationId: params.organizationId,
+      sourceChannel: "in_app",
+      requestedByUserId: params.requestedByUserId ?? null,
+      objectiveText,
+      context: {
         pipelineItemId: params.pipelineItemId,
         contactId: params.contactId,
         stageId: params.stageId,
         stageName: params.stageName,
+        contactName: "",
+        firstName: "",
+        recipientPhone: null,
+        recipientEmail: null,
+        channel: "sms",
+        churchName: "",
+        sessionId: "",
+        conversationId: "",
+        sequenceStartedAtIso: occurredAtIso,
         trigger: params.trigger,
-        occurredAt: occurredAtIso,
-        idempotencyKey,
       },
     });
+
+    if (workflow.created) {
+      await inngest.send({
+        id: idempotencyKey,
+        name: INNGEST_EVENTS.GRACE_FIRST_TIME_GUEST_APPOINTMENT_REQUESTED,
+        data: {
+          organizationId: params.organizationId,
+          pipelineItemId: params.pipelineItemId,
+          contactId: params.contactId,
+          stageId: params.stageId,
+          stageName: params.stageName,
+          trigger: params.trigger,
+          occurredAt: occurredAtIso,
+          idempotencyKey,
+        },
+      });
+    }
   } catch (error) {
     console.error("[Pipeline] Failed to enqueue first-time guest appointment sequence", {
       pipelineItemId: params.pipelineItemId,
@@ -139,7 +168,7 @@ export async function getPipelineData(orgId: string) {
   const items = await db
     .select({
       item: pipelineItems,
-      contact: churchContacts,
+      contact: compatibleChurchContactSelect,
     })
     .from(pipelineItems)
     .leftJoin(churchContacts, eq(pipelineItems.contactId, churchContacts.id))
@@ -197,6 +226,7 @@ export async function updateItemStage(
       stageName: stage.name,
       trigger: "stage_changed",
       occurredAt: item.updatedAt ?? new Date(),
+      requestedByUserId: userId,
     });
   }
 

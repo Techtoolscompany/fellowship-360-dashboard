@@ -19,12 +19,13 @@ type ContactDateLike = Date | string | null | undefined;
 
 export type DittofeedContactSnapshot = Omit<
   typeof churchContacts.$inferSelect,
-  "createdAt" | "updatedAt" | "dateOfBirth" | "firstVisitDate"
+  "createdAt" | "updatedAt" | "dateOfBirth" | "firstVisitDate" | "memberSinceDate"
 > & {
   createdAt: ContactDateLike;
   updatedAt: ContactDateLike;
   dateOfBirth: ContactDateLike;
   firstVisitDate: ContactDateLike;
+  memberSinceDate: ContactDateLike;
 };
 
 function getString(value: unknown) {
@@ -65,6 +66,7 @@ function buildContactTraits(params: {
     organizationId: params.organizationId,
     organizationExternalId: params.organizationExternalId ?? params.organizationId,
     firstVisitDate: toIsoString(params.contact.firstVisitDate),
+    memberSinceDate: toIsoString(params.contact.memberSinceDate),
     dateOfBirth: toIsoString(params.contact.dateOfBirth),
     createdAt: toIsoString(params.contact.createdAt),
     updatedAt: toIsoString(params.contact.updatedAt),

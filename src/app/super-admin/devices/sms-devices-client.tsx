@@ -118,6 +118,9 @@ type OrganizationsResponse = {
 type StatusFilter = "all" | "active" | "inactive";
 type AssignmentFilter = "all" | "assigned" | "unassigned";
 
+const EMPTY_DEVICES: DeviceRow[] = [];
+const EMPTY_ORGANIZATIONS: OrganizationsResponse["organizations"] = [];
+
 function formatLastSeen(value: string | Date | null) {
   if (!value) return "Never checked in";
   const date = new Date(value);
@@ -165,12 +168,38 @@ function handleUnauthorizedResponse(response: Response) {
   return false;
 }
 
+function buildAssignmentDrafts(rows: DeviceRow[]) {
+  const nextDrafts: Record<string, string> = {};
+
+  for (const row of rows) {
+    nextDrafts[row.device.id] = row.device.organizationId ?? "unassigned";
+  }
+
+  return nextDrafts;
+}
+
+function assignmentDraftsEqual(
+  left: Record<string, string>,
+  right: Record<string, string>
+) {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+
+  return leftKeys.every((key) => left[key] === right[key]);
+}
+
 export default function SMSDevicesClient() {
   const {
     data: devicesResponse,
     isLoading,
     mutate,
-  } = useSWR<DevicesResponse>("/api/sms-gateway/devices");
+  } = useSWR<DevicesResponse>("/api/sms-gateway/devices", {
+    refreshInterval: 10000,
+  });
   const { data: organizationsResponse } = useSWR<OrganizationsResponse>(
     "/api/super-admin/organizations?page=1&limit=200"
   );
@@ -192,15 +221,15 @@ export default function SMSDevicesClient() {
   const [issuingEnrollmentForDeviceId, setIssuingEnrollmentForDeviceId] = useState<string | null>(null);
   const [enrollmentDialog, setEnrollmentDialog] = useState<EnrollmentDialogState | null>(null);
 
-  const devices = devicesResponse?.devices ?? [];
-  const organizations = organizationsResponse?.organizations ?? [];
+  const devices = devicesResponse?.devices ?? EMPTY_DEVICES;
+  const organizations = organizationsResponse?.organizations ?? EMPTY_ORGANIZATIONS;
 
   useEffect(() => {
-    const nextDrafts: Record<string, string> = {};
-    for (const row of devices) {
-      nextDrafts[row.device.id] = row.device.organizationId ?? "unassigned";
-    }
-    setAssignmentDrafts(nextDrafts);
+    const nextDrafts = buildAssignmentDrafts(devices);
+
+    setAssignmentDrafts((current) =>
+      assignmentDraftsEqual(current, nextDrafts) ? current : nextDrafts
+    );
   }, [devices]);
 
   useEffect(() => {
@@ -467,8 +496,8 @@ export default function SMSDevicesClient() {
 
       toast.success(
         payload.queuedCount === 1
-          ? "Test SMS queued"
-          : `Queued ${payload.queuedCount ?? 0} test messages`
+          ? "Test SMS queued. Tap Sync Now on the gateway phone if it does not send within a few seconds."
+          : `Queued ${payload.queuedCount ?? 0} test messages. Tap Sync Now on the gateway phone if they do not send within a few seconds.`
       );
       await mutate();
     } catch (requestError) {
@@ -717,11 +746,11 @@ export default function SMSDevicesClient() {
       <Sheet open={!!selectedRow} onOpenChange={(open) => !open && setSelectedDeviceId(null)}>
         <SheetContent
           side="right"
-          className="w-full border-l-slate-200/80 bg-slate-50/95 p-0 sm:max-w-xl dark:border-l-slate-700/80 dark:bg-slate-950/95"
+          className="w-full overflow-hidden border-l-slate-200/80 bg-slate-50/95 p-0 sm:max-w-xl dark:border-l-slate-700/80 dark:bg-slate-950/95"
         >
           {selectedRow ? (
             <>
-              <SheetHeader className="border-b border-slate-200/70 px-6 py-5 dark:border-slate-800/80">
+              <SheetHeader className="shrink-0 border-b border-slate-200/70 px-6 py-5 dark:border-slate-800/80">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={selectedRow.device.isActive ? "default" : "destructive"}>
                     {selectedRow.device.isActive ? "Healthy" : "Needs attention"}
@@ -736,7 +765,7 @@ export default function SMSDevicesClient() {
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="space-y-6 px-6 py-6">
+              <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-6">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-[18px] border border-slate-200/70 bg-white/80 p-4 dark:border-slate-800 dark:bg-slate-900/60">
                     <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
@@ -885,7 +914,7 @@ export default function SMSDevicesClient() {
                   </div>
                   <div className="mt-3 space-y-4">
                     <p className="text-sm text-slate-500 dark:text-slate-400">
-                      Queue a real outbound text through this church’s assigned gateway to confirm routing and delivery.
+                      Queue a real outbound text through this church’s assigned gateway. The phone sends it after its next push wake-up or when you tap Sync Now in the Fellowship 360 Gateway app.
                     </p>
                     <div className="space-y-2">
                       <Input
@@ -921,7 +950,7 @@ export default function SMSDevicesClient() {
                           ? "Assign the device to a church before sending a test."
                           : !selectedRow.device.isActive
                             ? "Reactivate the device before sending a test."
-                            : "This uses the same first-party SMS path as Grace and automations."}
+                            : "This queues the text on the server first, then the enrolled phone pulls or receives it and sends it through the SIM."}
                       </div>
                       <Button
                         onClick={() => void handleSendTestSms(selectedRow.device.id)}
@@ -954,7 +983,7 @@ export default function SMSDevicesClient() {
                 </div>
               </div>
 
-              <SheetFooter className="border-t border-slate-200/70 bg-white/80 px-6 py-4 dark:border-slate-800/80 dark:bg-slate-950/75">
+              <SheetFooter className="shrink-0 border-t border-slate-200/70 bg-white/80 px-6 py-4 dark:border-slate-800/80 dark:bg-slate-950/75">
                 <div className="flex w-full flex-col gap-3">
                   <div className="flex flex-wrap items-center gap-2">
                     {selectedRow.device.organizationId ? (

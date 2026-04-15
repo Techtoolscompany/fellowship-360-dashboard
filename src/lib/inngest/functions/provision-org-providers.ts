@@ -5,12 +5,13 @@ import { aiConfig } from "@/db/schema/ai-config";
 import { providerConfigs } from "@/db/schema/provider-configs";
 import { organizations } from "@/db/schema/organization";
 import { eq } from "drizzle-orm";
+import { PRIMARY_SMS_GATEWAY_PROVIDER } from "@/lib/sms-gateway/provider";
 
 /**
  * Auto-provisions provider configs when a new church org is created.
  * All keys come from agency env vars — churches never see them.
  *
- * SMS stays inactive (deviceId: null) until super admin assigns a TextBee device.
+ * SMS stays inactive until super admin assigns a Fellowship 360 Gateway device.
  * Voice/AI activate immediately with shared agency keys.
  */
 export const provisionOrgProviders = inngest.createFunction(
@@ -51,7 +52,7 @@ export const provisionOrgProviders = inngest.createFunction(
       const providers = [
         {
           channel: "sms",
-          provider: "textbee",
+          provider: PRIMARY_SMS_GATEWAY_PROVIDER,
           mode: "agency_managed" as const,
           isActive: false, // inactive until device assigned
           configJson: { deviceId: null },
@@ -78,13 +79,6 @@ export const provisionOrgProviders = inngest.createFunction(
         {
           channel: "email",
           provider: "sendgrid",
-          mode: "disabled" as const,
-          isActive: false,
-          configJson: {},
-        },
-        {
-          channel: "voice",
-          provider: "elevenlabs",
           mode: "disabled" as const,
           isActive: false,
           configJson: {},

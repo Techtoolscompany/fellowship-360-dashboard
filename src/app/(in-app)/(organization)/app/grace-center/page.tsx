@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function GraceCenterPage() {
-  redirect("/app/grace?tab=center");
+  redirect("/app/grace?tab=workflow");
 }

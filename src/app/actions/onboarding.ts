@@ -3,19 +3,22 @@
 import { db } from "@/db";
 import {
   organizations,
+  onboardingDataSchema,
   organizationMemberships,
   providerConfigs,
-  gracePolicyConfigs,
   churchContacts,
+  families,
   conversations,
   tasks,
   appointments,
   messageTemplates,
   pipelineStages,
   serviceTemplates,
+  serviceRuns,
   smsDevices,
   graceAuditStream,
   automationWorkflows,
+  aiConfig,
 } from "@/db/schema";
 import { and, count, eq, gte, ne, sql } from "drizzle-orm";
 import { auditAction, requireOrgMembership } from "./utils";
@@ -23,8 +26,9 @@ import { createServiceTemplate } from "./operations";
 import { seedDefaultStages } from "./pipeline";
 import { seedDemoData } from "./seed";
 import { redactProviderConfigForClient } from "@/lib/grace/providers/security";
-import { getAutomationTemplateByKey } from "@/lib/automations/templates";
+import { getResolvedAutomationTemplateByKey } from "@/lib/automations/template-registry";
 import { createAutomationWorkflow, installAutomationTemplate } from "./automations";
+import { findPotentialDuplicateContacts } from "./contacts";
 import * as z from "zod";
 
 type OnboardingStepStatus = "done" | "pending";
@@ -109,13 +113,13 @@ const PROVIDER_HEALTH_TARGETS = [
     key: "ai-gemini",
     channel: "ai",
     provider: "gemini",
-    title: "Gemini AI Brain",
+    title: "Gemini AI + Voice",
     required: true,
   },
   {
-    key: "sms-textbee",
+    key: "sms-fellowship-gateway",
     channel: "sms",
-    provider: "textbee",
+    provider: "fellowship_gateway",
     title: "Fellowship 360 Gateway SMS",
     required: true,
   },
@@ -124,13 +128,6 @@ const PROVIDER_HEALTH_TARGETS = [
     channel: "email",
     provider: "sendgrid",
     title: "SendGrid Email",
-    required: false,
-  },
-  {
-    key: "voice-elevenlabs",
-    channel: "voice",
-    provider: "elevenlabs",
-    title: "ElevenLabs Voice",
     required: false,
   },
   {
@@ -211,6 +208,25 @@ const guidedSequenceOnboardingSchema = z.object({
   blueprintId: z.string().trim().min(1),
   installTemplate: z.boolean().optional(),
 });
+const optionalTrimmedStringSchema = z.string().trim().optional();
+const updateOnboardingProfileSchema = z.object({
+  organizationId: organizationIdSchema,
+  churchName: optionalTrimmedStringSchema,
+  denomination: optionalTrimmedStringSchema,
+  city: optionalTrimmedStringSchema,
+  website: optionalTrimmedStringSchema,
+  orgType: onboardingDataSchema.shape.orgType.optional(),
+  teamSize: z.coerce.number().int().nonnegative().optional(),
+  averageWeeklyAttendance: z.coerce.number().int().nonnegative().optional(),
+  industry: optionalTrimmedStringSchema,
+  howDidYouHearAboutUs: optionalTrimmedStringSchema,
+  primaryContactName: optionalTrimmedStringSchema,
+  primaryContactEmail: optionalTrimmedStringSchema,
+  primaryContactPhone: optionalTrimmedStringSchema,
+  primaryGoal: optionalTrimmedStringSchema,
+  notes: optionalTrimmedStringSchema,
+  onboardingDone: z.boolean().optional(),
+});
 
 function toStep(
   id: string,
@@ -254,6 +270,177 @@ function toRuntimeStats(rows: Array<{ status: string }>) {
   return { events, errors, errorRatePercent };
 }
 
+export async function updateOrganizationOnboardingProfile(input: {
+  organizationId: string;
+  churchName?: string;
+  denomination?: string;
+  city?: string;
+  website?: string;
+  orgType?: "startup" | "enterprise" | "agency" | "individual";
+  teamSize?: number;
+  averageWeeklyAttendance?: number;
+  industry?: string;
+  howDidYouHearAboutUs?: string;
+  primaryContactName?: string;
+  primaryContactEmail?: string;
+  primaryContactPhone?: string;
+  primaryGoal?: string;
+  notes?: string;
+  onboardingDone?: boolean;
+}) {
+  const parsed = updateOnboardingProfileSchema.parse(input);
+  const { userId } = await requireOrgMembership(parsed.organizationId, "admin");
+
+  const [organization] = await db
+    .select({
+      id: organizations.id,
+      name: organizations.name,
+      onboardingDone: organizations.onboardingDone,
+      onboardingData: organizations.onboardingData,
+    })
+    .from(organizations)
+    .where(eq(organizations.id, parsed.organizationId))
+    .limit(1);
+
+  if (!organization) {
+    throw new Error("Organization not found.");
+  }
+
+  const currentOnboardingData = onboardingDataSchema.parse(organization.onboardingData ?? {});
+  const nextOnboardingData = onboardingDataSchema.parse({
+    ...currentOnboardingData,
+    ...(parsed.churchName !== undefined ? { orgName: parsed.churchName } : {}),
+    ...(parsed.website !== undefined ? { orgWebsite: parsed.website } : {}),
+    ...(parsed.orgType !== undefined ? { orgType: parsed.orgType } : {}),
+    ...(parsed.teamSize !== undefined ? { teamSize: parsed.teamSize } : {}),
+    ...(parsed.averageWeeklyAttendance !== undefined
+      ? { averageWeeklyAttendance: parsed.averageWeeklyAttendance }
+      : {}),
+    ...(parsed.industry !== undefined ? { industry: parsed.industry } : {}),
+    ...(parsed.howDidYouHearAboutUs !== undefined
+      ? { howDidYouHearAboutUs: parsed.howDidYouHearAboutUs }
+      : {}),
+    ...(parsed.denomination !== undefined
+      ? { churchDenomination: parsed.denomination }
+      : {}),
+    ...(parsed.city !== undefined ? { churchCity: parsed.city } : {}),
+    ...(parsed.primaryContactName !== undefined
+      ? { primaryContactName: parsed.primaryContactName }
+      : {}),
+    ...(parsed.primaryContactEmail !== undefined
+      ? { primaryContactEmail: parsed.primaryContactEmail }
+      : {}),
+    ...(parsed.primaryContactPhone !== undefined
+      ? { primaryContactPhone: parsed.primaryContactPhone }
+      : {}),
+    ...(parsed.primaryGoal !== undefined ? { primaryGoal: parsed.primaryGoal } : {}),
+    ...(parsed.notes !== undefined ? { notes: parsed.notes } : {}),
+  });
+
+  await db
+    .update(organizations)
+    .set({
+      ...(parsed.churchName !== undefined && parsed.churchName.length > 0
+        ? { name: parsed.churchName }
+        : {}),
+      ...(parsed.onboardingDone !== undefined ? { onboardingDone: parsed.onboardingDone } : {}),
+      onboardingData: nextOnboardingData,
+      updatedAt: new Date(),
+    })
+    .where(eq(organizations.id, parsed.organizationId));
+
+  const [existingAiConfig] = await db
+    .select({ id: aiConfig.id })
+    .from(aiConfig)
+    .where(eq(aiConfig.organizationId, parsed.organizationId))
+    .limit(1);
+
+  const resolvedChurchName =
+    parsed.churchName?.trim() || nextOnboardingData.orgName || organization.name;
+
+  if (existingAiConfig) {
+    await db
+      .update(aiConfig)
+      .set({
+        ...(parsed.churchName !== undefined ? { churchName: resolvedChurchName } : {}),
+        ...(parsed.denomination !== undefined
+          ? { churchDenomination: parsed.denomination || null }
+          : {}),
+        ...(parsed.city !== undefined ? { churchCity: parsed.city || null } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(aiConfig.id, existingAiConfig.id));
+  } else if (
+    parsed.churchName !== undefined ||
+    parsed.denomination !== undefined ||
+    parsed.city !== undefined
+  ) {
+    await db.insert(aiConfig).values({
+      organizationId: parsed.organizationId,
+      churchName: resolvedChurchName,
+      churchDenomination: parsed.denomination ?? null,
+      churchCity: parsed.city ?? null,
+    });
+  }
+
+  const updatedFields = Object.entries(parsed)
+    .filter(([key, value]) => key !== "organizationId" && value !== undefined)
+    .map(([key]) => key);
+
+  await auditAction({
+    organizationId: parsed.organizationId,
+    userId,
+    actionType: "update",
+    entityName: "organization_onboarding_profile",
+    entityId: parsed.organizationId,
+    details: {
+      updatedFields,
+      onboardingDone:
+        parsed.onboardingDone !== undefined
+          ? parsed.onboardingDone
+          : organization.onboardingDone ?? false,
+    },
+  });
+
+  return {
+    organizationId: parsed.organizationId,
+    churchName: resolvedChurchName,
+    onboardingDone:
+      parsed.onboardingDone !== undefined
+        ? parsed.onboardingDone
+        : organization.onboardingDone ?? false,
+    onboardingData: nextOnboardingData,
+    updatedFields,
+  };
+}
+
+export async function getOrganizationOnboardingProfile(organizationId: string) {
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
+
+  const [organization] = await db
+    .select({
+      id: organizations.id,
+      name: organizations.name,
+      onboardingDone: organizations.onboardingDone,
+      onboardingData: organizations.onboardingData,
+    })
+    .from(organizations)
+    .where(eq(organizations.id, parsedOrganizationId))
+    .limit(1);
+
+  if (!organization) {
+    return null;
+  }
+
+  return {
+    id: organization.id,
+    name: organization.name,
+    onboardingDone: organization.onboardingDone ?? false,
+    onboardingData: onboardingDataSchema.parse(organization.onboardingData ?? {}),
+  };
+}
+
 export async function getLaunchReadiness(organizationId: string): Promise<LaunchReadiness> {
   const parsedOrganizationId = organizationIdSchema.parse(organizationId);
   await requireOrgMembership(parsedOrganizationId);
@@ -262,14 +449,15 @@ export async function getLaunchReadiness(organizationId: string): Promise<Launch
     [organization],
     [membershipStats],
     activeChannelsRows,
-    [policyConfig],
     [contactStats],
+    [familyStats],
     [conversationStats],
     [taskStats],
     [appointmentStats],
     [messageTemplateStats],
     [pipelineStageStats],
     [serviceTemplateStats],
+    [serviceRunStats],
   ] = await Promise.all([
     db
       .select({
@@ -300,19 +488,13 @@ export async function getLaunchReadiness(organizationId: string): Promise<Launch
         )
       ),
     db
-      .select({
-        approvalsEnabled: gracePolicyConfigs.approvalsEnabled,
-        autoEscalateOnEmergency: gracePolicyConfigs.autoEscalateOnEmergency,
-        highRiskTools: gracePolicyConfigs.highRiskTools,
-        allowedPublicTools: gracePolicyConfigs.allowedPublicTools,
-      })
-      .from(gracePolicyConfigs)
-      .where(eq(gracePolicyConfigs.organizationId, parsedOrganizationId))
-      .limit(1),
-    db
       .select({ total: count() })
       .from(churchContacts)
       .where(eq(churchContacts.organizationId, parsedOrganizationId)),
+    db
+      .select({ total: count() })
+      .from(families)
+      .where(eq(families.organizationId, parsedOrganizationId)),
     db
       .select({ total: count() })
       .from(conversations)
@@ -337,25 +519,29 @@ export async function getLaunchReadiness(organizationId: string): Promise<Launch
       .select({ total: count() })
       .from(serviceTemplates)
       .where(eq(serviceTemplates.organizationId, parsedOrganizationId)),
+    db
+      .select({ total: count() })
+      .from(serviceRuns)
+      .where(eq(serviceRuns.organizationId, parsedOrganizationId)),
   ]);
+
+  const duplicateGroups = await findPotentialDuplicateContacts(parsedOrganizationId);
 
   const activeChannels = Array.from(new Set(activeChannelsRows.map((row) => row.channel)));
   const hasSms = activeChannels.includes("sms");
-  const hasEmail = activeChannels.includes("email");
-  const hasVoice = activeChannels.includes("voice");
 
   const profileDone = Boolean(organization?.name?.trim());
-  const channelsDone = hasSms && (hasEmail || hasVoice);
+  const peopleImportDone = Number(contactStats?.total ?? 0) >= 10;
+  const householdCleanupDone =
+    Number(contactStats?.total ?? 0) === 0 ||
+    (Number(familyStats?.total ?? 0) >= 1 && duplicateGroups.length === 0);
+  const providerReadinessDone = hasSms;
   const rolesDone = Number(membershipStats?.members ?? 0) >= 2 && Number(membershipStats?.admins ?? 0) >= 1;
-  const escalationDone = Boolean(
-    policyConfig?.approvalsEnabled &&
-      policyConfig?.autoEscalateOnEmergency &&
-      (policyConfig.allowedPublicTools ?? []).includes("handoff.transfer")
-  );
-  const starterTemplatesDone =
+  const templateInstallDone =
     Number(messageTemplateStats?.total ?? 0) >= 4 &&
     Number(pipelineStageStats?.total ?? 0) >= 4 &&
     Number(serviceTemplateStats?.total ?? 0) >= 1;
+  const firstLiveServiceDone = Number(serviceRunStats?.total ?? 0) >= 1;
   const sampleDataDone =
     Number(contactStats?.total ?? 0) >= 10 &&
     Number(conversationStats?.total ?? 0) >= 3 &&
@@ -372,10 +558,26 @@ export async function getLaunchReadiness(organizationId: string): Promise<Launch
       true
     ),
     toStep(
-      "channels",
-      "Channels Configuration",
-      "Enable SMS and at least one additional channel (email or voice).",
-      channelsDone,
+      "people_import",
+      "CSV People Import",
+      "Import household-aware people data so Grace and the staff CRM start from one shared record.",
+      peopleImportDone,
+      "/app/contacts",
+      true
+    ),
+    toStep(
+      "household_cleanup",
+      "Household Cleanup & Dedupe Review",
+      "Assign households and clear likely duplicate contacts before beta traffic starts.",
+      householdCleanupDone,
+      "/app/contacts",
+      true
+    ),
+    toStep(
+      "provider_readiness",
+      "Provider Readiness",
+      "Confirm SMS routing and provider health before outreach workflows are turned on.",
+      providerReadinessDone,
       "/app/settings/integrations",
       true
     ),
@@ -388,19 +590,19 @@ export async function getLaunchReadiness(organizationId: string): Promise<Launch
       true
     ),
     toStep(
-      "escalation",
-      "Escalation Policy",
-      "Enable approvals and emergency auto-escalation policy for Grace.",
-      escalationDone,
-      "/app/settings/grace",
+      "template_install",
+      "Workflow Template Install",
+      "Install starter message templates, pipeline stages, and service templates for beta operations.",
+      templateInstallDone,
+      "/app/get-started",
       true
     ),
     toStep(
-      "starter_templates",
-      "Starter Templates",
-      "Install default pipeline stages, message templates, and service templates.",
-      starterTemplatesDone,
-      "/app/get-started",
+      "first_live_service",
+      "First Live Service Date",
+      "Create the first live service run so Sunday staffing and attendance flows can be validated.",
+      firstLiveServiceDone,
+      "/app/services",
       true
     ),
     toStep(
@@ -420,19 +622,27 @@ export async function getLaunchReadiness(organizationId: string): Promise<Launch
     ),
     toBlockingAction(
       steps[1],
-      "Without channels, Grace cannot reliably run outreach and follow-up automation."
+      "Without people import, the staff team has no shared system of record."
     ),
     toBlockingAction(
       steps[2],
-      "Without team roles, ownership and approvals become a bottleneck."
+      "Without household cleanup and duplicate review, follow-up and donor history drift across records."
     ),
     toBlockingAction(
       steps[3],
-      "Without escalation policy, high-risk actions are not safely governed."
+      "Without SMS provider readiness, outreach and volunteer confirmations will stall."
     ),
     toBlockingAction(
       steps[4],
-      "Without starter templates, onboarding velocity and repeatable workflows remain low."
+      "Without team roles, ownership and approvals become a bottleneck."
+    ),
+    toBlockingAction(
+      steps[5],
+      "Without installed templates, beta churches will fall back to ad hoc processes."
+    ),
+    toBlockingAction(
+      steps[6],
+      "Without a first live service date, Sunday ops and attendance cannot be validated."
     ),
   ].filter((item): item is BlockingAction => Boolean(item));
 
@@ -586,7 +796,7 @@ export async function getProviderHealthChecks(organizationId: string) {
       }
     }
 
-    if (target.key === "sms-textbee" && row && row.mode === "agency_managed") {
+    if (target.key === "sms-fellowship-gateway" && row && row.mode === "agency_managed") {
       if (!smsDevice || !smsDevice.isActive) {
         status = "critical";
         summary = "Agency-managed SMS device is missing or offline.";
@@ -734,7 +944,7 @@ export async function startGuidedSequenceOnboarding(input: {
     )
     .limit(1);
 
-  const template = getAutomationTemplateByKey(blueprint.templateKey);
+  const template = await getResolvedAutomationTemplateByKey(blueprint.templateKey);
   const builderWorkflow =
     existingBuilder ??
     (await createAutomationWorkflow({
@@ -832,6 +1042,22 @@ export async function installStarterTemplates(organizationId: string) {
       category: "Newsletter",
       channel: "email" as const,
       variables: ["churchName", "weeklyHighlights"],
+    },
+    {
+      name: "First-Time Giver Thank You",
+      content:
+        "Hi {firstName}, thank you for your first gift to {churchName}. We are grateful for your generosity and are praying for you this week.",
+      category: "Donor Care",
+      channel: "sms" as const,
+      variables: ["firstName", "churchName"],
+    },
+    {
+      name: "Lapsed Giver Check-In",
+      content:
+        "Hi {firstName}, this is {churchName}. We appreciate your past generosity and wanted to check in. How can we pray for you this week?",
+      category: "Donor Care",
+      channel: "sms" as const,
+      variables: ["firstName", "churchName"],
     },
   ];
 

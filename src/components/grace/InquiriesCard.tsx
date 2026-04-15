@@ -76,7 +76,7 @@ const InquiriesCard = ({ data }: { data?: ConversationData }) => {
           </div>
 
           <Link
-            href="/app/grace?tab=inbox"
+            href="/app/grace?tab=care"
             className="flex items-center gap-1 mt-auto"
             style={{
               fontSize: "13px",

@@ -1,10 +1,15 @@
 import { db } from "@/db";
+import { graceMessages } from "@/db/schema/grace-messages";
 import { graceSessions } from "@/db/schema/grace-sessions";
 import { gracePolicyConfigs } from "@/db/schema/grace-policy-configs";
 import { and, eq } from "drizzle-orm";
 import { runClawRouter } from "../router";
 import { matchOrCreateContact } from "../contact-matcher";
 import type { GraceActorType, GraceChannel, OrgPolicyOverride } from "../types";
+
+function shouldPersistGraceTurn(channel: GraceChannel) {
+  return channel === "in_app" || channel === "voice" || channel === "voice_internal";
+}
 
 export async function getOrCreateGraceSession(params: {
   organizationId: string;
@@ -67,6 +72,7 @@ export async function runGraceMessage(params: {
   sessionId?: string;
   userId?: string;
   contactId?: string | null;
+  originSurface?: "onboarding";
 }) {
   // Derive actorType from channel if not explicitly provided
   const actorType: GraceActorType =
@@ -86,6 +92,26 @@ export async function runGraceMessage(params: {
     loadOrgPolicy(params.organizationId),
   ]);
 
+  if (shouldPersistGraceTurn(params.channel) && params.message.trim().length > 0) {
+    try {
+      await db.insert(graceMessages).values({
+        organizationId: params.organizationId,
+        sessionId: session.id,
+        contactId: session.contactId ?? null,
+        direction: "inbound",
+        channel: params.channel,
+        messageText: params.message.trim(),
+        metadataJson: {
+          source: "grace_runtime",
+          actorType,
+          originSurface: params.originSurface ?? null,
+        },
+      });
+    } catch (error) {
+      console.error("[Grace runtime] Failed to persist inbound message:", error);
+    }
+  }
+
   const routerResult = await runClawRouter({
     message: params.message,
     state: (session.stateJson as Record<string, unknown>) ?? {},
@@ -96,6 +122,7 @@ export async function runGraceMessage(params: {
       actorType,
       userId: params.userId,
       contactId: session.contactId,
+      originSurface: params.originSurface,
       policy: orgPolicy,
     },
   });
@@ -108,6 +135,30 @@ export async function runGraceMessage(params: {
       finalSummary: routerResult.response,
     })
     .where(eq(graceSessions.id, session.id));
+
+  if (shouldPersistGraceTurn(params.channel) && routerResult.response.trim().length > 0) {
+    try {
+      await db.insert(graceMessages).values({
+        organizationId: params.organizationId,
+        sessionId: session.id,
+        contactId: session.contactId ?? null,
+        direction: "outbound",
+        channel: params.channel,
+        messageText: routerResult.response.trim(),
+        metadataJson: {
+          source: "grace_runtime",
+          actorType,
+          intent: routerResult.intent,
+          actionOutcomesCount: routerResult.actionOutcomes.length,
+          workflowDecisionType: routerResult.workflowDecision?.decisionType ?? null,
+          workflowKey: routerResult.workflowDecision?.workflowKey ?? null,
+          workflowStartStatus: routerResult.workflowStart?.status ?? null,
+        },
+      });
+    } catch (error) {
+      console.error("[Grace runtime] Failed to persist outbound message:", error);
+    }
+  }
 
   // ── Contact matching for public sessions ──
   // When the LLM extracts caller identifiers, attempt to match to an existing
@@ -145,6 +196,14 @@ export async function runGraceMessage(params: {
     intent: routerResult.intent,
     proposedActions: routerResult.proposedActions,
     actionOutcomes: routerResult.actionOutcomes,
+    workflowDecision: routerResult.workflowDecision ?? null,
+    workflowStart: routerResult.workflowStart ?? null,
+    availabilityStatus: routerResult.availabilityStatus,
+    availabilityMessage: routerResult.availabilityMessage ?? null,
     contactMatch: matchResult,
+    // Agentic reasoning trace
+    reasoning: routerResult.reasoning ?? null,
+    reasoningSteps: routerResult.reasoningSteps ?? null,
+    iterationCount: routerResult.iterationCount ?? null,
   };
 }

@@ -4,7 +4,25 @@ import { db } from "@/db";
 import { ministries, ministryMembers, churchContacts } from "@/db/schema";
 import { eq, desc, sql, and } from "drizzle-orm";
 import { requireOrgMembership, auditAction } from "./utils";
+import { compatibleChurchContactSelect } from "@/lib/contacts/projection";
 import * as z from "zod";
+
+const MINISTRY_ROLE_VALUES = ["leader", "co_leader", "member", "volunteer"] as const;
+
+function normalizeMinistryRole(role?: string | null) {
+  if (!role?.trim()) {
+    return "member" as const;
+  }
+
+  const normalized = role.trim().toLowerCase().replace(/\s+/g, "_");
+  if (MINISTRY_ROLE_VALUES.includes(normalized as (typeof MINISTRY_ROLE_VALUES)[number])) {
+    return normalized as (typeof MINISTRY_ROLE_VALUES)[number];
+  }
+
+  throw new Error(
+    `Invalid ministry role. Use one of: ${MINISTRY_ROLE_VALUES.join(", ")}.`
+  );
+}
 
 export async function getMinistries(orgId: string) {
   await requireOrgMembership(orgId);
@@ -27,7 +45,7 @@ export async function getMinistryMembers(ministryId: string) {
   await requireOrgMembership(min.organizationId);
 
   return await db
-    .select({ member: ministryMembers, contact: churchContacts })
+    .select({ member: ministryMembers, contact: compatibleChurchContactSelect })
     .from(ministryMembers)
     .leftJoin(churchContacts, eq(ministryMembers.contactId, churchContacts.id))
     .where(eq(ministryMembers.ministryId, ministryId));
@@ -140,7 +158,7 @@ export async function addMinistryMember(
     .values({
       ministryId: parsed.ministryId,
       contactId: parsed.contactId,
-      role: (parsed.role as any) ?? "member",
+      role: normalizeMinistryRole(parsed.role),
     })
     .returning();
 
@@ -150,7 +168,7 @@ export async function addMinistryMember(
     actionType: "create",
     entityName: "ministry_member",
     entityId: member.id,
-    details: { contactId: parsed.contactId, role: parsed.role }
+    details: { contactId: parsed.contactId, role: member.role }
   });
 
   return member;

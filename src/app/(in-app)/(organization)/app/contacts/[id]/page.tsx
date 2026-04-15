@@ -105,6 +105,8 @@ export default function ContactProfilePage() {
           ? new Date(profile.contact.dateOfBirth).toISOString().split("T")[0] : "",
         firstVisitDate: profile.contact.firstVisitDate
           ? new Date(profile.contact.firstVisitDate).toISOString().split("T")[0] : "",
+        memberSinceDate: profile.contact.memberSinceDate
+          ? new Date(profile.contact.memberSinceDate).toISOString().split("T")[0] : "",
         notes: profile.contact.notes ?? "",
       });
     }
@@ -124,6 +126,9 @@ export default function ContactProfilePage() {
         phone:        editForm.phone || null,
         memberStatus: editForm.memberStatus as any,
         source:       editForm.source as any,
+        dateOfBirth:  editForm.dateOfBirth ? new Date(editForm.dateOfBirth) : null,
+        firstVisitDate: editForm.firstVisitDate ? new Date(editForm.firstVisitDate) : null,
+        memberSinceDate: editForm.memberSinceDate ? new Date(editForm.memberSinceDate) : null,
         notes:        editForm.notes || null,
       });
       toast.success("Contact updated");
@@ -196,24 +201,31 @@ export default function ContactProfilePage() {
 
   const {
     contact,
+    household,
+    tags,
     donations,
     appointments,
     prayer,
     volunteer,
     shifts,
     ministries: contactMinistries,
+    attendanceSummary,
+    careSummary,
+    financeSummary,
+    timeline,
   } = profile;
   const fullName   = `${contact.firstName} ${contact.lastName}`;
   const initials   = `${contact.firstName?.[0] ?? ""}${contact.lastName?.[0] ?? ""}`.toUpperCase();
   const statusLabel = STATUS_CONFIG[contact.memberStatus ?? "visitor"] ?? "Visitor";
 
-  const totalGiving = donations.reduce((s, d) => s + Number(d.amount ?? 0), 0);
+  const totalGiving = financeSummary?.totalGiving ?? donations.reduce((s, d) => s + Number(d.amount ?? 0), 0);
   const totalVolunteerHours = shifts.reduce(
     (sum, shift) => sum + Number(shift.hours ?? 0),
     0
   );
   const openPrayerCount = prayer.filter((row) => row.status !== "answered").length;
   const answeredPrayerCount = prayer.filter((row) => row.status === "answered").length;
+  const memberSince = contact.memberSinceDate ?? contact.createdAt;
 
   const upcomingAppts = appointments.filter(a =>
     new Date(a.dateTime) >= new Date() && a.status !== "cancelled"
@@ -240,7 +252,7 @@ export default function ContactProfilePage() {
                   </span>
                   <span className="text-sm text-slate-500 flex items-center gap-1">
                     <span className="material-symbols-outlined text-sm">calendar_today</span>
-                    Member since {contact.createdAt ? new Date(contact.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'Unknown'}
+                    Member since {memberSince ? new Date(memberSince).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'Unknown'}
                   </span>
                 </div>
               </div>
@@ -304,7 +316,16 @@ export default function ContactProfilePage() {
                 </div>
                 <div>
                   <p className="text-xs text-slate-500">Join Date</p>
-                  <p className="text-sm font-medium">{contact.createdAt ? fmtDate(contact.createdAt) : "—"}</p>
+                  <p className="text-sm font-medium">{memberSince ? fmtDate(memberSince) : "—"}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-slate-50 dark:bg-slate-800 rounded-lg text-slate-500">
+                  <span className="material-symbols-outlined text-base">event_available</span>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">First Visit</p>
+                  <p className="text-sm font-medium">{contact.firstVisitDate ? fmtDate(contact.firstVisitDate) : "—"}</p>
                 </div>
               </div>
               <div className="flex items-start gap-3">
@@ -316,7 +337,51 @@ export default function ContactProfilePage() {
                   <p className="text-sm font-medium capitalize">{(contact.source ?? "walk_in").replaceAll("_", " ")}</p>
                 </div>
               </div>
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-slate-50 dark:bg-slate-800 rounded-lg text-slate-500">
+                  <span className="material-symbols-outlined text-base">sell</span>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Tags</p>
+                  <p className="text-sm font-medium">
+                    {tags.length > 0 ? tags.map((tag: { tag: string }) => tag.tag).join(", ") : "—"}
+                  </p>
+                </div>
+              </div>
             </div>
+          </section>
+
+          <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
+            <h3 className="font-bold text-lg mb-4">Household</h3>
+            {household ? (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Family</p>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">{household.family.name}</p>
+                </div>
+                <div className="space-y-2">
+                  {household.members.map((member: any) => (
+                    <div key={member.id} className="rounded-lg border border-slate-100 dark:border-slate-800 p-3 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-slate-900 dark:text-white">
+                          {member.firstName} {member.lastName}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {STATUS_CONFIG[member.memberStatus] ?? getMemberStatusLabel(member.memberStatus)}
+                        </p>
+                      </div>
+                      {member.id === contact.id ? (
+                        <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-[#84cc16]/10 text-[#84cc16]">
+                          Current
+                        </span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">No household assigned yet.</p>
+            )}
           </section>
 
           <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
@@ -344,6 +409,28 @@ export default function ContactProfilePage() {
               )}
             </div>
           </section>
+
+          <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
+            <h3 className="font-bold text-lg mb-4">Care Queue Snapshot</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Open Prayer</p>
+                <p className="text-xl font-bold text-slate-900 dark:text-white">{careSummary.openPrayer}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Open Conversations</p>
+                <p className="text-xl font-bold text-slate-900 dark:text-white">{careSummary.openConversations}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Pending Appointments</p>
+                <p className="text-xl font-bold text-slate-900 dark:text-white">{careSummary.pendingAppointments}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Grace Follow-Up</p>
+                <p className="text-xl font-bold text-slate-900 dark:text-white">{careSummary.pendingGraceFollowups}</p>
+              </div>
+            </div>
+          </section>
         </div>
 
         <div className="lg:col-span-2 space-y-8">
@@ -357,6 +444,10 @@ export default function ContactProfilePage() {
                 <div>
                   <p className="text-xs text-slate-500 uppercase font-bold tracking-wider">Total Given</p>
                   <p className="text-2xl font-bold text-[#84cc16]">{fmt$(totalGiving)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase font-bold tracking-wider">Pledges</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{financeSummary.activePledges}</p>
                 </div>
               </div>
             </div>
@@ -394,6 +485,37 @@ export default function ContactProfilePage() {
           </section>
 
           <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[#84cc16]">how_to_reg</span>
+                  Attendance Summary
+                </h3>
+                <p className="text-sm text-slate-500">Worship, ministry, and serving activity</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Last Recorded</p>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                  {attendanceSummary.lastRecordedAt ? fmtDate(attendanceSummary.lastRecordedAt) : "—"}
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { label: "Worship", value: attendanceSummary.worship },
+                { label: "Ministry", value: attendanceSummary.ministry },
+                { label: "Serving", value: attendanceSummary.serving },
+                { label: "Total", value: attendanceSummary.total },
+              ].map((item) => (
+                <div key={item.label} className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">{item.label}</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-white">{item.value}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
             <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
               <span className="material-symbols-outlined text-[#84cc16]">groups</span>
               Ministries
@@ -423,6 +545,35 @@ export default function ContactProfilePage() {
               </div>
             ) : (
               <p className="text-sm text-slate-500">No ministry memberships yet.</p>
+            )}
+          </section>
+
+          <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
+            <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+              <span className="material-symbols-outlined text-[#84cc16]">timeline</span>
+              Unified Timeline
+            </h3>
+            {timeline.length > 0 ? (
+              <div className="space-y-3">
+                {timeline.slice(0, 10).map((item: any) => (
+                  <div key={item.id} className="rounded-lg border border-slate-100 dark:border-slate-800 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white">{item.title}</p>
+                        <p className="text-xs text-slate-500 mt-1 line-clamp-2">{item.detail || "—"}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-xs font-semibold text-slate-500">{fmtDate(item.occurredAt)}</p>
+                        <p className="text-[10px] uppercase tracking-wide text-slate-400 mt-1">
+                          {String(item.type).replaceAll("_", " ")}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">No timeline activity yet.</p>
             )}
           </section>
 
@@ -534,6 +685,7 @@ export default function ContactProfilePage() {
                  <Field label="Date of Birth"   type="date" value={editForm.dateOfBirth    ?? ""} onChange={v => setEditForm(p => ({ ...p, dateOfBirth: v }))} />
                  <Field label="First Visit"     type="date" value={editForm.firstVisitDate ?? ""} onChange={v => setEditForm(p => ({ ...p, firstVisitDate: v }))} />
                </div>
+               <Field label="Member Since" type="date" value={editForm.memberSinceDate ?? ""} onChange={v => setEditForm(p => ({ ...p, memberSinceDate: v }))} />
             </div>
 
             <div className="space-y-4">

@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { db } from "@/db";
+import { organizations } from "@/db/schema/organization";
 import {
   consumeSmsGatewayEnrollmentToken,
   SmsGatewayAuthError,
@@ -15,10 +18,21 @@ const enrollSchema = z.object({
   pendingLimit: z.number().int().min(1).max(200).optional(),
 });
 
-function serializeDevice(device: Awaited<ReturnType<typeof consumeSmsGatewayEnrollmentToken>>["device"]) {
+async function serializeDevice(
+  device: Awaited<ReturnType<typeof consumeSmsGatewayEnrollmentToken>>["device"]
+) {
+  const [organization] = device.organizationId
+    ? await db
+        .select({ name: organizations.name })
+        .from(organizations)
+        .where(eq(organizations.id, device.organizationId))
+        .limit(1)
+    : [];
+
   return {
     id: device.id,
     organizationId: device.organizationId,
+    organizationName: organization?.name ?? null,
     deviceName: device.deviceName,
     phoneNumber: device.phoneNumber,
     isActive: device.isActive,
@@ -45,7 +59,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({
-      device: serializeDevice(device),
+      device: await serializeDevice(device),
       authToken,
       pendingMessages,
     });

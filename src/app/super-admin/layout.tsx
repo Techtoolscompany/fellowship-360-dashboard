@@ -52,10 +52,10 @@ const navigation: Array<{
     detail: "Church records",
   },
   {
-    name: "Bulk Deploy",
-    href: "/super-admin/automations/deploy",
+    name: "Automations",
+    href: "/super-admin/automations",
     icon: Rocket,
-    detail: "Workflow rollout",
+    detail: "Templates and rollout",
     permission: "deploy_automations",
   },
   {

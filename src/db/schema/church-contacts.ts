@@ -58,6 +58,7 @@ export const churchContacts = pgTable("church_contact", {
   avatarUrl: text("avatar_url"),
   dateOfBirth: timestamp("date_of_birth", { mode: "date" }),
   firstVisitDate: timestamp("first_visit_date", { mode: "date" }),
+  memberSinceDate: timestamp("member_since_date", { mode: "date" }),
   notes: text("notes"),
   organizationId: text("organization_id")
     .notNull()

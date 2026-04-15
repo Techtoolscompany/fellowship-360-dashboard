@@ -56,6 +56,74 @@ export const dispatchAutomationsOnContactCreated = inngest.createFunction(
   }
 );
 
+export const dispatchAutomationsOnContactMemberCreated = inngest.createFunction(
+  {
+    id: "automation-dispatch-contact-member-created",
+    retries: INNGEST_RETRY_PROFILES.STANDARD,
+    idempotency: "event.data.idempotencyKey",
+  },
+  { event: INNGEST_EVENTS.CONTACT_MEMBER_CREATED },
+  async ({ event, step, logger }) => {
+    const result = await step.run("dispatch-automations", async () =>
+      dispatchFromEvent({
+        organizationId: event.data.organizationId,
+        triggerEvent: INNGEST_EVENTS.CONTACT_MEMBER_CREATED,
+        contactId: event.data.contactId,
+        metadata: {
+          memberStatus: event.data.memberStatus,
+          occurredAt: event.data.occurredAt,
+          source: event.data.source,
+          eventIdempotencyKey: event.data.idempotencyKey,
+        },
+      })
+    );
+
+    logger.info("Automation dispatch complete", {
+      event: INNGEST_EVENTS.CONTACT_MEMBER_CREATED,
+      organizationId: event.data.organizationId,
+      dispatched: result.dispatched,
+    });
+
+    return result;
+  }
+);
+
+export const dispatchAutomationsOnAppointmentScheduled = inngest.createFunction(
+  {
+    id: "automation-dispatch-appointment-scheduled",
+    retries: INNGEST_RETRY_PROFILES.STANDARD,
+    idempotency: "event.data.idempotencyKey",
+  },
+  { event: INNGEST_EVENTS.APPOINTMENT_SCHEDULED },
+  async ({ event, step, logger }) => {
+    const result = await step.run("dispatch-automations", async () =>
+      dispatchFromEvent({
+        organizationId: event.data.organizationId,
+        triggerEvent: INNGEST_EVENTS.APPOINTMENT_SCHEDULED,
+        contactId: event.data.contactId,
+        metadata: {
+          appointmentId: event.data.appointmentId,
+          staffId: event.data.staffId,
+          title: event.data.title,
+          dateTime: event.data.dateTime,
+          duration: event.data.duration,
+          type: event.data.type,
+          status: event.data.status,
+          eventIdempotencyKey: event.data.idempotencyKey,
+        },
+      })
+    );
+
+    logger.info("Automation dispatch complete", {
+      event: INNGEST_EVENTS.APPOINTMENT_SCHEDULED,
+      organizationId: event.data.organizationId,
+      dispatched: result.dispatched,
+    });
+
+    return result;
+  }
+);
+
 export const dispatchAutomationsOnFirstTimeGuestRequested = inngest.createFunction(
   {
     id: "automation-dispatch-first-time-guest",
@@ -149,6 +217,38 @@ export const dispatchAutomationsOnPrayerFollowup = inngest.createFunction(
 
     logger.info("Automation dispatch complete", {
       event: INNGEST_EVENTS.GRACE_PRAYER_REQUEST_FOLLOWUP_REQUESTED,
+      organizationId: event.data.organizationId,
+      dispatched: result.dispatched,
+    });
+
+    return result;
+  }
+);
+
+export const dispatchAutomationsOnVolunteerCreated = inngest.createFunction(
+  {
+    id: "automation-dispatch-volunteer-created",
+    retries: INNGEST_RETRY_PROFILES.STANDARD,
+    idempotency: "event.data.idempotencyKey",
+  },
+  { event: INNGEST_EVENTS.VOLUNTEER_CREATED },
+  async ({ event, step, logger }) => {
+    const result = await step.run("dispatch-automations", async () =>
+      dispatchFromEvent({
+        organizationId: event.data.organizationId,
+        triggerEvent: INNGEST_EVENTS.VOLUNTEER_CREATED,
+        contactId: event.data.contactId,
+        metadata: {
+          volunteerId: event.data.volunteerId,
+          role: event.data.role,
+          status: event.data.status,
+          eventIdempotencyKey: event.data.idempotencyKey,
+        },
+      })
+    );
+
+    logger.info("Automation dispatch complete", {
+      event: INNGEST_EVENTS.VOLUNTEER_CREATED,
       organizationId: event.data.organizationId,
       dispatched: result.dispatched,
     });

@@ -18,6 +18,10 @@ import {
   type AgencyHealthStatus,
   classifyAgencyHealthStatus,
 } from "./agency-launch-contracts";
+import {
+  getSmsGatewayProviderCandidates,
+  isSmsGatewayProvider,
+} from "@/lib/sms-gateway/provider";
 
 const MS_PER_MINUTE = 60_000;
 const HOURS_24_MS = 24 * 60 * MS_PER_MINUTE;
@@ -237,7 +241,7 @@ export function buildAgencyOrgHealthRow(input: {
     (row) => row.channel === "ai" && row.provider === "gemini"
   );
   const hasSmsProvider = providerStats.some(
-    (row) => row.channel === "sms" && row.provider === "textbee"
+    (row) => row.channel === "sms" && isSmsGatewayProvider(row.provider)
   );
   const activeSmsDevices = input.smsDevices.filter(
     (row) => row.organizationId === input.organizationId && row.isActive
@@ -473,7 +477,7 @@ export async function getAgencyHealthBoardData(
         activeAiProviders:
           sql<number>`count(*) filter (where ${providerConfigs.channel} = 'ai' and ${providerConfigs.provider} = 'gemini' and ${providerConfigs.isActive} = true and ${providerConfigs.mode} <> 'disabled')`,
         activeSmsProviders:
-          sql<number>`count(*) filter (where ${providerConfigs.channel} = 'sms' and ${providerConfigs.provider} = 'textbee' and ${providerConfigs.isActive} = true and ${providerConfigs.mode} <> 'disabled')`,
+          sql<number>`count(*) filter (where ${providerConfigs.channel} = 'sms' and ${inArray(providerConfigs.provider, getSmsGatewayProviderCandidates())} and ${providerConfigs.isActive} = true and ${providerConfigs.mode} <> 'disabled')`,
       })
       .from(providerConfigs)
       .where(inArray(providerConfigs.organizationId, organizationIds))

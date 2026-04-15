@@ -85,10 +85,22 @@ const HEADER_MAP: Record<string, keyof ImportContactRow> = {
   mobile: "phone",
   cell: "phone",
   "phone number": "phone",
+  family: "family",
+  household: "household",
+  "family name": "family",
+  "household name": "household",
+  tags: "tags",
+  tag: "tags",
   memberstatus: "memberStatus",
   member_status: "memberStatus",
   status: "memberStatus",
   source: "source",
+  firstvisitdate: "firstVisitDate",
+  first_visit_date: "firstVisitDate",
+  "first visit": "firstVisitDate",
+  membersincedate: "memberSinceDate",
+  member_since_date: "memberSinceDate",
+  "member since": "memberSinceDate",
   notes: "notes",
   note: "notes",
 };
@@ -117,15 +129,31 @@ function parseRows(raw: string[][]): ParsedRow[] {
     if (!firstName || !lastName) {
       return { ...row, firstName, lastName, _valid: false, _error: "firstName and lastName required" };
     }
-    return { firstName, lastName, email: row.email, phone: row.phone, memberStatus: row.memberStatus, source: row.source, notes: row.notes, _valid: true };
+    return {
+      firstName,
+      lastName,
+      email: row.email,
+      phone: row.phone,
+      family: row.family,
+      household: row.household,
+      tags: row.tags,
+      memberStatus: row.memberStatus,
+      source: row.source,
+      firstVisitDate: row.firstVisitDate,
+      memberSinceDate: row.memberSinceDate,
+      notes: row.notes,
+      _valid: true,
+    };
   });
 }
 
 // ── Template download ───────────────────────────────────────────────────────
 
 function downloadTemplate() {
-  const headers = "firstName,lastName,email,phone,memberStatus,source,notes";
-  const example = "Jane,Doe,jane@example.com,5551234567,new_guest,website,Visited last Sunday";
+  const headers =
+    "firstName,lastName,email,phone,household,tags,memberStatus,source,firstVisitDate,memberSinceDate,notes";
+  const example =
+    "Jane,Doe,jane@example.com,5551234567,Doe Family,\"guest,choir\",prospect,website,2026-03-22,2026-03-29,Visited last Sunday";
   const blob = new Blob([`${headers}\n${example}\n`], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

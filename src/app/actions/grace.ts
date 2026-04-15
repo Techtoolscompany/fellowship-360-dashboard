@@ -6,6 +6,7 @@ import {
   graceCalls,
   graceMessages,
   graceToolAudit,
+  graceAuditStream,
   graceKnowledge,
   graceKnowledgeVersions,
   graceApprovals,
@@ -32,6 +33,11 @@ import {
   normalizeAndEncryptProviderConfig,
   redactProviderConfigForClient,
 } from "@/lib/grace/providers/security";
+import { compatibleChurchContactSelect } from "@/lib/contacts/projection";
+import {
+  getSmsGatewayProviderCandidates,
+  isSmsGatewayProvider,
+} from "@/lib/sms-gateway/provider";
 import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 import * as z from "zod";
 
@@ -376,7 +382,7 @@ export async function getGraceCalls(organizationId: string) {
     .select({
       call: graceCalls,
       session: graceSessions,
-      contact: churchContacts,
+      contact: compatibleChurchContactSelect,
       linkedConversationId: sql<string | null>`(
         select c.id
         from conversation c
@@ -999,6 +1005,33 @@ export async function getGraceFollowupProposals(organizationId: string) {
     .orderBy(desc(graceFollowupProposals.createdAt));
 }
 
+export async function getGraceActivityFeed(organizationId: string) {
+  const parsedOrganizationId = organizationIdSchema.parse(organizationId);
+  await requireOrgMembership(parsedOrganizationId);
+  return db
+    .select({
+      id: graceAuditStream.id,
+      status: graceAuditStream.status,
+      source: graceAuditStream.source,
+      actorType: graceAuditStream.actorType,
+      channel: graceAuditStream.channel,
+      toolName: graceAuditStream.toolName,
+      actionName: graceAuditStream.actionName,
+      errorText: graceAuditStream.errorText,
+      metadataJson: graceAuditStream.metadataJson,
+      createdAt: graceAuditStream.createdAt,
+    })
+    .from(graceAuditStream)
+    .where(
+      and(
+        eq(graceAuditStream.organizationId, parsedOrganizationId),
+        eq(graceAuditStream.eventType, "action_execution")
+      )
+    )
+    .orderBy(desc(graceAuditStream.createdAt))
+    .limit(30);
+}
+
 export async function updateGraceFollowupProposalStatus(input: {
   organizationId: string;
   proposalId: string;
@@ -1358,6 +1391,10 @@ export async function upsertGraceProviderConfig(input: {
 }) {
   const parsed = upsertGraceProviderConfigSchema.parse(input);
   await requireOrgAdmin(parsed.organizationId);
+  const providerCandidates =
+    parsed.channel === "sms" && isSmsGatewayProvider(parsed.provider)
+      ? getSmsGatewayProviderCandidates(parsed.provider)
+      : [parsed.provider];
 
   const [existing] = await db
     .select()
@@ -1366,7 +1403,9 @@ export async function upsertGraceProviderConfig(input: {
       and(
         eq(providerConfigs.organizationId, parsed.organizationId),
         eq(providerConfigs.channel, parsed.channel),
-        eq(providerConfigs.provider, parsed.provider)
+        providerCandidates.length === 1
+          ? eq(providerConfigs.provider, providerCandidates[0]!)
+          : inArray(providerConfigs.provider, providerCandidates)
       )
     )
     .limit(1);
@@ -1488,7 +1527,7 @@ export async function getGracePolicyConfig(organizationId: string) {
       approvalsEnabled: true,
       autoEscalateOnEmergency: true,
       confidenceThreshold: "0.7",
-      highRiskTools: ["messages.sendSMS", "messages.sendEmail", "appointments.book", "contacts.upsert"],
+      highRiskTools: [],
       allowedPublicTools: [
         "churchInfo.search",
         "prayerRequests.create",

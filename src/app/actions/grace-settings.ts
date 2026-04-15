@@ -23,6 +23,7 @@ const aiConfigUpdateSchema = z.object({
   churchDenomination: z.string().trim().nullable().optional(),
   churchCity: z.string().trim().nullable().optional(),
   graceEnabled: z.boolean().optional(),
+  proactiveMode: z.enum(["off", "quiet", "normal"]).optional(),
   internalGraceEnabled: z.boolean().optional(),
   publicGraceEnabled: z.boolean().optional(),
   publicWidgetEnabled: z.boolean().optional(),

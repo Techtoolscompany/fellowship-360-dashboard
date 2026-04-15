@@ -434,3 +434,119 @@ export function AgentAudioVisualizerAura({
     />
   );
 }
+
+export type ManualAudioVisualizerAuraPhase =
+  | 'idle'
+  | 'connecting'
+  | 'listening'
+  | 'thinking'
+  | 'speaking'
+  | 'error';
+
+export interface ManualAudioVisualizerAuraProps {
+  size?: 'icon' | 'sm' | 'md' | 'lg' | 'xl';
+  phase?: ManualAudioVisualizerAuraPhase;
+  activityLevel?: number;
+  color?: `#${string}`;
+  themeMode?: 'dark' | 'light';
+  className?: string;
+}
+
+export function ManualAudioVisualizerAura({
+  size = 'lg',
+  phase = 'idle',
+  activityLevel = 0,
+  color,
+  themeMode = 'dark',
+  className,
+}: ManualAudioVisualizerAuraProps) {
+  const clampedActivity = Math.max(0, Math.min(1, activityLevel));
+  const resolvedColor =
+    color ??
+    (phase === 'error'
+      ? '#FB7185'
+      : phase === 'speaking'
+        ? '#34D399'
+        : '#BBFF00');
+
+  const profile = useMemo(() => {
+    if (phase === 'connecting') {
+      return {
+        speed: 26,
+        scale: 0.28,
+        amplitude: 0.5,
+        frequency: 1.05,
+        brightness: 1.9,
+        colorShift: 0.08,
+      };
+    }
+
+    if (phase === 'listening') {
+      return {
+        speed: 22 + clampedActivity * 18,
+        scale: 0.24 + clampedActivity * 0.08,
+        amplitude: 0.9 + clampedActivity * 0.5,
+        frequency: 0.72 + clampedActivity * 0.25,
+        brightness: 1.5 + clampedActivity * 0.8,
+        colorShift: 0.1,
+      };
+    }
+
+    if (phase === 'thinking') {
+      return {
+        speed: 34,
+        scale: 0.28,
+        amplitude: 0.45,
+        frequency: 1.15,
+        brightness: 2.15,
+        colorShift: 0.2,
+      };
+    }
+
+    if (phase === 'speaking') {
+      return {
+        speed: 48 + clampedActivity * 30,
+        scale: 0.29 + clampedActivity * 0.12,
+        amplitude: 0.75 + clampedActivity * 0.55,
+        frequency: 1.18 + clampedActivity * 0.3,
+        brightness: 1.7 + clampedActivity * 1.1,
+        colorShift: 0.16,
+      };
+    }
+
+    if (phase === 'error') {
+      return {
+        speed: 12,
+        scale: 0.22,
+        amplitude: 0.4,
+        frequency: 0.7,
+        brightness: 1.2,
+        colorShift: 0.04,
+      };
+    }
+
+    return {
+      speed: 12,
+      scale: 0.2,
+      amplitude: 0.75,
+      frequency: 0.55,
+      brightness: 1.05,
+      colorShift: 0.05,
+    };
+  }, [clampedActivity, phase]);
+
+  return (
+    <AuraShader
+      blur={0.18}
+      color={resolvedColor}
+      colorShift={profile.colorShift}
+      speed={profile.speed}
+      scale={profile.scale}
+      themeMode={themeMode}
+      amplitude={profile.amplitude}
+      frequency={profile.frequency}
+      brightness={profile.brightness}
+      className={cn(AgentAudioVisualizerAuraVariants({ size }), className)}
+    />
+  );
+}

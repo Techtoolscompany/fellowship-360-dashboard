@@ -279,7 +279,7 @@ export default function DonationsPage() {
             </p>
           </div>
           <Link
-            href="/app/grace?tab=command"
+            href="/app/grace?tab=home"
             className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             Ask Grace

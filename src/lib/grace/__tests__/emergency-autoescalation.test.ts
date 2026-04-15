@@ -19,6 +19,7 @@ queryMock.limit = vi.fn(() => queryMock);
 vi.mock("@/db", () => ({
   db: {
     select: vi.fn(() => queryMock),
+    insert: vi.fn(() => ({ values: vi.fn().mockResolvedValue(undefined) })),
   },
 }));
 

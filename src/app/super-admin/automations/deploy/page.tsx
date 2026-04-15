@@ -47,6 +47,8 @@ type TemplateRow = {
   category: string;
   triggerEvent: string;
   nodeCount: number;
+  source: "system" | "managed";
+  status: string;
 };
 
 type TemplatesResponse = {
@@ -57,7 +59,7 @@ type TemplatesResponse = {
 
 type DeployResult = {
   organizationId: string;
-  status: "installed" | "already_installed" | "failed";
+  status: "installed" | "updated" | "already_installed" | "failed";
   workflowId?: string;
   error?: string;
 };
@@ -75,6 +77,7 @@ export default function SuperAdminBulkDeployPage() {
   const deferredSearch = useDeferredValue(searchInput);
   const [templateKey, setTemplateKey] = useState<string>("");
   const [selectedOrgIds, setSelectedOrgIds] = useState<string[]>([]);
+  const [skipIfInstalled, setSkipIfInstalled] = useState(true);
   const [isDeploying, setIsDeploying] = useState(false);
   const [deployResponse, setDeployResponse] = useState<DeployResponse | null>(null);
 
@@ -102,16 +105,17 @@ export default function SuperAdminBulkDeployPage() {
 
   const deploySummary = useMemo(() => {
     if (!deployResponse?.results) {
-      return { installed: 0, alreadyInstalled: 0, failed: 0 };
+      return { installed: 0, updated: 0, alreadyInstalled: 0, failed: 0 };
     }
     return deployResponse.results.reduce(
       (acc, row) => {
         if (row.status === "installed") acc.installed += 1;
+        else if (row.status === "updated") acc.updated += 1;
         else if (row.status === "already_installed") acc.alreadyInstalled += 1;
         else acc.failed += 1;
         return acc;
       },
-      { installed: 0, alreadyInstalled: 0, failed: 0 }
+      { installed: 0, updated: 0, alreadyInstalled: 0, failed: 0 }
     );
   }, [deployResponse]);
 
@@ -159,7 +163,7 @@ export default function SuperAdminBulkDeployPage() {
         body: JSON.stringify({
           templateKey,
           organizationIds: selectedOrgIds,
-          skipIfInstalled: true,
+          skipIfInstalled,
         }),
       });
       const payload = (await response.json()) as DeployResponse;
@@ -197,11 +201,15 @@ export default function SuperAdminBulkDeployPage() {
         stats={[
           { label: "Templates", value: templates.length, detail: "Deployable right now" },
           { label: "Selected", value: selectedOrgIds.length, detail: "Churches queued" },
-          { label: "Last Run", value: deploySummary.installed, detail: "Fresh installs" },
+          {
+            label: "Last Run",
+            value: deploySummary.installed + deploySummary.updated,
+            detail: "Installs + updates",
+          },
         ]}
       />
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <SuperAdminMetricCard
           label="Install Success"
           value={deploySummary.installed}
@@ -214,6 +222,12 @@ export default function SuperAdminBulkDeployPage() {
           value={deploySummary.alreadyInstalled}
           detail="Skipped because already installed"
           icon={RefreshCcw}
+        />
+        <SuperAdminMetricCard
+          label="Updated"
+          value={deploySummary.updated}
+          detail="Existing installs refreshed"
+          icon={Rocket}
         />
         <SuperAdminMetricCard
           label="Failures"
@@ -252,10 +266,59 @@ export default function SuperAdminBulkDeployPage() {
           <Button variant="outline" size="sm" onClick={clearFiltered} disabled={selectedOrgIds.length === 0}>
             Clear filtered
           </Button>
+          <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+            <Checkbox
+              checked={skipIfInstalled}
+              onCheckedChange={(value) => setSkipIfInstalled(value === true)}
+            />
+            Skip installed
+          </label>
           <Badge variant="secondary">Selected: {selectedOrgIds.length}</Badge>
           {templateKey ? <Badge variant="outline">Template ready</Badge> : <Badge variant="outline">Choose template</Badge>}
         </div>
       </SuperAdminToolbar>
+
+      <SuperAdminTableShell>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Template</TableHead>
+              <TableHead>Category</TableHead>
+              <TableHead>Trigger</TableHead>
+              <TableHead>Source</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Nodes</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {templates.map((template) => (
+              <TableRow key={template.key}>
+                <TableCell>
+                  <div>
+                    <p className="font-semibold text-slate-900 dark:text-white">{template.name}</p>
+                    <p className="text-xs text-slate-500">{template.description}</p>
+                  </div>
+                </TableCell>
+                <TableCell>{template.category}</TableCell>
+                <TableCell className="text-xs text-slate-500">{template.triggerEvent}</TableCell>
+                <TableCell>
+                  <Badge variant={template.source === "managed" ? "default" : "secondary"}>
+                    {template.source}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={template.status === "published" ? "outline" : "secondary"}>
+                    {template.status}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-right text-sm font-semibold text-slate-700">
+                  {template.nodeCount}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </SuperAdminTableShell>
 
       <SuperAdminTableShell>
         <Table>
@@ -306,6 +369,7 @@ export default function SuperAdminBulkDeployPage() {
           <div className="border-b border-slate-200/80 px-6 py-4 dark:border-slate-700">
             <div className="flex flex-wrap gap-2">
               <Badge>Installed: {deploySummary.installed}</Badge>
+              <Badge variant="default">Updated: {deploySummary.updated}</Badge>
               <Badge variant="secondary">Already installed: {deploySummary.alreadyInstalled}</Badge>
               <Badge variant={deploySummary.failed > 0 ? "destructive" : "outline"}>
                 Failed: {deploySummary.failed}
@@ -331,6 +395,8 @@ export default function SuperAdminBulkDeployPage() {
                         variant={
                           row.status === "installed"
                             ? "default"
+                            : row.status === "updated"
+                              ? "default"
                             : row.status === "already_installed"
                               ? "secondary"
                               : "destructive"

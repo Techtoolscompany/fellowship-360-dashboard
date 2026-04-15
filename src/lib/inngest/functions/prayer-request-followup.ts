@@ -14,6 +14,13 @@ import {
 } from "@/db/schema";
 import sendMail from "@/lib/email/sendMail";
 import { getOrCreateGraceSession } from "@/lib/grace/runtime";
+import {
+  ensurePrayerCareWorkflowGoal,
+  finishPrayerCareWorkflowStep,
+  startPrayerCareWorkflowStep,
+  updatePrayerCareWorkflowGoal,
+  PRAYER_CARE_STEP_KEYS,
+} from "@/lib/grace/workflows/prayer-care";
 import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 import {
   buildPrayerEscalationTaskMarker,
@@ -73,6 +80,7 @@ type PreparedContext = {
   organizationId: string;
   requestId: string;
   sessionId: string;
+  workflowGoalId: string;
   conversationId: string | null;
   contactId: string | null;
   contactName: string;
@@ -86,6 +94,15 @@ type PreparedContext = {
   status: "new" | "praying" | "answered" | "archived";
   urgency: PrayerUrgency;
 };
+
+function summarizePrayerCareOutcome(params: {
+  status: "new" | "praying" | "answered" | "archived";
+  urgency: PrayerUrgency;
+  assignedTeam: string;
+  content: string;
+}) {
+  return `Prayer care workflow for ${params.assignedTeam} is ${params.status} (${params.urgency}): ${params.content}`;
+}
 
 export const prayerRequestFollowupSequence = inngest.createFunction(
   {
@@ -193,10 +210,32 @@ export const prayerRequestFollowupSequence = inngest.createFunction(
                   status: "open",
                   subject: "Prayer request care",
                 })
-                .returning({ id: conversations.id })
-            )[0]?.id ??
+          .returning({ id: conversations.id })
+        )[0]?.id ??
             null
           : null;
+
+      const workflowGoal = await ensurePrayerCareWorkflowGoal({
+        organizationId,
+        requestId: requestRow.requestId,
+        sourceChannel: channel === "sms" ? "sms_public" : "web_public",
+        triggerSource: `prayer_request_followup.${trigger}`,
+        status: requestRow.status,
+        urgency: requestRow.urgency,
+        assignedTeam: trimOrNull(requestRow.assignedTeam) ?? "Prayer Team",
+        content: requestRow.content,
+        contactId: requestRow.contactId ?? null,
+        objectiveText: summarizePrayerCareOutcome({
+          status: requestRow.status,
+          urgency: requestRow.urgency,
+          assignedTeam: trimOrNull(requestRow.assignedTeam) ?? "Prayer Team",
+          content: requestRow.content,
+        }),
+        lastDecisionSummary: `Grace prepared prayer follow-up for ${requestRow.status} prayer request.`,
+        nextCheckpointAt: requestRow.status === "new" || requestRow.status === "praying"
+          ? new Date(Date.now() + 15 * 60 * 1000)
+          : null,
+      });
 
       return {
         skip: false,
@@ -204,6 +243,7 @@ export const prayerRequestFollowupSequence = inngest.createFunction(
           organizationId,
           requestId: requestRow.requestId,
           sessionId: session.id,
+          workflowGoalId: workflowGoal.goal.id,
           conversationId,
           contactId: requestRow.contactId ?? null,
           contactName: resolvedName,
@@ -230,6 +270,47 @@ export const prayerRequestFollowupSequence = inngest.createFunction(
     }
 
     const run = prepared.context;
+    await updatePrayerCareWorkflowGoal({
+      goalId: run.workflowGoalId,
+      organizationId: run.organizationId,
+      status: "in_progress",
+      requestId: run.requestId,
+      summary: `Grace is processing prayer follow-up for ${run.assignedTeam}.`,
+      nextCheckpointAt:
+        run.status === "new" || run.status === "praying"
+          ? new Date(Date.now() + 15 * 60 * 1000)
+          : null,
+      resultJson: {
+        prayerRequestStatus: run.status,
+        urgency: run.urgency,
+        assignedTeam: run.assignedTeam,
+        conversationId: run.conversationId,
+      },
+    });
+
+    await startPrayerCareWorkflowStep({
+      goalId: run.workflowGoalId,
+      organizationId: run.organizationId,
+      stepKey: PRAYER_CARE_STEP_KEYS.contextCollection,
+      inputJson: {
+        requestId: run.requestId,
+        status: run.status,
+        urgency: run.urgency,
+        assignedTeam: run.assignedTeam,
+      },
+    });
+    await finishPrayerCareWorkflowStep({
+      goalId: run.workflowGoalId,
+      organizationId: run.organizationId,
+      stepKey: PRAYER_CARE_STEP_KEYS.contextCollection,
+      status: "completed",
+      outputJson: {
+        contactId: run.contactId,
+        conversationId: run.conversationId,
+        channel: run.channel,
+      },
+    });
+
     const ackMessageKey = `prayer-ack:${run.requestId}`;
     const ackMessageText = buildPrayerAcknowledgmentMessage({
       firstName: run.firstName,
@@ -239,6 +320,18 @@ export const prayerRequestFollowupSequence = inngest.createFunction(
     });
 
     const ackResult = await step.run("send-acknowledgment", async () => {
+      await startPrayerCareWorkflowStep({
+        goalId: run.workflowGoalId,
+        organizationId: run.organizationId,
+        stepKey: PRAYER_CARE_STEP_KEYS.sendAcknowledgment,
+        inputJson: {
+          requestId: run.requestId,
+          channel: run.channel,
+          recipientPhone: run.recipientPhone,
+          recipientEmail: run.recipientEmail,
+        },
+      });
+
       const [alreadySent] = await db
         .select({ id: graceMessages.id })
         .from(graceMessages)
@@ -281,6 +374,15 @@ export const prayerRequestFollowupSequence = inngest.createFunction(
           deliveryError = error instanceof Error ? error.message : "Email delivery failed";
         }
       } else {
+        await finishPrayerCareWorkflowStep({
+          goalId: run.workflowGoalId,
+          organizationId: run.organizationId,
+          stepKey: PRAYER_CARE_STEP_KEYS.sendAcknowledgment,
+          status: "waiting",
+          outputJson: {
+            reason: "no_recipient_channel",
+          },
+        });
         return { sent: false, reason: "no_recipient_channel" as const };
       }
 
@@ -342,6 +444,19 @@ export const prayerRequestFollowupSequence = inngest.createFunction(
         }
       }
 
+      await finishPrayerCareWorkflowStep({
+        goalId: run.workflowGoalId,
+        organizationId: run.organizationId,
+        stepKey: PRAYER_CARE_STEP_KEYS.sendAcknowledgment,
+        status: deliveryStatus === "sent" ? "completed" : "waiting",
+        outputJson: {
+          deliveryStatus,
+          deliveryError,
+          messageKey: ackMessageKey,
+        },
+        errorText: deliveryError ?? undefined,
+      });
+
       return {
         sent: deliveryStatus === "sent",
         reason:
@@ -350,7 +465,26 @@ export const prayerRequestFollowupSequence = inngest.createFunction(
     });
 
     const escalationResult = await step.run("route-escalation", async () => {
+      await startPrayerCareWorkflowStep({
+        goalId: run.workflowGoalId,
+        organizationId: run.organizationId,
+        stepKey: PRAYER_CARE_STEP_KEYS.routeEscalation,
+        inputJson: {
+          requestId: run.requestId,
+          urgency: run.urgency,
+        },
+      });
+
       if (run.urgency === "normal") {
+        await finishPrayerCareWorkflowStep({
+          goalId: run.workflowGoalId,
+          organizationId: run.organizationId,
+          stepKey: PRAYER_CARE_STEP_KEYS.routeEscalation,
+          status: "skipped",
+          outputJson: {
+            reason: "normal_urgency",
+          },
+        });
         return { escalated: false, reason: "normal_urgency" as const };
       }
 
@@ -497,11 +631,68 @@ export const prayerRequestFollowupSequence = inngest.createFunction(
         },
       });
 
+      await finishPrayerCareWorkflowStep({
+        goalId: run.workflowGoalId,
+        organizationId: run.organizationId,
+        stepKey: PRAYER_CARE_STEP_KEYS.routeEscalation,
+        status: "completed",
+        outputJson: {
+          escalated: true,
+          handoffId,
+          taskId: escalationTaskId,
+        },
+      });
+
       return {
         escalated: true,
         handoffId,
         taskId: escalationTaskId,
       };
+    });
+
+    const workflowFinalStatus =
+      run.status === "answered" || run.status === "archived"
+        ? "completed"
+        : run.urgency === "critical"
+          ? "escalated"
+          : run.urgency === "urgent"
+            ? "escalated"
+            : "waiting";
+
+    await updatePrayerCareWorkflowGoal({
+      goalId: run.workflowGoalId,
+      organizationId: run.organizationId,
+      status: workflowFinalStatus,
+      requestId: run.requestId,
+      summary:
+        workflowFinalStatus === "completed"
+          ? `Prayer request ${run.status} has been completed.`
+          : workflowFinalStatus === "escalated"
+            ? `Prayer request escalated to ${run.assignedTeam}.`
+            : `Prayer request remains active and is awaiting follow-up.`,
+      nextCheckpointAt:
+        workflowFinalStatus === "waiting"
+          ? new Date(Date.now() + 15 * 60 * 1000)
+          : null,
+      resultJson: {
+        prayerRequestStatus: run.status,
+        urgency: run.urgency,
+        escalation: escalationResult,
+        acknowledgment: ackResult,
+        conversationId: run.conversationId,
+      },
+    });
+
+    await finishPrayerCareWorkflowStep({
+      goalId: run.workflowGoalId,
+      organizationId: run.organizationId,
+      stepKey: PRAYER_CARE_STEP_KEYS.completion,
+      status: "completed",
+      outputJson: {
+        workflowStatus: workflowFinalStatus,
+        prayerRequestStatus: run.status,
+        urgency: run.urgency,
+      },
     });
 
     logger.info("Prayer request follow-up processed", {

@@ -30,6 +30,7 @@ export type BulkTemplateDeployRequest = {
 
 export type BulkTemplateDeployOrgStatus =
   | "installed"
+  | "updated"
   | "already_installed"
   | "failed";
 

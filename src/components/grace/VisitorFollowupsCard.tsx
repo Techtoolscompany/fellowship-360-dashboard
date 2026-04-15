@@ -104,7 +104,7 @@ const VisitorFollowupsCard = ({ data }: { data?: PipelineData }) => {
           </div>
 
           <Link
-            href="/app/grace?tab=visitors"
+            href="/app/grace?tab=guests"
             className="flex items-center gap-1 mt-auto"
             style={{
               fontSize: "13px",

@@ -21,6 +21,13 @@ import {
   isFirstTimeGuestStageName,
 } from "@/lib/pipeline/first-time-guest";
 import { sendOrganizationSms } from "@/lib/sms-gateway/send";
+import {
+  createOrReuseGuestFollowupGoal,
+  finishGuestFollowupStep,
+  startGuestFollowupStep,
+  updateGuestFollowupGoalState,
+  type GuestFollowupWorkflowContext,
+} from "@/lib/grace/workflows/guest-followup";
 import { inngest } from "../client";
 import { INNGEST_EVENTS } from "../events";
 import { INNGEST_RETRY_PROFILES } from "../policy";
@@ -49,6 +56,8 @@ type PreparedContext = {
   sessionId: string;
   conversationId: string;
   sequenceStartedAtIso: string;
+  workflowGoalId: string;
+  workflowCorrelationKey: string;
 };
 
 function trimOrNull(value: string | null | undefined) {
@@ -216,6 +225,30 @@ export const firstTimeGuestAppointmentSequence = inngest.createFunction(
             .returning({ id: conversations.id })
         )[0].id;
 
+      const workflowContext: GuestFollowupWorkflowContext = {
+        pipelineItemId: pipelineRow.pipelineItemId,
+        contactId: pipelineRow.contactId,
+        stageId: pipelineRow.stageId,
+        stageName: pipelineRow.stageName,
+        contactName: contactName || "Guest",
+        firstName,
+        recipientPhone,
+        recipientEmail,
+        channel,
+        churchName: trimOrNull(pipelineRow.churchName) ?? "your church",
+        sessionId: session.id,
+        conversationId,
+        sequenceStartedAtIso: toValidDate(occurredAt).toISOString(),
+        trigger,
+      };
+
+      const workflow = await createOrReuseGuestFollowupGoal({
+        organizationId,
+        sourceChannel: channel,
+        objectiveText: `Follow up with ${workflowContext.contactName} from ${workflowContext.stageName}.`,
+        context: workflowContext,
+      });
+
       return {
         skip: false,
         context: {
@@ -229,10 +262,12 @@ export const firstTimeGuestAppointmentSequence = inngest.createFunction(
           recipientPhone,
           recipientEmail,
           channel,
-          churchName: trimOrNull(pipelineRow.churchName) ?? "your church",
+          churchName: workflowContext.churchName,
           sessionId: session.id,
           conversationId,
-          sequenceStartedAtIso: toValidDate(occurredAt).toISOString(),
+          sequenceStartedAtIso: workflowContext.sequenceStartedAtIso,
+          workflowGoalId: workflow.goal.id,
+          workflowCorrelationKey: workflow.correlationKey,
         } satisfies PreparedContext,
       } as const;
     });
@@ -247,6 +282,9 @@ export const firstTimeGuestAppointmentSequence = inngest.createFunction(
     }
 
     const run = prepared.context;
+    const guestWorkflowGoalId = run.workflowGoalId;
+    const guestWorkflowCorrelationKey = run.workflowCorrelationKey;
+    const startedAt = toValidDate(run.sequenceStartedAtIso);
 
     const sendSequenceMessage = async (params: {
       stepName: string;
@@ -365,8 +403,6 @@ export const firstTimeGuestAppointmentSequence = inngest.createFunction(
 
     const hasStopSignal = async (stepName: string) =>
       step.run(stepName, async () => {
-        const sequenceStartedAt = toValidDate(run.sequenceStartedAtIso);
-
         const [inboundReply] = await db
           .select({ id: messages.id })
           .from(messages)
@@ -374,7 +410,7 @@ export const firstTimeGuestAppointmentSequence = inngest.createFunction(
             and(
               eq(messages.conversationId, run.conversationId),
               eq(messages.direction, "inbound"),
-              gte(messages.sentAt, sequenceStartedAt)
+              gte(messages.sentAt, startedAt)
             )
           )
           .limit(1);
@@ -386,7 +422,7 @@ export const firstTimeGuestAppointmentSequence = inngest.createFunction(
             and(
               eq(appointments.organizationId, run.organizationId),
               eq(appointments.contactId, run.contactId),
-              gte(appointments.createdAt, sequenceStartedAt),
+              gte(appointments.createdAt, startedAt),
               inArray(appointments.status, ACTIVE_APPOINTMENT_STATUSES)
             )
           )
@@ -395,7 +431,31 @@ export const firstTimeGuestAppointmentSequence = inngest.createFunction(
         return Boolean(inboundReply || bookedAppointment);
       });
 
-    await sendSequenceMessage({
+    await startGuestFollowupStep(guestWorkflowGoalId, "resolve_context", {
+      correlationKey: guestWorkflowCorrelationKey,
+      pipelineItemId: run.pipelineItemId,
+      stageId: run.stageId,
+      trigger,
+    });
+    await finishGuestFollowupStep({
+      goalId: guestWorkflowGoalId,
+      stepKey: "resolve_context",
+      status: "completed",
+      outputJson: {
+        contactId: run.contactId,
+        conversationId: run.conversationId,
+        sessionId: run.sessionId,
+        correlationKey: guestWorkflowCorrelationKey,
+      },
+    });
+
+    await startGuestFollowupStep(guestWorkflowGoalId, "send_initial_invite", {
+      correlationKey: guestWorkflowCorrelationKey,
+      pipelineItemId: run.pipelineItemId,
+      stageId: run.stageId,
+      trigger,
+    });
+    const initialInviteResult = await sendSequenceMessage({
       stepName: "send-initial-appointment-invite",
       reason: "step_1_initial_invite",
       messageKey: `first-time-guest-appointment:${run.pipelineItemId}:step1`,
@@ -405,13 +465,67 @@ export const firstTimeGuestAppointmentSequence = inngest.createFunction(
         churchName: run.churchName,
       }),
     });
+    await finishGuestFollowupStep({
+      goalId: guestWorkflowGoalId,
+      stepKey: "send_initial_invite",
+      status: "completed",
+      outputJson: {
+        ...initialInviteResult,
+      },
+    });
+
+    await updateGuestFollowupGoalState(guestWorkflowGoalId, {
+      status: "waiting",
+      nextRunAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    });
+    await startGuestFollowupStep(guestWorkflowGoalId, "wait_after_initial_invite", {
+      correlationKey: guestWorkflowCorrelationKey,
+    });
 
     await step.sleep("wait-24h", "24h");
     if (await hasStopSignal("check-stop-signal-after-24h")) {
+      await finishGuestFollowupStep({
+        goalId: guestWorkflowGoalId,
+        stepKey: "wait_after_initial_invite",
+        status: "completed",
+        outputJson: {
+          stopped: true,
+          reason: "guest_engaged_after_initial_invite",
+        },
+      });
+      await updateGuestFollowupGoalState(guestWorkflowGoalId, {
+        status: "completed",
+        completedAt: new Date(),
+        resultJson: {
+          status: "stopped",
+          reason: "guest_engaged_after_initial_invite",
+          correlationKey: guestWorkflowCorrelationKey,
+        },
+        nextRunAt: null,
+      });
       return { status: "stopped", reason: "guest_engaged_after_initial_invite" };
     }
+    await finishGuestFollowupStep({
+      goalId: guestWorkflowGoalId,
+      stepKey: "wait_after_initial_invite",
+      status: "completed",
+      outputJson: {
+        stopped: false,
+        reason: "wait_elapsed",
+      },
+    });
 
-    await sendSequenceMessage({
+    await updateGuestFollowupGoalState(guestWorkflowGoalId, {
+      status: "in_progress",
+      nextRunAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+    });
+    await startGuestFollowupStep(guestWorkflowGoalId, "send_reminder", {
+      correlationKey: guestWorkflowCorrelationKey,
+      pipelineItemId: run.pipelineItemId,
+      stageId: run.stageId,
+      trigger,
+    });
+    const reminderResult = await sendSequenceMessage({
       stepName: "send-appointment-invite-reminder",
       reason: "step_2_reminder_invite",
       messageKey: `first-time-guest-appointment:${run.pipelineItemId}:step2`,
@@ -421,11 +535,55 @@ export const firstTimeGuestAppointmentSequence = inngest.createFunction(
         churchName: run.churchName,
       }),
     });
+    await finishGuestFollowupStep({
+      goalId: guestWorkflowGoalId,
+      stepKey: "send_reminder",
+      status: "completed",
+      outputJson: {
+        ...reminderResult,
+      },
+    });
+
+    await updateGuestFollowupGoalState(guestWorkflowGoalId, {
+      status: "waiting",
+      nextRunAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+    });
+    await startGuestFollowupStep(guestWorkflowGoalId, "wait_after_reminder", {
+      correlationKey: guestWorkflowCorrelationKey,
+    });
 
     await step.sleep("wait-48h", "48h");
     if (await hasStopSignal("check-stop-signal-after-72h")) {
+      await finishGuestFollowupStep({
+        goalId: guestWorkflowGoalId,
+        stepKey: "wait_after_reminder",
+        status: "completed",
+        outputJson: {
+          stopped: true,
+          reason: "guest_engaged_after_reminder_invite",
+        },
+      });
+      await updateGuestFollowupGoalState(guestWorkflowGoalId, {
+        status: "completed",
+        completedAt: new Date(),
+        resultJson: {
+          status: "stopped",
+          reason: "guest_engaged_after_reminder_invite",
+          correlationKey: guestWorkflowCorrelationKey,
+        },
+        nextRunAt: null,
+      });
       return { status: "stopped", reason: "guest_engaged_after_reminder_invite" };
     }
+    await finishGuestFollowupStep({
+      goalId: guestWorkflowGoalId,
+      stepKey: "wait_after_reminder",
+      status: "completed",
+      outputJson: {
+        stopped: false,
+        reason: "wait_elapsed",
+      },
+    });
 
     const escalationResult = await step.run("create-manual-outreach-task", async () => {
       const escalationKey = `first-time-guest-appointment:${run.pipelineItemId}:manual-escalation`;
@@ -524,6 +682,41 @@ export const firstTimeGuestAppointmentSequence = inngest.createFunction(
       }
 
       return { escalated: true, reason: "manual_outreach_created" as const, taskId };
+    });
+
+    await startGuestFollowupStep(guestWorkflowGoalId, "manual_outreach", {
+      correlationKey: guestWorkflowCorrelationKey,
+      pipelineItemId: run.pipelineItemId,
+      stageId: run.stageId,
+      trigger,
+    });
+    await finishGuestFollowupStep({
+      goalId: guestWorkflowGoalId,
+      stepKey: "manual_outreach",
+      status: "completed",
+      outputJson: {
+        ...escalationResult,
+      },
+    });
+    await finishGuestFollowupStep({
+      goalId: guestWorkflowGoalId,
+      stepKey: "complete",
+      status: "completed",
+      outputJson: {
+        trigger,
+        escalation: escalationResult,
+      },
+    });
+    await updateGuestFollowupGoalState(guestWorkflowGoalId, {
+      status: "escalated",
+      completedAt: new Date(),
+      resultJson: {
+        status: "completed",
+        trigger,
+        escalation: escalationResult,
+        correlationKey: guestWorkflowCorrelationKey,
+      },
+      nextRunAt: null,
     });
 
     logger.info("First-time guest appointment sequence processed", {

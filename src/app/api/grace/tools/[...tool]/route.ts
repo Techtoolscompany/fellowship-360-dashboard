@@ -66,7 +66,7 @@ async function handler(
     tool,
     input: body.input,
     reason: "direct_tool_api_request",
-    requiresApproval: resolvedTool.requiresApproval ?? false,
+    requiresApproval: false,
   };
 
   const execution = await executePlannedActions({

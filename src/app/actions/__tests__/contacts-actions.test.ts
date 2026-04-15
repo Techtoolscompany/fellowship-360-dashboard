@@ -182,4 +182,61 @@ describe("contacts actions", () => {
     );
     expect(updateReturning).toHaveBeenCalledTimes(1);
   });
+
+  it("creates households and persists attendance-era import fields", async () => {
+    const familyInsertReturning = vi.fn().mockResolvedValueOnce([
+      {
+        id: "family_1",
+        name: "Doe Family",
+        organizationId: "org_1",
+      },
+    ]);
+    const familyInsertValues = vi.fn(() => ({ returning: familyInsertReturning }));
+
+    const contactInsertReturning = vi.fn().mockResolvedValueOnce([
+      {
+        id: "contact_3",
+        organizationId: "org_1",
+      },
+    ]);
+    const contactInsertValues = vi.fn(() => ({ returning: contactInsertReturning }));
+
+    mocks.insert
+      .mockReturnValueOnce({ values: familyInsertValues })
+      .mockReturnValueOnce({ values: contactInsertValues });
+
+    mocks.selectLimit
+      .mockResolvedValueOnce([]) // household lookup
+      .mockResolvedValueOnce([]); // existing contact lookup
+
+    const result = await importContacts("org_1", [
+      {
+        firstName: "Jordan",
+        lastName: "Doe",
+        email: "jordan@example.com",
+        household: "Doe Family",
+        firstVisitDate: "2026-03-16",
+        memberSinceDate: "2026-03-30",
+      },
+    ]);
+
+    expect(result).toMatchObject({
+      inserted: 1,
+      updated: 0,
+      failed: 0,
+    });
+    expect(familyInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org_1",
+        name: "Doe Family",
+      })
+    );
+    expect(contactInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        familyId: "family_1",
+        firstVisitDate: expect.any(Date),
+        memberSinceDate: expect.any(Date),
+      })
+    );
+  });
 });

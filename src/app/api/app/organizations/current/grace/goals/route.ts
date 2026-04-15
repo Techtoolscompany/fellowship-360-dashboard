@@ -3,6 +3,7 @@ import { z, ZodError } from "zod";
 import withOrganizationAuthRequired from "@/lib/auth/withOrganizationAuthRequired";
 import { OrganizationRole } from "@/db/schema/organization";
 import { getGraceGoals, startServiceRunAutostaffGoal } from "@/app/actions/operations";
+import { buildGraceWorkflowCardView } from "@/lib/grace/workflow-summary";
 
 const querySchema = z.object({
   status: z
@@ -18,6 +19,9 @@ const querySchema = z.object({
     .optional(),
   goalType: z
     .enum(["service_staffing", "communications_followup", "operations", "custom"])
+    .optional(),
+  workflowKey: z
+    .enum(["volunteer_staffing", "guest_followup", "prayer_care", "legacy_goal"])
     .optional(),
   serviceRunId: z.string().optional(),
 });
@@ -36,11 +40,19 @@ export const GET = withOrganizationAuthRequired(async (req, context) => {
     const parsed = querySchema.parse({
       status: url.searchParams.get("status") ?? undefined,
       goalType: url.searchParams.get("goalType") ?? undefined,
+      workflowKey: url.searchParams.get("workflowKey") ?? undefined,
       serviceRunId: url.searchParams.get("serviceRunId") ?? undefined,
     });
 
     const goals = await getGraceGoals(organization.id, parsed);
-    return NextResponse.json({ success: true, goals });
+    return NextResponse.json({
+      success: true,
+      goals: goals.map(({ goal, serviceRun }) => ({
+        goal,
+        serviceRun,
+        workflow: buildGraceWorkflowCardView(goal),
+      })),
+    });
   } catch (error) {
     if (error instanceof ZodError) {
       return NextResponse.json(

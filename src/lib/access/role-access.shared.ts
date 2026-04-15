@@ -24,7 +24,7 @@ const DEFAULT_ROLE_ACCESS: RoleAccessMatrix = {
 };
 
 const SECTION_DEFAULT_PATH: Record<AccessSection, string> = {
-  grace: "/app/grace?tab=command",
+  grace: "/app/grace?tab=home",
   people: "/app/contacts",
   tasks: "/app/tasks",
   finance: "/app/donations",
@@ -33,7 +33,7 @@ const SECTION_DEFAULT_PATH: Record<AccessSection, string> = {
   communications: "/app/conversations",
   settings: "/app/settings",
   onboarding: "/app/get-started",
-  service_ops: "/app/volunteers",
+  service_ops: "/app/services",
 };
 
 const ROUTE_ACCESS_EXACT: Array<{ path: string; section: AccessSection }> = [
@@ -65,6 +65,7 @@ const ROUTE_ACCESS_PREFIXES: Array<{ prefix: string; section: AccessSection }> =
   { prefix: "/app/seed", section: "onboarding" },
   { prefix: "/app/subscribe", section: "onboarding" },
   { prefix: "/app/volunteers", section: "service_ops" },
+  { prefix: "/app/services", section: "service_ops" },
   { prefix: "/app/ministries", section: "service_ops" },
 ];
 
@@ -131,6 +132,7 @@ export function isPathAllowed(pathname: string, allowedSections: AccessSection[]
 export function getDefaultPathForAllowedSections(allowedSections: AccessSection[]) {
   const priority: AccessSection[] = [
     "grace",
+    "service_ops",
     "people",
     "tasks",
     "communications",
@@ -138,7 +140,6 @@ export function getDefaultPathForAllowedSections(allowedSections: AccessSection[
     "finance",
     "automations",
     "reports",
-    "service_ops",
     "settings",
   ];
 
@@ -152,8 +153,8 @@ export const ACCESS_SECTION_METADATA: Record<
   { label: string; description: string }
 > = {
   grace: {
-    label: "Grace Command Center",
-    description: "AI workspace, assistant command tabs, and follow-up control.",
+    label: "Grace Workspace",
+    description: "Daily command bar, care follow-up, guests, and review work.",
   },
   people: {
     label: "People",
@@ -189,6 +190,6 @@ export const ACCESS_SECTION_METADATA: Record<
   },
   service_ops: {
     label: "Service Operations",
-    description: "Volunteer and ministry operations surfaces.",
+    description: "Services, volunteers, and ministry operations surfaces.",
   },
 };

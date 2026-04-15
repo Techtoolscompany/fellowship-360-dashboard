@@ -9,6 +9,7 @@ import {
   smsDevices,
 } from "@/db/schema";
 import { and, eq, gte, inArray } from "drizzle-orm";
+import { isSmsGatewayProvider } from "@/lib/sms-gateway/provider";
 import { buildAgencyOrgHealthRows } from "./agency-health";
 import {
   AGENCY_HEALTH_CRITICAL_ERROR_RATE_PERCENT,
@@ -91,7 +92,7 @@ function hasActiveProvider(
   return providerConfigs.some(
     (row) =>
       row.channel === channel &&
-      row.provider === provider &&
+      (channel === "sms" ? isSmsGatewayProvider(row.provider) : row.provider === provider) &&
       row.isActive &&
       row.mode !== "disabled"
   );
@@ -127,7 +128,7 @@ function buildRequiredProviderGaps(input: {
   const hasSmsProvider = hasActiveProvider(
     input.providerConfigs,
     "sms",
-    "textbee"
+    "fellowship_gateway"
   );
   const hasActiveSmsDevice = input.smsDevices.some((device) => device.isActive);
 

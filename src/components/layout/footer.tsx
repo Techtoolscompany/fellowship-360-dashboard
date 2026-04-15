@@ -104,10 +104,10 @@ export function Footer() {
             <ul className="mt-2 space-y-2 text-sm">
               <li>
                 <Link
-                  href="/app/grace?tab=center"
+                  href="/app/grace?tab=home"
                   className="text-muted-foreground hover:text-primary"
                 >
-                  Grace Center
+                  Grace
                 </Link>
               </li>
               <li>

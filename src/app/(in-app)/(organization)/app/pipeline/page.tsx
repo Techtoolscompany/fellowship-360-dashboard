@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function PipelinePage() {
-  redirect("/app/grace?tab=visitors");
+  redirect("/app/grace?tab=guests");
 }

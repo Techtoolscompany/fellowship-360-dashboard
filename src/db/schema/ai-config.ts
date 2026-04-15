@@ -11,6 +11,10 @@ export const aiConfig = pgTable("ai_config", {
   churchDenomination: text("church_denomination"),
   churchCity: text("church_city"),
   graceEnabled: boolean("grace_enabled").notNull().default(true),
+  proactiveMode: text("proactive_mode")
+    .$type<"off" | "quiet" | "normal">()
+    .notNull()
+    .default("normal"),
   internalGraceEnabled: boolean("internal_grace_enabled").notNull().default(true),
   publicGraceEnabled: boolean("public_grace_enabled").notNull().default(false),
   publicWidgetEnabled: boolean("public_widget_enabled").notNull().default(false),

@@ -110,9 +110,9 @@ const QUICK_ACTIONS: Array<{
     icon: Building2,
   },
   {
-    href: "/super-admin/automations/deploy",
-    label: "Bulk Deploy",
-    description: "Push starter workflows across churches.",
+    href: "/super-admin/automations",
+    label: "Automations",
+    description: "Author managed templates and push them across churches.",
     icon: Rocket,
     permission: "deploy_automations",
   },

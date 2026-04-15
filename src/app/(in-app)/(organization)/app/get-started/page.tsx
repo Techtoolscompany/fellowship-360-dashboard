@@ -128,7 +128,15 @@ export default function GetStartedPage() {
   const wizardSteps = useMemo(
     () =>
       setupSteps.filter((step) =>
-        ["profile", "channels", "roles", "escalation"].includes(step.id)
+        [
+          "profile",
+          "people_import",
+          "household_cleanup",
+          "provider_readiness",
+          "roles",
+          "template_install",
+          "first_live_service",
+        ].includes(step.id)
       ),
     [setupSteps]
   );
@@ -218,6 +226,18 @@ export default function GetStartedPage() {
           <p className="text-xs text-white/80 mt-2">
             {completed}/{totalSteps} launch steps completed
           </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link
+              href="/app/get-started/concierge"
+              className="inline-flex items-center gap-2 rounded-full bg-[#84cc16] px-4 py-2 text-xs font-black text-slate-950 hover:bg-[#a3e635] transition-colors"
+            >
+              Open Launch Concierge
+              <span className="material-symbols-outlined text-[14px]">headset_mic</span>
+            </Link>
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-[11px] font-bold text-white/80 backdrop-blur">
+              Voice + form onboarding app
+            </span>
+          </div>
         </div>
       </div>
 
@@ -263,10 +283,10 @@ export default function GetStartedPage() {
             <div className="flex items-center justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-lg font-black text-slate-900 dark:text-white">
-                  Guided Setup Wizard
+                  White-Glove Beta Checklist
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Profile, channels, team roles, and escalation policy.
+                  Import people, clean households, confirm SMS readiness, install templates, and set the first live service.
                 </p>
               </div>
               <button
@@ -322,7 +342,7 @@ export default function GetStartedPage() {
               Starter Bootstrap
             </h3>
             <p className="text-xs text-slate-500 mb-4">
-              Install starter templates and optionally seed sample records for fast validation.
+              Install the beta starter pack for messaging, visitor follow-up, donor care, and Sunday ops, then optionally seed sample records for validation.
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
@@ -542,14 +562,14 @@ export default function GetStartedPage() {
               label="Conversations"
               value={metrics.conversations}
               icon="forum"
-              href="/app/grace?tab=inbox"
+              href="/app/grace?tab=care"
             />
             <MiniCard label="Tasks" value={metrics.tasks} icon="check_box" href="/app/tasks" />
             <MiniCard
               label="Appointments"
               value={metrics.appointments}
               icon="event"
-              href="/app/grace?tab=calendar"
+              href="/app/calendar"
             />
           </div>
         </div>

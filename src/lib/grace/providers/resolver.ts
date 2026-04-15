@@ -1,6 +1,11 @@
 import { db } from "@/db";
 import { providerConfigs } from "@/db/schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import {
+  getLegacySmsProviderApiKeyEnv,
+  getSmsGatewayBaseUrlEnv,
+  getSmsGatewayProviderCandidates,
+} from "@/lib/sms-gateway/provider";
 import { decryptValue, isEncryptedValue } from "./security";
 
 export type ResolvedSmsProvider = {
@@ -45,7 +50,15 @@ async function getActiveProviderRow(params: {
     eq(providerConfigs.isActive, true),
   ];
   if (params.provider) {
-    clauses.push(eq(providerConfigs.provider, params.provider));
+    const providerCandidates =
+      params.channel === "sms"
+        ? getSmsGatewayProviderCandidates(params.provider)
+        : [params.provider];
+    clauses.push(
+      providerCandidates.length === 1
+        ? eq(providerConfigs.provider, providerCandidates[0]!)
+        : inArray(providerConfigs.provider, providerCandidates)
+    );
   }
 
   const [row] = await db
@@ -68,7 +81,15 @@ async function getLatestProviderRow(params: {
     eq(providerConfigs.channel, params.channel),
   ];
   if (params.provider) {
-    clauses.push(eq(providerConfigs.provider, params.provider));
+    const providerCandidates =
+      params.channel === "sms"
+        ? getSmsGatewayProviderCandidates(params.provider)
+        : [params.provider];
+    clauses.push(
+      providerCandidates.length === 1
+        ? eq(providerConfigs.provider, providerCandidates[0]!)
+        : inArray(providerConfigs.provider, providerCandidates)
+    );
   }
 
   const [row] = await db
@@ -92,22 +113,21 @@ export async function resolveSmsProvider(
   const latestRow = await getLatestProviderRow({
     organizationId,
     channel: "sms",
-    provider: "textbee",
+    provider: "fellowship_gateway",
   });
   if (latestRow?.mode === "disabled") return null;
 
   const row = await getActiveProviderRow({
     organizationId,
     channel: "sms",
-    provider: "textbee",
+    provider: "fellowship_gateway",
   });
 
   if (row?.mode === "disabled") return null;
 
   const config = decryptConfigFields(row?.configJson ?? {}, ["apiKey", "webhookSecret"]);
-  const apiKey = getStringOrNull(config.apiKey) ?? getStringOrNull(process.env.TEXTBEE_API_KEY);
-  const baseUrl =
-    getStringOrNull(config.baseUrl) ?? getStringOrNull(process.env.TEXTBEE_BASE_URL);
+  const apiKey = getStringOrNull(config.apiKey) ?? getStringOrNull(getLegacySmsProviderApiKeyEnv());
+  const baseUrl = getStringOrNull(config.baseUrl) ?? getStringOrNull(getSmsGatewayBaseUrlEnv());
 
   return apiKey && baseUrl ? { apiKey, baseUrl } : null;
 }
@@ -170,31 +190,6 @@ export async function resolveGeminiApiKey(
 
   const fallback = process.env.GEMINI_API_KEY;
   return getStringOrNull(fallback);
-}
-
-export async function resolveElevenLabsApiKey(
-  organizationId: string
-): Promise<string | null> {
-  const latestRow = await getLatestProviderRow({
-    organizationId,
-    channel: "voice",
-    provider: "elevenlabs",
-  });
-  if (latestRow?.mode === "disabled") return null;
-
-  const row = await getActiveProviderRow({
-    organizationId,
-    channel: "voice",
-    provider: "elevenlabs",
-  });
-
-  if (row?.mode === "disabled") return null;
-
-  const config = decryptConfigFields(row?.configJson ?? {}, ["apiKey"]);
-  const configuredApiKey = getStringOrNull(config.apiKey);
-  if (configuredApiKey) return configuredApiKey;
-
-  return getStringOrNull(process.env.ELEVENLABS_API_KEY);
 }
 
 export async function resolveProviderWebhookSecret(params: {

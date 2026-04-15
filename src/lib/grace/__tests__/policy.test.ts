@@ -29,14 +29,20 @@ describe("evaluatePolicy — static channel rules", () => {
     expect(result.requiresApproval).toBe(false);
   });
 
-  it("marks contacts.upsert as requiring approval for staff", () => {
+  it("allows contacts.upsert for staff without approval", () => {
     const result = evaluatePolicy(baseCtx(), "contacts.upsert");
     expect(result.allowed).toBe(true);
-    expect(result.requiresApproval).toBe(true);
+    expect(result.requiresApproval).toBe(false);
   });
 
-  it("marks messages.sendSMS as requiring approval for staff", () => {
+  it("allows one-to-one messages.sendSMS for staff without approval", () => {
     const result = evaluatePolicy(baseCtx(), "messages.sendSMS");
+    expect(result.allowed).toBe(true);
+    expect(result.requiresApproval).toBe(false);
+  });
+
+  it("still requires approval for invariant destructive tools", () => {
+    const result = evaluatePolicy(baseCtx(), "contacts.delete");
     expect(result.allowed).toBe(true);
     expect(result.requiresApproval).toBe(true);
   });
@@ -95,8 +101,54 @@ describe("evaluatePolicy — org policy overrides (public actor)", () => {
     expect(result.requiresApproval).toBe(false);
   });
 
-  it("uses static highRisk list even without org override", () => {
+  it("uses invariant highRisk list even without org override", () => {
     const result = evaluatePolicy(publicCtxWithPolicy(["contacts.upsert"]), "contacts.upsert");
+    expect(result.requiresApproval).toBe(false);
+  });
+});
+
+describe("evaluatePolicy — bulk targeting and staff overrides", () => {
+  it("requires approval when an org marks a routine staff tool as high risk", () => {
+    const result = evaluatePolicy(
+      baseCtx({
+        policy: {
+          approvalsEnabled: true,
+          highRiskTools: ["messages.sendSMS"],
+          allowedPublicTools: [],
+        },
+      }),
+      "messages.sendSMS"
+    );
+
+    expect(result.allowed).toBe(true);
     expect(result.requiresApproval).toBe(true);
+  });
+
+  it("requires approval for explicit bulk recipient arrays", () => {
+    const result = evaluatePolicy(
+      baseCtx(),
+      "messages.sendSMS",
+      {
+        recipientIds: Array.from({ length: 10 }, (_, index) => `contact_${index + 1}`),
+        message: "Reminder",
+      }
+    );
+
+    expect(result.allowed).toBe(true);
+    expect(result.requiresApproval).toBe(true);
+  });
+
+  it("does not require approval for a single-recipient send", () => {
+    const result = evaluatePolicy(
+      baseCtx(),
+      "messages.sendSMS",
+      {
+        to: "+15555550101",
+        message: "Thanks for visiting.",
+      }
+    );
+
+    expect(result.allowed).toBe(true);
+    expect(result.requiresApproval).toBe(false);
   });
 });

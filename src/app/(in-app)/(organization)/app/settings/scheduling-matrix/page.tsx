@@ -447,7 +447,7 @@ export default function SchedulingMatrixPage() {
               </p>
               {serviceRuns.length === 0 && (
                 <Button variant="outline" className="mt-4" asChild>
-                  <Link href="/app/grace?tab=operations">Create a Service</Link>
+                  <Link href="/app/services">Create a Service</Link>
                 </Button>
               )}
             </div>

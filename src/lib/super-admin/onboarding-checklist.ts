@@ -165,8 +165,8 @@ export function buildChurchOnboardingChecklist(
         automationFootprint.installedCount,
         automationFootprint.publishedCount
       ),
-      actionLabel: "Open bulk deploy",
-      actionHref: "/super-admin/automations/deploy",
+      actionLabel: "Open automations",
+      actionHref: "/super-admin/automations",
     },
     {
       id: "readiness",

@@ -11,7 +11,16 @@ import { graceMemory } from "@/db/schema/grace-memory";
 import { churchContacts } from "@/db/schema/church-contacts";
 import { tasks, appointments } from "@/db/schema/operations";
 import { prayerRequests } from "@/db/schema/prayer";
-import type { GraceIntent, GraceRouterInput, GraceRouterOutput, ProposedAction } from "../types";
+import { organizations, onboardingDataSchema } from "@/db/schema/organization";
+import type {
+  GraceActionOutcome,
+  GraceIntent,
+  GraceRouterInput,
+  GraceRouterOutput,
+  GraceWorkflowDecision,
+  ProposedAction,
+  ReasoningStep,
+} from "../types";
 import { executePlannedActions } from "./executor";
 import { resolveGeminiApiKey } from "../providers/resolver";
 import {
@@ -25,6 +34,7 @@ import {
   normalizeAuditUsage,
   writeGraceAuditStreamSafe,
 } from "../audit-stream";
+import { startGraceWorkflowFromDecision } from "../workflows/runtime";
 
 // ---------------------------------------------------------------------------
 // Zod schema for structured Gemini output
@@ -48,9 +58,39 @@ const proposedToolSchema = z.object({
   requiresApproval: z.boolean().default(false),
 });
 
+const workflowDecisionSchema = z.object({
+  decisionType: z
+    .enum(["respond_only", "start_workflow", "continue_workflow", "handoff"])
+    .default("respond_only"),
+  workflowKey: z
+    .enum(["volunteer_staffing", "guest_followup", "prayer_care"])
+    .optional(),
+  workflowVersion: z.number().int().positive().optional(),
+  workflowInput: z.record(z.unknown()).optional(),
+  missingInputs: z.array(z.string()).optional(),
+  kickoffSummary: z.string().optional(),
+  nextBestAction: z.string().optional(),
+  approvalMode: z.enum(["confirm_once", "approval_required", "none"]).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+});
+
 const graceOutputSchema = z.object({
+  reasoning: z
+    .string()
+    .describe(
+      "A brief operator-facing rationale. Summarize what you observed, what is missing, and why you chose the next step. Do not reveal hidden chain-of-thought."
+    ),
+  continueThinking: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Set to true if you need to execute tools first and then reason about the results before responding to the user. Set to false when you have enough information to give a final response."
+    ),
   intent: intentSchema.describe("Classified intent of the user message"),
-  response: z.string().describe("Your pastoral, warm response to send to the user"),
+  response: z.string().describe("Your pastoral, warm response to send to the user. Leave empty if continueThinking is true."),
+  workflowDecision: workflowDecisionSchema
+    .optional()
+    .describe("Workflow orchestration decision for long-running church operations"),
   proposedTools: z
     .array(proposedToolSchema)
     .optional()
@@ -68,6 +108,54 @@ const graceOutputSchema = z.object({
     .optional()
     .describe("Slot state extracted from this message to persist across turns"),
 });
+
+type PendingWorkflowConfirmation = GraceWorkflowDecision & {
+  requestedAt: string;
+  sourceMessage: string;
+};
+
+function isAffirmativeMessage(message: string) {
+  return /^(yes|yep|yeah|ok|okay|do it|go ahead|proceed|start it|launch it|run it)\b/i.test(
+    message.trim()
+  );
+}
+
+function isNegativeMessage(message: string) {
+  return /^(no|nope|cancel|stop|not now|don't|do not)\b/i.test(message.trim());
+}
+
+function readPendingWorkflowConfirmation(
+  state: GraceRouterInput["state"]
+): PendingWorkflowConfirmation | null {
+  const candidate = state.pendingWorkflowConfirmation;
+  if (!candidate || typeof candidate !== "object") {
+    return null;
+  }
+
+  const parsed = z
+    .object({
+      decisionType: z.enum(["respond_only", "start_workflow", "continue_workflow", "handoff"]),
+      workflowKey: z.enum(["volunteer_staffing", "guest_followup", "prayer_care"]).optional(),
+      workflowVersion: z.number().int().positive().optional(),
+      workflowInput: z.record(z.unknown()).optional(),
+      missingInputs: z.array(z.string()).optional(),
+      kickoffSummary: z.string().optional(),
+      nextBestAction: z.string().optional(),
+      approvalMode: z.enum(["confirm_once", "approval_required", "none"]).optional(),
+      confidence: z.number().min(0).max(1).optional(),
+      requestedAt: z.string(),
+      sourceMessage: z.string(),
+    })
+    .safeParse(candidate);
+
+  return parsed.success ? parsed.data : null;
+}
+
+function withoutPendingWorkflowConfirmation(state: GraceRouterInput["state"]) {
+  const nextState = { ...state };
+  delete nextState.pendingWorkflowConfirmation;
+  return nextState;
+}
 
 // ---------------------------------------------------------------------------
 // Knowledge retrieval (visibility-gated)
@@ -105,6 +193,113 @@ async function loadChurchKnowledge(
 function truncate(text: string, max = 200): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 3)}...`;
+}
+
+function formatOnboardingValue(value: string | number | null | undefined, fallback = "Not set") {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "number") {
+    return value > 0 ? String(value) : fallback;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : fallback;
+}
+
+async function loadOnboardingContext(organizationId: string): Promise<string> {
+  try {
+    const [organization] = await db
+      .select({
+        name: organizations.name,
+        onboardingDone: organizations.onboardingDone,
+        onboardingData: organizations.onboardingData,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, organizationId))
+      .limit(1);
+
+    if (!organization) {
+      return "";
+    }
+
+    const { getGuidedSequenceOnboarding, getLaunchReadiness, getProviderHealthChecks } =
+      await import("@/app/actions/onboarding");
+
+    const [launchReadiness, providerHealth, guidedSequences] = await Promise.all([
+      getLaunchReadiness(organizationId),
+      getProviderHealthChecks(organizationId),
+      getGuidedSequenceOnboarding(organizationId),
+    ]);
+
+    const onboardingData = onboardingDataSchema.parse(organization.onboardingData ?? {});
+    const sections: string[] = [];
+
+    sections.push(
+      [
+        "## Onboarding Profile",
+        `- Church name: ${formatOnboardingValue(onboardingData.orgName || organization.name)}`,
+        `- Website: ${formatOnboardingValue(onboardingData.orgWebsite)}`,
+        `- Denomination: ${formatOnboardingValue(onboardingData.churchDenomination)}`,
+        `- City: ${formatOnboardingValue(onboardingData.churchCity)}`,
+        `- Team size: ${formatOnboardingValue(onboardingData.teamSize)}`,
+        `- Avg weekly attendance: ${formatOnboardingValue(onboardingData.averageWeeklyAttendance)}`,
+        `- Primary goal: ${formatOnboardingValue(onboardingData.primaryGoal)}`,
+        `- Primary contact: ${formatOnboardingValue(onboardingData.primaryContactName)} | ${formatOnboardingValue(onboardingData.primaryContactEmail)} | ${formatOnboardingValue(onboardingData.primaryContactPhone)}`,
+        `- Notes: ${formatOnboardingValue(onboardingData.notes)}`,
+        `- Onboarding complete: ${organization.onboardingDone ? "yes" : "no"}`,
+      ].join("\n")
+    );
+
+    sections.push(
+      [
+        "## Launch Readiness",
+        `- Score: ${launchReadiness.score}%`,
+        `- Completed steps: ${launchReadiness.completedCount}/${launchReadiness.totalCount}`,
+        ...launchReadiness.steps.map(
+          (step) => `- [${step.status}] ${step.id}: ${step.title} — ${step.description}`
+        ),
+      ].join("\n")
+    );
+
+    if (launchReadiness.blockingActions.length > 0) {
+      sections.push(
+        [
+          "## Blocking Actions",
+          ...launchReadiness.blockingActions.map(
+            (action) =>
+              `- ${action.title} — ${action.description} | impact: ${action.impact} | href: ${action.href}`
+          ),
+        ].join("\n")
+      );
+    }
+
+    sections.push(
+      [
+        "## Provider Health",
+        `- Summary: ${providerHealth.summary.healthy}/${providerHealth.summary.total} healthy | degraded ${providerHealth.summary.degraded} | critical ${providerHealth.summary.critical}`,
+        ...providerHealth.checks.map(
+          (check) =>
+            `- ${check.key}: ${check.title} — ${check.status} | ${check.summary} | remediation: ${check.remediation.href}`
+        ),
+      ].join("\n")
+    );
+
+    sections.push(
+      [
+        "## Guided Sequences",
+        ...guidedSequences.guides.map(
+          (guide) =>
+            `- [id:${guide.id}] ${guide.title} — templateInstalled=${guide.templateInstalled ? "yes" : "no"} | builderDraft=${guide.builderWorkflowId ? "yes" : "no"}`
+        ),
+        guidedSequences.nextGuideId
+          ? `- Recommended next guide id: ${guidedSequences.nextGuideId}`
+          : "- Recommended next guide id: none",
+      ].join("\n")
+    );
+
+    return sections.join("\n\n");
+  } catch (error) {
+    console.error("[Grace] Failed to load onboarding context:", error);
+    return "";
+  }
 }
 
 async function loadOperationalContext(
@@ -156,8 +351,11 @@ async function loadOperationalContext(
         .select({
           id: graceGoals.id,
           goalType: graceGoals.goalType,
+          workflowKey: graceGoals.workflowKey,
           status: graceGoals.status,
           objectiveText: graceGoals.objectiveText,
+          lastDecisionSummary: graceGoals.lastDecisionSummary,
+          nextCheckpointAt: graceGoals.nextCheckpointAt,
           createdAt: graceGoals.createdAt,
         })
         .from(graceGoals)
@@ -301,7 +499,9 @@ async function loadOperationalContext(
       `## Pending Grace Goals\n${pendingGoals
         .map(
           (goal) =>
-            `- [${goal.status}] ${goal.goalType}: ${truncate(goal.objectiveText, 120)}`
+            `- [${goal.status}] ${goal.workflowKey || goal.goalType}: ${truncate(goal.objectiveText, 120)}${
+              goal.lastDecisionSummary ? ` | next: ${truncate(goal.lastDecisionSummary, 80)}` : ""
+            }${goal.nextCheckpointAt ? ` | checkpoint ${new Date(goal.nextCheckpointAt).toLocaleString()}` : ""}`
         )
         .join("\n")}`
     );
@@ -372,8 +572,10 @@ function buildSystemPrompt(params: {
   customPrompt: string | null;
   knowledge: string;
   operationalContext: string;
+  onboardingContext: string;
   actorType: GraceRouterInput["context"]["actorType"];
   channel: GraceRouterInput["context"]["channel"];
+  originSurface?: GraceRouterInput["context"]["originSurface"];
   currentState: Record<string, unknown>;
 }): string {
   const isPublic = params.actorType === "public";
@@ -413,11 +615,49 @@ You have access to CRM tools, scheduling, notes, and follow-up workflows.`;
     ? `\n\n# Operational Context\n${params.operationalContext}`
     : "";
 
+  const onboardingContextSection = params.onboardingContext
+    ? `\n\n# Onboarding Context\n${params.onboardingContext}`
+    : "";
+
+  const onboardingGuidance =
+    params.originSurface === "onboarding"
+      ? `
+# Onboarding Mode
+You are acting as Grace's launch concierge for this workspace.
+Prioritize capturing missing church profile details, clearing blocking launch steps, resolving provider readiness gaps, and getting the team to their first real workflow.
+Ask at most one focused follow-up question at a time when a critical fact is missing.
+When the user shares concrete setup facts, persist them with onboarding.profile.update instead of merely acknowledging them.
+When the user asks you to install or start something, use the appropriate onboarding tool instead of only describing the steps.
+After each response, end with the single best next step based on the onboarding context.
+
+Onboarding tools:
+- onboarding.profile.update(churchName?, denomination?, city?, website?, orgType?, teamSize?, averageWeeklyAttendance?, primaryContactName?, primaryContactEmail?, primaryContactPhone?, primaryGoal?, notes?, onboardingDone?)
+- onboarding.installStarterTemplates()
+- onboarding.bootstrapSampleData()
+- onboarding.startGuidedSequence(blueprintId, installTemplate?)`
+      : "";
+
   const customSection = params.customPrompt
     ? `\n\n# Additional Instructions\n${params.customPrompt}`
     : "";
 
 const toolGuidance = `
+# Workflow Orchestration
+For long-running church operations, populate workflowDecision instead of only proposing tools.
+
+Supported Grace workflows:
+- volunteer_staffing: fill open service roles, send offers, watch replies, and escalate gaps
+- guest_followup: follow up with first-time guests and move them toward a booked next step
+- prayer_care: follow up on prayer requests, apply urgency rules, and escalate to human care when needed
+
+Rules:
+- Use decisionType=start_workflow when staff is asking Grace to launch one of these workflows.
+- Use missingInputs[] for any blocking details that must be clarified before the workflow can start.
+- Use kickoffSummary for the one confirmation Grace will show before starting autonomous execution.
+- Use approvalMode=confirm_once for normal staff-initiated workflows unless a stricter mode is clearly required.
+- Use decisionType=continue_workflow when the user is clearly referring to an in-flight workflow already shown in context.
+- Use decisionType=respond_only when no workflow should be started or resumed.
+
 # Available Tools
 Only propose tools that are appropriate for the actor type and channel. Do not invent tool names.
 Use the entity IDs from the Operational Context to call update tools directly — no guessing IDs.
@@ -428,15 +668,36 @@ Public-safe tools: churchInfo.search, prayerRequests.create, appointments.checkA
 
 Staff read/search tools: contacts.search(query, status?, limit?), contacts.findDuplicates(reason?, minGroupSize?, limit?), tasks.search(query?, status?, priority?, assigneeId?, sla?, limit?), finance.weeklyReport(startDate?, endDate?), appointments.search(query?, status?, fromDate?, toDate?, upcomingOnly?, limit?), calls.search(query?, outcome?, escalatedOnly?, fromDate?, toDate?, limit?), pipeline.search(query?, stageId?, priority?, assigneeId?, limit?), pipeline.audit(itemId?, limit?), conversations.search(query?, status?, includeArchived?, limit?)
 
-Staff create tools: contacts.upsert, appointments.book, tasks.create(title, description?, assigneeId?, dueDate?, priority?)✅approval, prayerRequests.create, pipelines.addToStage, memory.write, serviceRuns.createFromTemplate, serviceRuns.autoStaff, volunteers.create(contactId, role?, status?)✅approval, volunteerShifts.create(volunteerId, date, hours, eventId?, notes?)✅approval
+Staff create tools: contacts.upsert, appointments.book, tasks.create(title, description?, assigneeId?, dueDate?, priority?), prayerRequests.create, pipelines.addToStage, memory.write, serviceRuns.createFromTemplate, serviceRuns.autoStaff, volunteers.create(contactId, role?, status?), volunteerShifts.create(volunteerId, date, hours, eventId?, notes?)
 
-Staff update tools: contacts.update(contactId, firstName?, lastName?, email?, phone?, memberStatus?, notes?), contacts.archive(contactId)✅approval, contacts.restore(contactId, status?)✅approval, contacts.delete(contactId)✅approval, contacts.merge(primaryContactId, duplicateContactId)✅approval, tasks.update(taskId, title?, status?, priority?, assigneeId?, dueDate?), tasks.complete(taskId), prayerRequests.update(requestId, status?, urgency?, assignedTeam?, response?), appointments.setStatus(appointmentId, status)✅approval, appointments.reschedule(appointmentId, dateTime, duration?, notes?, resetStatus?)✅approval, appointments.cancel(appointmentId)✅approval, appointments.delete(appointmentId)✅approval, calls.update(callId, transcriptText?, summaryText?, intent?, outcome?, startedAt?, endedAt?, durationSec?, recordingUrl?, contactId?), calls.escalate(callId, reason, summaryText?, assignedTeam?), pipeline.moveStage(itemId, stageId), pipeline.updateItem(itemId, stageId?, order?, priority?, assigneeId?, notes?, lastContactDate?, nextActionDate?), pipeline.deleteItem(itemId)✅approval, ministries.addMember(ministryId, contactId, role?), conversations.setStatus(conversationId, status), conversations.waiting(conversationId), conversations.resolve(conversationId), conversations.archive(conversationId), conversations.reopen(conversationId), volunteers.update(volunteerId, role?, status?, contactId?)✅approval, volunteers.delete(volunteerId)✅approval, volunteerShifts.update(shiftId, date?, hours?, notes?, eventId?)✅approval, volunteerShifts.delete(shiftId)✅approval
+Staff update tools: contacts.update(contactId, firstName?, lastName?, email?, phone?, memberStatus?, notes?), contacts.archive(contactId), contacts.restore(contactId, status?), contacts.delete(contactId), contacts.merge(primaryContactId, duplicateContactId), tasks.update(taskId, title?, status?, priority?, assigneeId?, dueDate?), tasks.complete(taskId), prayerRequests.update(requestId, status?, urgency?, assignedTeam?, response?), appointments.setStatus(appointmentId, status), appointments.reschedule(appointmentId, dateTime, duration?, notes?, resetStatus?), appointments.cancel(appointmentId), appointments.delete(appointmentId), calls.update(callId, transcriptText?, summaryText?, intent?, outcome?, startedAt?, endedAt?, durationSec?, recordingUrl?, contactId?), calls.escalate(callId, reason, summaryText?, assignedTeam?), pipeline.moveStage(itemId, stageId), pipeline.updateItem(itemId, stageId?, order?, priority?, assigneeId?, notes?, lastContactDate?, nextActionDate?), pipeline.deleteItem(itemId), ministries.addMember(ministryId, contactId, role?), conversations.setStatus(conversationId, status), conversations.waiting(conversationId), conversations.resolve(conversationId), conversations.archive(conversationId), conversations.reopen(conversationId), volunteers.update(volunteerId, role?, status?, contactId?), volunteers.delete(volunteerId), volunteerShifts.update(shiftId, date?, hours?, notes?, eventId?), volunteerShifts.delete(shiftId)
 
-Staff communication tools: messages.sendSMS(to, message)✅approval, messages.sendEmail(to, subject, html)✅approval, staff.alert(reason, details?)
+Staff communication tools: messages.sendSMS(to, message), messages.sendEmail(to, subject, html), staff.alert(reason, details?)
 
-Staff service tools: serviceAssignments.sendOfferSMS(serviceRunId)✅approval
+Staff service tools: serviceAssignments.sendOfferSMS(serviceRunId)
 
-Tools marked ✅approval will be queued for human staff approval before executing.`;
+Runtime policy decides whether a proposed tool executes immediately, becomes a suggestion, or queues approval.
+- Routine one-to-one operational actions can execute autonomously.
+- Less-routine or low-confidence actions become suggestions for staff review.
+- Destructive tools and explicit bulk/group-targeted actions always require approval.
+
+# Agentic Reasoning
+You are an autonomous agent who can think in multiple steps. Before responding to the user:
+1. OBSERVE: Review the operational context. What data do you already have? What's missing?
+2. THINK: Use the "reasoning" field for a short, factual rationale. Do not write hidden chain-of-thought.
+3. ACT: Propose tools to gather information or take action.
+4. DECIDE: Set continueThinking=true if you need to see tool results before forming a response.
+   Set continueThinking=false when you have enough information for a complete, helpful response.
+
+Key behaviors:
+- When asked about a contact, SEARCH first (contacts.search) before responding. Don't guess.
+- When asked to follow up, check if a follow-up already exists (tasks.search) before creating one.
+- When asked to staff a service, check the service matrix first before proposing candidates.
+- Chain tools: search → analyze results → take action → summarize what you did.
+- If a tool fails, reason about why and try an alternative approach.
+- You are Grace, a proactive team member. Take initiative on routine operations.
+  For visitor follow-ups, thank-you texts, prayer check-ins, and volunteer staffing — act immediately.
+  For re-engagement campaigns, complex outreach, or anything affecting many people — propose and wait for confirmation.`;
 
   return [
     identity,
@@ -445,11 +706,60 @@ Tools marked ✅approval will be queued for human staff approval before executin
     stateContext,
     knowledgeSection,
     operationalContextSection,
+    onboardingContextSection,
+    onboardingGuidance,
     customSection,
     toolGuidance,
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function hasStateUpdates(
+  stateUpdates: z.infer<typeof graceOutputSchema>["stateUpdates"] | undefined
+) {
+  return Boolean(stateUpdates && Object.keys(stateUpdates).length > 0);
+}
+
+function buildReasoningLoopFallbackResponse(params: {
+  actionOutcomes: GraceActionOutcome[];
+  exitReason: "completed" | "budget_exceeded" | "time_budget_exceeded" | "no_tools" | "no_progress" | "max_iterations" | "llm_error";
+}) {
+  const executedCount = params.actionOutcomes.filter((outcome) =>
+    outcome.status === "executed" || outcome.status === "retried"
+  ).length;
+  const queuedCount = params.actionOutcomes.filter((outcome) => outcome.status === "queued").length;
+  const suggestedCount = params.actionOutcomes.filter((outcome) => outcome.status === "suggested").length;
+
+  const completedParts: string[] = [];
+  if (executedCount > 0) {
+    completedParts.push(`completed ${executedCount} step${executedCount === 1 ? "" : "s"}`);
+  }
+  if (queuedCount > 0) {
+    completedParts.push(`queued ${queuedCount} approval${queuedCount === 1 ? "" : "s"}`);
+  }
+  if (suggestedCount > 0) {
+    completedParts.push(`logged ${suggestedCount} suggestion${suggestedCount === 1 ? "" : "s"} for review`);
+  }
+
+  const handledText =
+    completedParts.length > 0
+      ? ` I ${completedParts.join(", ")}.`
+      : "";
+
+  if (params.exitReason === "no_tools" || params.exitReason === "no_progress") {
+    return `I stopped before guessing because I didn't have enough reliable information to keep going automatically.${handledText} Please tell me the specific contact, service, or next step you want me to work on.`;
+  }
+
+  if (
+    params.exitReason === "budget_exceeded" ||
+    params.exitReason === "time_budget_exceeded" ||
+    params.exitReason === "max_iterations"
+  ) {
+    return `I completed what I could and stopped before overextending the decision loop.${handledText} If you want me to keep going, send the next specific instruction.`;
+  }
+
+  return `I completed the safe next step and stopped when the model became unavailable.${handledText}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -572,11 +882,81 @@ export async function runClawRouter(input: GraceRouterInput): Promise<GraceRoute
       },
       proposedActions: [emergencyAction],
       actionOutcomes,
+      workflowDecision: null,
+      workflowStart: null,
     };
   }
 
+  const pendingWorkflowConfirmation = readPendingWorkflowConfirmation(state);
+  if (context.actorType === "staff" && pendingWorkflowConfirmation) {
+    if (isAffirmativeMessage(message)) {
+      const workflowStart = await startGraceWorkflowFromDecision({
+        context,
+        decision: pendingWorkflowConfirmation,
+      });
+
+      await writeGraceAuditStreamSafe({
+        organizationId: context.organizationId,
+        sessionId: context.sessionId,
+        actorType: context.actorType,
+        channel: context.channel,
+        eventType: "workflow_execution",
+        source: "grace_router",
+        status: workflowStart.status === "failed" ? "error" : "success",
+        actionName: `${pendingWorkflowConfirmation.workflowKey ?? "unknown"}.kickoff_confirmed`,
+        metadataJson: {
+          workflowKey: pendingWorkflowConfirmation.workflowKey ?? null,
+          workflowStart,
+        },
+      });
+
+      return {
+        response:
+          workflowStart.summary ??
+          "Grace has started that workflow and will keep it moving automatically.",
+        intent: "follow_up_request",
+        state: withoutPendingWorkflowConfirmation(state),
+        proposedActions: [],
+        actionOutcomes: [],
+        workflowDecision: pendingWorkflowConfirmation,
+        workflowStart,
+      };
+    }
+
+    if (isNegativeMessage(message)) {
+      await writeGraceAuditStreamSafe({
+        organizationId: context.organizationId,
+        sessionId: context.sessionId,
+        actorType: context.actorType,
+        channel: context.channel,
+        eventType: "workflow_execution",
+        source: "grace_router",
+        status: "skipped",
+        actionName: `${pendingWorkflowConfirmation.workflowKey ?? "unknown"}.kickoff_cancelled`,
+        metadataJson: {
+          workflowKey: pendingWorkflowConfirmation.workflowKey ?? null,
+        },
+      });
+
+      return {
+        response: "Okay. I won't start that workflow.",
+        intent: "unknown",
+        state: withoutPendingWorkflowConfirmation(state),
+        proposedActions: [],
+        actionOutcomes: [],
+        workflowDecision: pendingWorkflowConfirmation,
+        workflowStart: {
+          status: "cancelled",
+          workflowKey: pendingWorkflowConfirmation.workflowKey,
+          summary: "Kickoff cancelled by staff.",
+        },
+      };
+    }
+  }
+
   // Load org context, knowledge, and provider credentials in parallel.
-  const [orgConfig, knowledge, operationalContext, geminiApiKey] = await Promise.all([
+  const [orgConfig, knowledge, operationalContext, geminiApiKey, onboardingContext] =
+    await Promise.all([
     db
       .select({
         churchName: aiConfig.churchName,
@@ -591,6 +971,9 @@ export async function runClawRouter(input: GraceRouterInput): Promise<GraceRoute
     loadChurchKnowledge(context.organizationId, context.actorType),
     loadOperationalContext(context.organizationId, activeContactId),
     resolveGeminiApiKey(context.organizationId),
+    context.originSurface === "onboarding"
+      ? loadOnboardingContext(context.organizationId)
+      : Promise.resolve(""),
   ]);
 
   const systemPrompt = buildSystemPrompt({
@@ -600,8 +983,10 @@ export async function runClawRouter(input: GraceRouterInput): Promise<GraceRoute
     customPrompt: orgConfig?.customSystemPrompt ?? null,
     knowledge,
     operationalContext,
+    onboardingContext,
     actorType: context.actorType,
     channel: context.channel,
+    originSurface: context.originSurface,
     currentState: state,
   });
 
@@ -616,7 +1001,7 @@ export async function runClawRouter(input: GraceRouterInput): Promise<GraceRoute
       source: "grace_router",
       status: "error",
       intent: "unknown",
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       errorText: "missing_gemini_provider_key",
       metadataJson: {
         fallbackResponse: true,
@@ -630,92 +1015,302 @@ export async function runClawRouter(input: GraceRouterInput): Promise<GraceRoute
       state,
       proposedActions: [],
       actionOutcomes: [],
+      workflowDecision: null,
+      workflowStart: null,
+      availabilityStatus: "provider_missing",
+      availabilityMessage:
+        "Grace AI is not configured for this organization yet. Finish onboarding to enable chat and voice.",
     };
   }
 
   const google = createGoogleGenerativeAI({ apiKey: geminiApiKey });
 
-  let object: z.infer<typeof graceOutputSchema>;
-  const llmDecisionStartedAt = Date.now();
-  try {
-    const llmResult = await generateObject({
-      model: google("gemini-2.0-flash"),
-      output: "object",
-      system: systemPrompt,
-      prompt: message,
-      schema: graceOutputSchema,
-    });
-    object = llmResult.object;
+  // ---------------------------------------------------------------------------
+  // Agentic Reasoning Loop
+  // ---------------------------------------------------------------------------
+  // Instead of a single LLM call, Grace runs up to MAX_ITERATIONS:
+  //   1. LLM reasons about the request and proposes tools
+  //   2. If continueThinking=true, tools are executed and results fed back
+  //   3. On the next iteration, Grace sees tool results and decides next step
+  //   4. Loop ends when continueThinking=false or max iterations reached
+  // ---------------------------------------------------------------------------
 
-    const usage = normalizeAuditUsage((llmResult as { usage?: unknown }).usage);
-    await writeGraceAuditStreamSafe({
-      organizationId: context.organizationId,
-      sessionId: context.sessionId,
-      actorType: context.actorType,
-      channel: context.channel,
-      eventType: "ai_decision",
-      source: "grace_router",
-      status: "success",
-      intent: object.intent,
-      model: "gemini-2.0-flash",
-      latencyMs: Date.now() - llmDecisionStartedAt,
-      inputTokens: usage.inputTokens ?? null,
-      outputTokens: usage.outputTokens ?? null,
-      totalTokens: usage.totalTokens ?? null,
-      estimatedCostUsd: estimateModelCostUsd({
+  const MAX_ITERATIONS = 5;
+  const MAX_TOTAL_TOKENS = 12_000;
+  const MAX_LOOP_DURATION_MS = 15_000;
+  const reasoningSteps: ReasoningStep[] = [];
+  const allProposedActions: ProposedAction[] = [];
+  const allActionOutcomes: GraceActionOutcome[] = [];
+  const accumulatedStateUpdates: Record<string, unknown> = {};
+  let finalObject: z.infer<typeof graceOutputSchema> | null = null;
+  let toolResultsContext = "";
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  const loopStartedAt = Date.now();
+  let loopExitReason:
+    | "completed"
+    | "budget_exceeded"
+    | "time_budget_exceeded"
+    | "no_tools"
+    | "no_progress"
+    | "max_iterations"
+    | "llm_error" = "max_iterations";
+
+  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+    const iterationStart = Date.now();
+
+    // Build the prompt: original message + accumulated tool results
+    const iterationPrompt = iteration === 0
+      ? message
+      : `${message}\n\n# Tool Results from Previous Steps\n${toolResultsContext}\n\nBased on these results, continue reasoning. If you have enough information, set continueThinking=false and provide your final response.`;
+
+    let object: z.infer<typeof graceOutputSchema>;
+    try {
+      const llmResult = await generateObject({
+        model: google("gemini-2.5-flash"),
+        output: "object",
+        system: systemPrompt,
+        prompt: iterationPrompt,
+        schema: graceOutputSchema,
+      });
+      object = llmResult.object;
+      if (object.stateUpdates) {
+        Object.assign(accumulatedStateUpdates, object.stateUpdates);
+      }
+
+      const usage = normalizeAuditUsage((llmResult as { usage?: unknown }).usage);
+      totalInputTokens += usage.inputTokens ?? 0;
+      totalOutputTokens += usage.outputTokens ?? 0;
+
+      await writeGraceAuditStreamSafe({
+        organizationId: context.organizationId,
+        sessionId: context.sessionId,
+        actorType: context.actorType,
+        channel: context.channel,
+        eventType: "ai_decision",
+        source: "grace_router",
+        status: "success",
+        intent: object.intent,
+        model: "gemini-2.5-flash",
+        latencyMs: Date.now() - iterationStart,
         inputTokens: usage.inputTokens ?? null,
         outputTokens: usage.outputTokens ?? null,
-      }),
-      metadataJson: {
-        proposedToolCount: (object.proposedTools ?? []).length,
-      },
+        totalTokens: usage.totalTokens ?? null,
+        estimatedCostUsd: estimateModelCostUsd({
+          inputTokens: usage.inputTokens ?? null,
+          outputTokens: usage.outputTokens ?? null,
+        }),
+        metadataJson: {
+          iteration,
+          continueThinking: object.continueThinking,
+          reasoning: object.reasoning,
+          proposedToolCount: (object.proposedTools ?? []).length,
+          workflowDecisionType: object.workflowDecision?.decisionType ?? "respond_only",
+          workflowKey: object.workflowDecision?.workflowKey ?? null,
+        },
+      });
+    } catch (llmError) {
+      console.error(`[Grace] Gemini call failed on iteration ${iteration}:`, llmError);
+      await writeGraceAuditStreamSafe({
+        organizationId: context.organizationId,
+        sessionId: context.sessionId,
+        actorType: context.actorType,
+        channel: context.channel,
+        eventType: "ai_decision",
+        source: "grace_router",
+        status: "error",
+        intent: "unknown",
+        model: "gemini-2.5-flash",
+        latencyMs: Date.now() - iterationStart,
+        errorText: llmError instanceof Error ? llmError.message : "llm_call_failed",
+        metadataJson: {
+          iteration,
+          fallbackResponse: true,
+        },
+      });
+
+      // If we have results from previous iterations, use the last good response
+      if (finalObject) {
+        loopExitReason = "llm_error";
+        break;
+      }
+
+      return {
+        response:
+          "I'm temporarily unavailable and unable to process your request right now. " +
+          "Please try again in a moment, or contact the church office directly for assistance.",
+        intent: "unknown" as GraceIntent,
+        state,
+        proposedActions: allProposedActions,
+        actionOutcomes: allActionOutcomes,
+        workflowDecision: null,
+        workflowStart: null,
+        availabilityStatus: "llm_unavailable",
+        availabilityMessage:
+          "Grace AI is temporarily unavailable right now. Please try again in a moment.",
+      };
+    }
+
+    finalObject = object;
+
+    // Convert proposed tools into actions
+    const iterationActions: ProposedAction[] = (object.proposedTools ?? []).map((t) => ({
+      id: crypto.randomUUID(),
+      tool: t.tool,
+      input: t.input,
+      reason: t.reason,
+      requiresApproval: t.requiresApproval,
+    }));
+
+    // Execute tools for this iteration
+    const stepToolResults: ReasoningStep["toolsCalled"] = [];
+
+    if (iterationActions.length > 0) {
+      const execution = await executePlannedActions({
+        actions: iterationActions,
+        context,
+        returnToolResults: true,
+      });
+
+      // Collect results for the reasoning step trace
+      for (let i = 0; i < iterationActions.length; i++) {
+        const action = iterationActions[i];
+        const result = execution.results[i];
+        if (action && result) {
+          stepToolResults.push({
+            tool: action.tool,
+            input: action.input,
+            result,
+          });
+        }
+      }
+
+      allProposedActions.push(...iterationActions);
+      allActionOutcomes.push(...(execution.actionOutcomes ?? []));
+
+      // Build tool results context for the next iteration
+      if (object.continueThinking && stepToolResults.length > 0) {
+        const newResults = stepToolResults
+          .map(
+            (tr, idx) =>
+              `## Tool ${idx + 1}: ${tr.tool}\nInput: ${JSON.stringify(tr.input)}\nResult: ${tr.result.success ? "SUCCESS" : "FAILED"}\nOutput: ${JSON.stringify(tr.result.output ?? tr.result.error ?? "no output")}`
+          )
+          .join("\n\n");
+        toolResultsContext += (toolResultsContext ? "\n\n---\n\n" : "") + `### Iteration ${iteration + 1}\n${newResults}`;
+      }
+    }
+
+    // Record this reasoning step
+    reasoningSteps.push({
+      iteration,
+      reasoning: object.reasoning,
+      toolsCalled: stepToolResults,
+      durationMs: Date.now() - iterationStart,
     });
-  } catch (llmError) {
-    console.error("[Grace] Gemini call failed, returning fallback response:", llmError);
-    await writeGraceAuditStreamSafe({
-      organizationId: context.organizationId,
-      sessionId: context.sessionId,
-      actorType: context.actorType,
-      channel: context.channel,
-      eventType: "ai_decision",
-      source: "grace_router",
-      status: "error",
-      intent: "unknown",
-      model: "gemini-2.0-flash",
-      latencyMs: Date.now() - llmDecisionStartedAt,
-      errorText: llmError instanceof Error ? llmError.message : "llm_call_failed",
-      metadataJson: {
-        fallbackResponse: true,
-      },
-    });
-    return {
-      response:
-        "I'm temporarily unavailable and unable to process your request right now. " +
-        "Please try again in a moment, or contact the church office directly for assistance.",
-      intent: "unknown" as GraceIntent,
-      state,
-      proposedActions: [],
-      actionOutcomes: [],
-    };
+
+    // If Grace says she's done thinking, break out of the loop
+    if (!object.continueThinking) {
+      loopExitReason = "completed";
+      break;
+    }
+
+    // If no tools were proposed but continueThinking is true, force stop to prevent infinite loop
+    if (iterationActions.length === 0) {
+      console.warn(`[Grace] Iteration ${iteration}: continueThinking=true but no tools proposed. Stopping.`);
+      loopExitReason = "no_tools";
+      break;
+    }
+
+    if (
+      Date.now() - loopStartedAt >= MAX_LOOP_DURATION_MS
+    ) {
+      console.warn(`[Grace] Iteration ${iteration}: loop exceeded time budget. Stopping.`);
+      loopExitReason = "time_budget_exceeded";
+      break;
+    }
+
+    if (totalInputTokens + totalOutputTokens >= MAX_TOTAL_TOKENS) {
+      console.warn(`[Grace] Iteration ${iteration}: loop exceeded token budget. Stopping.`);
+      loopExitReason = "budget_exceeded";
+      break;
+    }
+
+    const madeProgress =
+      stepToolResults.some((toolResult) => toolResult.result.success) ||
+      hasStateUpdates(object.stateUpdates);
+
+    if (!madeProgress) {
+      console.warn(`[Grace] Iteration ${iteration}: continueThinking=true but no useful progress. Stopping.`);
+      loopExitReason = "no_progress";
+      break;
+    }
   }
 
-  // Convert Gemini's proposed tools into ProposedAction[] for the executor
-  const proposedActions: ProposedAction[] = (object.proposedTools ?? []).map((t) => ({
-    id: crypto.randomUUID(),
-    tool: t.tool,
-    input: t.input,
-    reason: t.reason,
-    requiresApproval: t.requiresApproval,
-  }));
+  // Use the final iteration's output
+  const object = finalObject!;
 
-  // Run through the policy engine + approval gating
-  const execution = await executePlannedActions({ actions: proposedActions, context });
+  const workflowDecision: GraceWorkflowDecision | null = object.workflowDecision
+    ? {
+        decisionType: object.workflowDecision.decisionType,
+        workflowKey: object.workflowDecision.workflowKey,
+        workflowVersion: object.workflowDecision.workflowVersion,
+        workflowInput: object.workflowDecision.workflowInput,
+        missingInputs: object.workflowDecision.missingInputs ?? [],
+        kickoffSummary: object.workflowDecision.kickoffSummary,
+        nextBestAction: object.workflowDecision.nextBestAction,
+        approvalMode: object.workflowDecision.approvalMode,
+        confidence: object.workflowDecision.confidence,
+      }
+    : null;
 
-  // Merge any state updates Gemini extracted from this message
+  // Merge any state updates extracted across all iterations
   const updatedState: typeof state = {
     ...state,
-    ...(object.stateUpdates ?? {}),
+    ...accumulatedStateUpdates,
   };
+
+  const finalResponse =
+    loopExitReason === "completed" && typeof object.response === "string" && object.response.trim().length > 0
+      ? object.response
+      : buildReasoningLoopFallbackResponse({
+          actionOutcomes: allActionOutcomes,
+          exitReason: loopExitReason,
+        });
+
+  if (
+    context.actorType === "staff" &&
+    loopExitReason === "completed" &&
+    workflowDecision?.decisionType === "start_workflow" &&
+    workflowDecision.workflowKey &&
+    (workflowDecision.missingInputs?.length ?? 0) === 0 &&
+    workflowDecision.approvalMode !== "none"
+  ) {
+    updatedState.pendingWorkflowConfirmation = {
+      ...workflowDecision,
+      requestedAt: new Date().toISOString(),
+      sourceMessage: message,
+    };
+
+    return {
+      response:
+        workflowDecision.kickoffSummary && !finalResponse.includes(workflowDecision.kickoffSummary)
+          ? `${finalResponse}\n\n${workflowDecision.kickoffSummary}\nReply yes to start or no to cancel.`
+          : `${finalResponse}\n\nReply yes to start or no to cancel.`,
+      intent: object.intent as GraceIntent,
+      state: updatedState,
+      proposedActions: allProposedActions,
+      actionOutcomes: allActionOutcomes,
+      workflowDecision,
+      workflowStart: {
+        status: "pending_confirmation",
+        workflowKey: workflowDecision.workflowKey,
+        summary: workflowDecision.kickoffSummary ?? object.response,
+      },
+      reasoning: reasoningSteps.map((s) => s.reasoning).join("\n---\n"),
+      reasoningSteps,
+      iterationCount: reasoningSteps.length,
+    };
+  }
 
   if (!updatedState.matchedContactId && (updatedState.name || updatedState.phone || updatedState.email)) {
     const names = updatedState.name ? updatedState.name.split(" ") : [];
@@ -739,10 +1334,15 @@ export async function runClawRouter(input: GraceRouterInput): Promise<GraceRoute
   }
 
   return {
-    response: object.response,
+    response: finalResponse,
     intent: object.intent as GraceIntent,
     state: updatedState,
-    proposedActions,
-    actionOutcomes: execution.actionOutcomes ?? [],
+    proposedActions: allProposedActions,
+    actionOutcomes: allActionOutcomes,
+    workflowDecision,
+    workflowStart: null,
+    reasoning: reasoningSteps.map((s) => s.reasoning).join("\n---\n"),
+    reasoningSteps,
+    iterationCount: reasoningSteps.length,
   };
 }

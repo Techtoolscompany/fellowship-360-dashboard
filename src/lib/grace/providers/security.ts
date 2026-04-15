@@ -14,6 +14,10 @@ const multiActiveProviderChannels = new Set([
 const ENCRYPTED_PREFIX = "enc:v1";
 
 const providerRules: Record<string, ProviderRule> = {
+  "sms:fellowship_gateway": {
+    required: ["apiKey", "baseUrl"],
+    secret: ["apiKey", "webhookSecret"],
+  },
   "sms:textbee": {
     required: ["apiKey", "baseUrl"],
     secret: ["apiKey", "webhookSecret"],

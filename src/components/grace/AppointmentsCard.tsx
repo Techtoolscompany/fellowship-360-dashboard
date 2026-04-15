@@ -76,7 +76,7 @@ const AppointmentsCard = ({ data }: { data?: AppointmentData }) => {
           </div>
 
           <Link
-            href="/app/grace?tab=calendar"
+            href="/app/calendar"
             className="flex items-center gap-1 mt-auto"
             style={{
               fontSize: "13px",

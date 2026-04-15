@@ -23,7 +23,7 @@ export function planActions(intent: GraceIntent, state: SlotState): ProposedActi
         id: crypto.randomUUID(),
         tool: "appointments.book",
         reason: "Book requested pastoral appointment",
-        requiresApproval: true,
+        requiresApproval: false,
         input: {
           title: state.appointmentTitle ?? "Pastoral Appointment",
           dateTime: state.preferredTime,

@@ -21,6 +21,9 @@ import {
 } from "../src/lib/automations/types";
 import { validateAutomationDefinition } from "../src/lib/automations/validation";
 import { seedDemoDataForOrg } from "../src/lib/seed/demo-data";
+import {
+  PRIMARY_SMS_GATEWAY_PROVIDER,
+} from "../src/lib/sms-gateway/provider";
 
 type CheckLevel = "PASS" | "FIXED" | "WARN" | "FAIL";
 type ProviderMode = "agency_managed" | "byo" | "disabled";
@@ -399,10 +402,6 @@ async function run() {
 
   const requiredEnv = [
     "GEMINI_API_KEY",
-    "ELEVENLABS_API_KEY",
-    "TEXTBEE_API_KEY",
-    "TEXTBEE_BASE_URL",
-    "TEXTBEE_WEBHOOK_SECRET",
     "RETELL_WEBHOOK_SECRET",
     "SMS_GATEWAY_API_KEY",
   ] as const;
@@ -521,12 +520,9 @@ async function run() {
   await ensureManagedProvider({
     organizationId: org.id,
     channel: "sms",
-    provider: "textbee",
+    provider: PRIMARY_SMS_GATEWAY_PROVIDER,
     apply: args.apply,
-    configPatch: {
-      baseUrl: envValue("TEXTBEE_BASE_URL") ?? "https://api.textbee.dev/api/v1",
-    },
-    label: "Provider sms/textbee",
+    label: "Provider sms/fellowship_gateway",
   });
   await ensureManagedProvider({
     organizationId: org.id,
@@ -534,13 +530,6 @@ async function run() {
     provider: "retell",
     apply: args.apply,
     label: "Provider voice/retell",
-  });
-  await ensureManagedProvider({
-    organizationId: org.id,
-    channel: "voice",
-    provider: "elevenlabs",
-    apply: args.apply,
-    label: "Provider voice/elevenlabs",
   });
   await ensureManagedProvider({
     organizationId: org.id,

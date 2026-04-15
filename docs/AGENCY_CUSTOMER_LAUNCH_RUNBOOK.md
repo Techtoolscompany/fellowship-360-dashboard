@@ -5,6 +5,8 @@ Owner: Agency operator + platform lead
 
 ## 1. Technical Go/No-Go (T-24h to T-1h)
 
+Before running the command gate, clear the env/setup items in `docs/PREFLIGHT_CLEARANCE_CHECKLIST.md`.
+
 Run these commands from project root:
 
 ```bash
@@ -29,11 +31,12 @@ Release criteria:
 Required env for demo-org comms readiness:
 - `GEMINI_API_KEY`
 - `ELEVENLABS_API_KEY`
-- `TEXTBEE_API_KEY`
-- `TEXTBEE_BASE_URL`
-- `TEXTBEE_WEBHOOK_SECRET`
 - `RETELL_WEBHOOK_SECRET`
 - `SMS_GATEWAY_API_KEY`
+
+First-party SMS transport app:
+- Android companion gateway lives in [apps/fellowship-sms-gateway-android](/Users/studiocomp/Documents/fellowship-360-app/apps/fellowship-sms-gateway-android)
+- Use device enrollment from `/super-admin/devices` and the app’s `Enroll` flow to bind a real SIM phone to an org
 
 ## 2. Pilot Rollout (Day 0)
 

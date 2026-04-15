@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import useOrganization from "@/lib/organizations/useOrganization";
+import { isSmsGatewayProvider } from "@/lib/sms-gateway/provider";
 
 type ProviderMode = "agency_managed" | "disabled";
 type ProviderConfigRow = Awaited<ReturnType<typeof getGraceProviderConfigs>>[number];
@@ -50,8 +51,8 @@ const PROVIDERS: ProviderDefinition[] = [
     key: "ai-gemini",
     channel: "ai",
     provider: "gemini",
-    title: "Gemini (AI Brain)",
-    summary: "Core reasoning for Grace command, workflows, and assistant responses.",
+    title: "Gemini (AI Brain + Voice)",
+    summary: "Core reasoning, transcription, and spoken replies for Grace command, workflows, and assistant responses.",
     fields: [
       {
         key: "apiKey",
@@ -61,31 +62,31 @@ const PROVIDERS: ProviderDefinition[] = [
       },
     ],
     modeDescription: {
-      agency_managed: "Use agency-managed Gemini credentials.",
+      agency_managed: "Use agency-managed Gemini credentials for Grace text and voice runtime.",
       disabled: "Disable Grace AI model access for this channel.",
     },
   },
   {
-    key: "sms-textbee",
+    key: "sms-fellowship-gateway",
     channel: "sms",
-    provider: "textbee",
+    provider: "fellowship_gateway",
     title: "Fellowship 360 Gateway (SMS)",
     summary: "Android gateway delivery for broadcasts, assignment offers, and inbound member text workflows.",
     fields: [
       {
         key: "apiKey",
-        label: "Gateway API Key",
+        label: "Legacy Provider API Key",
         secret: true,
-        placeholder: "managed internally",
+        placeholder: "optional legacy migration fallback",
       },
       {
         key: "baseUrl",
-        label: "Gateway Base URL",
-        placeholder: "https://your-gateway-host",
+        label: "Legacy Provider Base URL",
+        placeholder: "optional legacy migration fallback",
       },
       {
         key: "webhookSecret",
-        label: "Gateway Webhook Secret",
+        label: "SMS Webhook Secret",
         secret: true,
         placeholder: "shared secret for inbound signature",
       },
@@ -93,25 +94,6 @@ const PROVIDERS: ProviderDefinition[] = [
     modeDescription: {
       agency_managed: "Use agency-managed Fellowship 360 Gateway credentials.",
       disabled: "Disable SMS provider for this organization.",
-    },
-  },
-  {
-    key: "voice-elevenlabs",
-    channel: "voice",
-    provider: "elevenlabs",
-    title: "ElevenLabs (Voice Output)",
-    summary: "Converts Grace text responses into spoken audio for in-app voice experiences.",
-    fields: [
-      {
-        key: "apiKey",
-        label: "ElevenLabs API Key",
-        secret: true,
-        placeholder: "eleven_...",
-      },
-    ],
-    modeDescription: {
-      agency_managed: "Use agency-managed voice synthesis credentials.",
-      disabled: "Disable voice synthesis output.",
     },
   },
   {
@@ -161,7 +143,11 @@ const PROVIDERS: ProviderDefinition[] = [
 
 function findRow(rows: ProviderConfigRow[], definition: ProviderDefinition) {
   return rows.find(
-    (row) => row.channel === definition.channel && row.provider === definition.provider
+    (row) =>
+      row.channel === definition.channel &&
+      (definition.channel === "sms"
+        ? isSmsGatewayProvider(row.provider)
+        : row.provider === definition.provider)
   );
 }
 
@@ -559,7 +545,7 @@ export default function IntegrationsPage() {
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
-                  {definition.provider === "textbee" && draft.mode === "agency_managed" ? (
+                  {definition.channel === "sms" && draft.mode === "agency_managed" ? (
                     <div className="col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/50">
                       <div className="flex items-center gap-3">
                         <div className={`h-2 w-2 rounded-full ${smsDevice?.isActive ? 'bg-emerald-500' : 'bg-amber-500'}`} />

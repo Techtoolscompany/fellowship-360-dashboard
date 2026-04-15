@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import withSuperAdminAuthRequired from "@/lib/auth/withSuperAdminAuthRequired";
-import { getAutomationTemplateCatalog } from "@/lib/automations/templates";
+import { listAutomationLibraryTemplates } from "@/lib/automations/template-registry";
 import { deployAutomationTemplateBatch } from "@/lib/super-admin/deploy-template";
 
 const deploySchema = z.object({
@@ -11,13 +11,15 @@ const deploySchema = z.object({
 });
 
 export const GET = withSuperAdminAuthRequired(async () => {
-  const templates = getAutomationTemplateCatalog().map((template) => ({
+  const templates = (await listAutomationLibraryTemplates()).map((template) => ({
     key: template.key,
     name: template.name,
     description: template.description,
     category: template.category,
     triggerEvent: template.triggerEvent,
     nodeCount: template.definition.nodes.length,
+    source: template.source,
+    status: template.status,
   }));
 
   return NextResponse.json({

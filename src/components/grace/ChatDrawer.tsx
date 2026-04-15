@@ -144,12 +144,12 @@ export function ChatDrawer({ open, onClose }: ChatDrawerProps) {
 
   const handleOpenVoiceCommand = () => {
     onClose();
-    router.push("/app/grace?tab=command&voice=1");
+    router.push("/app/grace?tab=home&voice=1");
   };
 
   const handleReviewApprovals = () => {
     onClose();
-    router.push("/app/grace?tab=center");
+    router.push("/app/grace?tab=workflow");
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

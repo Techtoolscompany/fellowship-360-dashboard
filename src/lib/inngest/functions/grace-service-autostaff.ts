@@ -22,42 +22,21 @@ import {
   scoreStaffCandidate,
   scoreVolunteerCandidate,
 } from "@/lib/grace/assignment-scoring";
+import {
+  buildVolunteerStaffingGoalContext,
+  buildVolunteerStaffingGoalResult,
+  buildVolunteerStaffingStepTemplates,
+  summarizeVolunteerStaffingAssignmentProgress,
+  updateVolunteerStaffingGoalStatus,
+  updateVolunteerStaffingGoalStep,
+  VOLUNTEER_STAFFING_WORKFLOW_KEY,
+} from "@/lib/grace/workflows/volunteer";
 import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 import { inngest } from "../client";
 import { INNGEST_EVENTS } from "../events";
 import { INNGEST_RETRY_PROFILES } from "../policy";
 
-const AUTOSTAFF_STEPS: Array<{
-  stepKey: string;
-  title: string;
-  runOrder: number;
-}> = [
-  {
-    stepKey: "ensure_assignments",
-    title: "Ensure run has assignment seats",
-    runOrder: 10,
-  },
-  {
-    stepKey: "seed_assignments",
-    title: "Auto-fill seats from recommendations",
-    runOrder: 20,
-  },
-  {
-    stepKey: "send_offers",
-    title: "Send SMS offers to proposed assignees",
-    runOrder: 30,
-  },
-  {
-    stepKey: "wait_responses",
-    title: "Wait for volunteer/staff responses",
-    runOrder: 40,
-  },
-  {
-    stepKey: "escalate_gaps",
-    title: "Escalate unresolved required seats",
-    runOrder: 50,
-  },
-];
+const AUTOSTAFF_STEPS = buildVolunteerStaffingStepTemplates();
 
 function normalizePhoneNumber(value: string | null | undefined) {
   if (!value) return "";
@@ -140,18 +119,16 @@ async function updateGoalStatus(
     errorText: string | null;
   }>
 ) {
-  await db
-    .update(graceGoals)
-    .set({
-      status,
-      startedAt: extra?.startedAt,
-      completedAt: extra?.completedAt,
-      nextRunAt: extra?.nextRunAt,
-      resultJson: extra?.resultJson,
-      errorText: extra?.errorText,
-      updatedAt: new Date(),
-    })
-    .where(eq(graceGoals.id, goalId));
+  await updateVolunteerStaffingGoalStatus({
+    goalId,
+    status,
+    source: "automation_runtime",
+    startedAt: extra?.startedAt ?? undefined,
+    nextRunAt: extra?.nextRunAt ?? undefined,
+    completedAt: extra?.completedAt ?? undefined,
+    errorText: extra?.errorText ?? undefined,
+    resultJsonPatch: extra?.resultJson ?? undefined,
+  });
 }
 
 async function startGoalStep(
@@ -159,19 +136,16 @@ async function startGoalStep(
   stepKey: string,
   inputJson?: Record<string, unknown>
 ) {
-  await db
-    .update(graceGoalSteps)
-    .set({
-      status: "in_progress",
-      startedAt: new Date(),
-      completedAt: null,
-      inputJson: inputJson ?? null,
-      outputJson: null,
-      errorText: null,
-      attemptCount: sql`${graceGoalSteps.attemptCount} + 1`,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(graceGoalSteps.goalId, goalId), eq(graceGoalSteps.stepKey, stepKey)));
+  await updateVolunteerStaffingGoalStep({
+    goalId,
+    stepKey,
+    status: "in_progress",
+    source: "automation_runtime",
+    inputJson: inputJson ?? null,
+    startedAt: new Date(),
+    completedAt: null,
+    attemptCountDelta: 1,
+  });
 }
 
 async function finishGoalStep(params: {
@@ -181,18 +155,15 @@ async function finishGoalStep(params: {
   outputJson?: Record<string, unknown>;
   errorText?: string | null;
 }) {
-  await db
-    .update(graceGoalSteps)
-    .set({
-      status: params.status,
-      outputJson: params.outputJson ?? null,
-      errorText: params.errorText ?? null,
-      completedAt: params.status === "waiting" ? null : new Date(),
-      updatedAt: new Date(),
-    })
-    .where(
-      and(eq(graceGoalSteps.goalId, params.goalId), eq(graceGoalSteps.stepKey, params.stepKey))
-    );
+  await updateVolunteerStaffingGoalStep({
+    goalId: params.goalId,
+    stepKey: params.stepKey,
+    status: params.status,
+    source: "automation_runtime",
+    outputJson: params.outputJson ?? null,
+    errorText: params.errorText ?? null,
+    completedAt: params.status === "waiting" ? null : new Date(),
+  });
 }
 
 export const graceServiceAutostaff = inngest.createFunction(
@@ -240,6 +211,27 @@ export const graceServiceAutostaff = inngest.createFunction(
       }
 
       await ensureGoalStepRows(goal.id, goal.organizationId);
+
+      const contextJson = goal.contextJson as Record<string, unknown> | null;
+      if (!contextJson || contextJson.workflowKey !== VOLUNTEER_STAFFING_WORKFLOW_KEY) {
+        await db
+          .update(graceGoals)
+          .set({
+            contextJson: buildVolunteerStaffingGoalContext({
+              serviceRunId: serviceRun.id,
+              templateId: serviceRun.templateId,
+              serviceAt: serviceRun.serviceAt,
+              triggerSource: "automation_runtime",
+              triggerChannel: "inngest",
+              requestedByUserId: goal.requestedByUserId,
+              objectiveText: goal.objectiveText,
+              waitHours,
+            }),
+            updatedAt: new Date(),
+          })
+          .where(eq(graceGoals.id, goal.id));
+      }
+
       return {
         goal,
         serviceRun,
@@ -901,33 +893,13 @@ export const graceServiceAutostaff = inngest.createFunction(
         serviceRunId: context.serviceRun.id,
       });
 
-      const rows = await db
-        .select({
-          assignment: serviceAssignments,
-          roleSlot: serviceTemplateRoleSlots,
-        })
-        .from(serviceAssignments)
-        .leftJoin(serviceTemplateRoleSlots, eq(serviceAssignments.roleSlotId, serviceTemplateRoleSlots.id))
-        .where(eq(serviceAssignments.serviceRunId, context.serviceRun.id))
-        .orderBy(serviceAssignments.roleName, desc(serviceAssignments.createdAt));
-
-      const satisfiedStatuses = new Set(["confirmed", "checked_in", "checked_out"]);
-      const statusCounts = rows.reduce<Record<string, number>>((acc, row) => {
-        acc[row.assignment.status] = (acc[row.assignment.status] ?? 0) + 1;
-        return acc;
-      }, {});
-
-      const requiredOpenRows = rows.filter((row) => {
-        const isRequired = row.roleSlot?.isRequired ?? true;
-        if (!isRequired) return false;
-        return !satisfiedStatuses.has(row.assignment.status);
+      const progress = await summarizeVolunteerStaffingAssignmentProgress({
+        organizationId: context.goal.organizationId,
+        serviceRunId: context.serviceRun.id,
       });
-
-      const uniqueOpenRoles = Array.from(new Set(requiredOpenRows.map((row) => row.assignment.roleName)));
-      const unresolvedRequiredSeats = requiredOpenRows.length;
       const serviceRunAt = toDate(context.serviceRun.serviceAt) ?? new Date();
 
-      if (unresolvedRequiredSeats > 0) {
+      if (progress.unresolvedRequiredSeats > 0) {
         const dueDate =
           serviceRunAt.getTime() > Date.now()
             ? new Date(
@@ -943,42 +915,45 @@ export const graceServiceAutostaff = inngest.createFunction(
           title: `Service coverage gap: ${context.serviceRun.name}`,
           description: `Grace auto-staffing could not confirm all required seats for ${formatShortDateTime(
             serviceRunAt
-          )}. Open roles: ${uniqueOpenRoles.join(", ") || "See assignments board"}.`,
+          )}. Open roles: ${progress.openRequiredRoles.join(", ") || "See assignments board"}.`,
           priority: "high",
           status: "todo",
           dueDate,
         });
 
-        const resultJson = {
-          statusCounts,
-          unresolvedRequiredSeats,
-          openRoles: uniqueOpenRoles,
-          escalatedAt: new Date().toISOString(),
-        };
-
-        await finishGoalStep({
-          goalId: context.goal.id,
-          stepKey: "escalate_gaps",
-          status: "completed",
-          outputJson: resultJson,
+        const resultJson = buildVolunteerStaffingGoalResult({
+          serviceRunId: context.serviceRun.id,
+          status: "escalated",
+          summary: {
+            statusCounts: progress.statusCounts,
+            unresolvedRequiredSeats: progress.unresolvedRequiredSeats,
+            openRoles: progress.openRequiredRoles,
+            escalatedAt: new Date().toISOString(),
+          },
+          openRequiredSeats: progress.unresolvedRequiredSeats,
+          openRoles: progress.openRequiredRoles,
         });
+
         await updateGoalStatus(context.goal.id, "escalated", {
           completedAt: new Date(),
           resultJson,
-          errorText: `${unresolvedRequiredSeats} required seats remain unconfirmed.`,
+          errorText: `${progress.unresolvedRequiredSeats} required seats remain unconfirmed.`,
         });
-        return {
-          status: "escalated",
-          ...resultJson,
-        };
+        return resultJson;
       }
 
-      const resultJson = {
-        statusCounts,
-        unresolvedRequiredSeats: 0,
+      const resultJson = buildVolunteerStaffingGoalResult({
+        serviceRunId: context.serviceRun.id,
+        status: "completed",
+        summary: {
+          statusCounts: progress.statusCounts,
+          unresolvedRequiredSeats: 0,
+          openRoles: [],
+          completedAt: new Date().toISOString(),
+        },
+        openRequiredSeats: 0,
         openRoles: [],
-        completedAt: new Date().toISOString(),
-      };
+      });
 
       await finishGoalStep({
         goalId: context.goal.id,
@@ -992,10 +967,7 @@ export const graceServiceAutostaff = inngest.createFunction(
         errorText: null,
       });
 
-      return {
-        status: "completed",
-        ...resultJson,
-      };
+      return resultJson;
     });
 
       logger.info("Grace service autostaff finished", {
@@ -1006,7 +978,6 @@ export const graceServiceAutostaff = inngest.createFunction(
 
       return {
         goalId: context.goal.id,
-        serviceRunId: context.serviceRun.id,
         waitHours,
         ...finalSummary,
       };

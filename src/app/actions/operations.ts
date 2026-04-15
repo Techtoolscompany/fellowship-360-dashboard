@@ -25,8 +25,10 @@ import * as z from "zod";
 import { inngest } from "@/lib/inngest/client";
 import {
   INNGEST_EVENTS,
+  buildAppointmentScheduledIdempotencyKey,
   buildGraceServiceAutostaffIdempotencyKey,
   buildServiceAssignmentReplacementIdempotencyKey,
+  buildVolunteerCreatedIdempotencyKey,
 } from "@/lib/inngest/events";
 import { sendOrganizationSms } from "@/lib/sms-gateway/send";
 import {
@@ -36,6 +38,16 @@ import {
   getRescheduledAppointmentStatus,
   type AppointmentLifecycleStatus,
 } from "@/lib/operations/appointments-lifecycle";
+import { compatibleChurchContactSelect } from "@/lib/contacts/projection";
+import {
+  buildVolunteerStaffingGoalResult,
+  deriveVolunteerStaffingReplyProgress,
+  ensureVolunteerStaffingGoalRecord,
+  summarizeVolunteerStaffingAssignmentProgress,
+  updateVolunteerStaffingGoalStatus,
+  updateVolunteerStaffingGoalStep,
+  VOLUNTEER_STAFFING_WORKFLOW_KEY,
+} from "@/lib/grace/workflows/volunteer";
 
 function getConflictWindow(dateTime: Date) {
   return {
@@ -446,7 +458,7 @@ export async function getAppointments(
   await requireOrgMembership(orgId);
   if (filters?.status) {
     return await db
-      .select({ appointment: appointments, contact: churchContacts })
+      .select({ appointment: appointments, contact: compatibleChurchContactSelect })
       .from(appointments)
       .leftJoin(
         churchContacts,
@@ -461,7 +473,7 @@ export async function getAppointments(
       .orderBy(appointments.dateTime);
   }
   return await db
-    .select({ appointment: appointments, contact: churchContacts })
+    .select({ appointment: appointments, contact: compatibleChurchContactSelect })
     .from(appointments)
     .leftJoin(churchContacts, eq(appointments.contactId, churchContacts.id))
     .where(eq(appointments.organizationId, orgId))
@@ -528,6 +540,35 @@ export async function createAppointment(data: {
     entityId: appointment.id,
     details: { contactId: parsed.contactId, staffId: parsed.staffId, type: parsed.type }
   });
+
+  try {
+    const idempotencyKey = buildAppointmentScheduledIdempotencyKey({
+      organizationId: parsed.organizationId,
+      appointmentId: appointment.id,
+    });
+    await inngest.send({
+      id: idempotencyKey,
+      name: INNGEST_EVENTS.APPOINTMENT_SCHEDULED,
+      data: {
+        organizationId: parsed.organizationId,
+        appointmentId: appointment.id,
+        contactId: appointment.contactId ?? undefined,
+        staffId: appointment.staffId ?? undefined,
+        title: appointment.title,
+        dateTime: appointment.dateTime.toISOString(),
+        duration: appointment.duration ?? undefined,
+        type: appointment.type ?? null,
+        status: "scheduled",
+        idempotencyKey,
+      },
+    });
+  } catch (error) {
+    console.error("[Operations] Appointment scheduled workflow enqueue failed", {
+      appointmentId: appointment.id,
+      organizationId: parsed.organizationId,
+      error,
+    });
+  }
 
   return appointment;
 }
@@ -756,7 +797,7 @@ function assertVolunteerStatusTransition(
 export async function getVolunteers(orgId: string) {
   await requireOrgMembership(orgId);
   return await db
-    .select({ volunteer: volunteers, contact: churchContacts })
+    .select({ volunteer: volunteers, contact: compatibleChurchContactSelect })
     .from(volunteers)
     .leftJoin(churchContacts, eq(volunteers.contactId, churchContacts.id))
     .where(eq(volunteers.organizationId, orgId))
@@ -852,6 +893,34 @@ export async function createVolunteer(data: {
       mode: existing ? "upsert_existing" : "created",
     }
   });
+
+  if (!existing) {
+    try {
+      const idempotencyKey = buildVolunteerCreatedIdempotencyKey({
+        organizationId: parsed.organizationId,
+        volunteerId: volunteer.id,
+      });
+
+      await inngest.send({
+        id: idempotencyKey,
+        name: INNGEST_EVENTS.VOLUNTEER_CREATED,
+        data: {
+          organizationId: parsed.organizationId,
+          volunteerId: volunteer.id,
+          contactId: parsed.contactId,
+          role: volunteer.role ?? null,
+          status: volunteer.status,
+          idempotencyKey,
+        },
+      });
+    } catch (error) {
+      console.error("[Operations] Volunteer created workflow enqueue failed", {
+        volunteerId: volunteer.id,
+        organizationId: parsed.organizationId,
+        error,
+      });
+    }
+  }
 
   return volunteer;
 }
@@ -1100,7 +1169,7 @@ export async function getVolunteerShifts(data: {
     .select({
       shift: volunteerShifts,
       volunteer: volunteers,
-      contact: churchContacts,
+      contact: compatibleChurchContactSelect,
     })
     .from(volunteerShifts)
     .innerJoin(volunteers, eq(volunteerShifts.volunteerId, volunteers.id))
@@ -2352,7 +2421,7 @@ export async function getServiceRunAssignments(serviceRunId: string) {
     .select({
       assignment: serviceAssignments,
       volunteer: volunteers,
-      contact: churchContacts,
+      contact: compatibleChurchContactSelect,
       staff: users,
     })
     .from(serviceAssignments)
@@ -2802,6 +2871,15 @@ function getOperationsSystemToken() {
   );
 }
 
+function hasInngestEventKey() {
+  return Boolean(process.env.INNGEST_EVENT_KEY?.trim());
+}
+
+function isInngestDispatchConfigurationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /event key not found/i.test(message) || /\b401\b/.test(message);
+}
+
 function assertOperationsSystemToken(token: string) {
   const expected = getOperationsSystemToken();
   if (!expected) {
@@ -3231,12 +3309,25 @@ export async function sendServiceAssignmentOffers(data: {
     .parse(data);
 
   const serviceRun = await requireServiceRunAccess(parsed.serviceRunId, "admin");
+  const workflowGoalRecord = await ensureVolunteerStaffingGoalRecord({
+    organizationId: serviceRun.organizationId,
+    serviceRunId: serviceRun.id,
+    serviceRunName: serviceRun.name,
+    serviceAt: serviceRun.serviceAt,
+    templateId: serviceRun.templateId,
+    sourceChannel: "in_app",
+    triggerSource: "service_page",
+    requestedByUserId: serviceRun.session.userId,
+    objectiveText:
+      parsed.messageTemplate?.trim() ||
+      `Send volunteer offers for "${serviceRun.name}".`,
+  });
 
   const rows = await db
     .select({
       assignment: serviceAssignments,
       volunteer: volunteers,
-      contact: churchContacts,
+      contact: compatibleChurchContactSelect,
       staff: users,
     })
     .from(serviceAssignments)
@@ -3353,6 +3444,86 @@ export async function sendServiceAssignmentOffers(data: {
     },
   });
 
+  const progress = await summarizeVolunteerStaffingAssignmentProgress({
+    organizationId: serviceRun.organizationId,
+    serviceRunId: serviceRun.id,
+  });
+  const workflowStatus: "waiting" | "completed" =
+    progress.unresolvedRequiredSeats <= 0 ? "completed" : "waiting";
+
+  await updateVolunteerStaffingGoalStep({
+    organizationId: serviceRun.organizationId,
+    goalId: workflowGoalRecord.goal.id,
+    serviceRunId: serviceRun.id,
+    stepKey: "send_offers",
+    status: "completed",
+    source: "grace_executor",
+    actorType: "staff",
+    channel: "in_app",
+    sessionId: null,
+    outputJson: {
+      attempted: candidateRows.length,
+      sent: sentCount,
+      skipped: skippedCount,
+      failed: failedCount,
+      workflowKey: VOLUNTEER_STAFFING_WORKFLOW_KEY,
+    },
+    actionName: "sendServiceAssignmentOffers",
+  });
+
+  await updateVolunteerStaffingGoalStep({
+    organizationId: serviceRun.organizationId,
+    goalId: workflowGoalRecord.goal.id,
+    serviceRunId: serviceRun.id,
+    stepKey: "wait_responses",
+    status: workflowStatus === "completed" ? "completed" : "waiting",
+    source: "grace_executor",
+    actorType: "staff",
+    channel: "in_app",
+    sessionId: null,
+    outputJson: {
+      waitingForReplies: workflowStatus !== "completed",
+      openRequiredSeats: progress.unresolvedRequiredSeats,
+      openRoles: progress.openRequiredRoles,
+      workflowKey: VOLUNTEER_STAFFING_WORKFLOW_KEY,
+    },
+    actionName: "sendServiceAssignmentOffers",
+  });
+
+  await updateVolunteerStaffingGoalStatus({
+    organizationId: serviceRun.organizationId,
+    goalId: workflowGoalRecord.goal.id,
+    serviceRunId: serviceRun.id,
+    status: workflowStatus,
+    source: "grace_executor",
+    actorType: "staff",
+    channel: "in_app",
+    sessionId: null,
+    contextJsonPatch: {
+      lastManualActionAt: new Date().toISOString(),
+      lastManualAction: "sendServiceAssignmentOffers",
+      lastOfferSummary: {
+        attempted: candidateRows.length,
+        sent: sentCount,
+        skipped: skippedCount,
+        failed: failedCount,
+      },
+    },
+    resultJsonPatch: buildVolunteerStaffingGoalResult({
+      serviceRunId: serviceRun.id,
+      status: workflowStatus,
+      summary: {
+        attempted: candidateRows.length,
+        sent: sentCount,
+        skipped: skippedCount,
+        failed: failedCount,
+      },
+      openRequiredSeats: progress.unresolvedRequiredSeats,
+      openRoles: progress.openRequiredRoles,
+    }),
+    actionName: "sendServiceAssignmentOffers",
+  });
+
   return {
     serviceRunId: serviceRun.id,
     attempted: candidateRows.length,
@@ -3391,7 +3562,7 @@ export async function processServiceAssignmentSmsReply(data: {
       assignment: serviceAssignments,
       run: serviceRuns,
       volunteer: volunteers,
-      contact: churchContacts,
+      contact: compatibleChurchContactSelect,
     })
     .from(serviceAssignments)
     .innerJoin(serviceRuns, eq(serviceAssignments.serviceRunId, serviceRuns.id))
@@ -3460,11 +3631,101 @@ export async function processServiceAssignmentSmsReply(data: {
       "Grace: got it. We will follow up with a replacement or alternate scheduling option.";
   }
 
-  await sendOrganizationSms({
+  const sendResult = await sendOrganizationSms({
     organizationId: parsed.organizationId,
     to: normalizedFrom,
     message: replyMessage,
     idempotencyKey: `${updated.id}:reply:${response.nextStatus}`,
+  });
+
+  const workflowGoalRecord = await ensureVolunteerStaffingGoalRecord({
+    organizationId: parsed.organizationId,
+    serviceRunId: matched.run.id,
+    serviceRunName: matched.run.name,
+    serviceAt: matched.run.serviceAt,
+    templateId: matched.run.templateId ?? null,
+    sourceChannel: "sms_public",
+    triggerSource: "sms_reply",
+    objectiveText: `Continue volunteer staffing for "${matched.run.name}" after an inbound volunteer reply.`,
+  });
+
+  const progress = await summarizeVolunteerStaffingAssignmentProgress({
+    organizationId: parsed.organizationId,
+    serviceRunId: matched.run.id,
+  });
+  const workflowProgress = deriveVolunteerStaffingReplyProgress({
+    assignmentStatus: updated.status,
+    unresolvedRequiredSeats: progress.unresolvedRequiredSeats,
+  });
+
+  const workflowResult = buildVolunteerStaffingGoalResult({
+    serviceRunId: matched.run.id,
+    status: workflowProgress.workflowStatus,
+    summary: {
+      assignmentId: updated.id,
+      assignmentStatus: updated.status,
+      replyQueued: sendResult.success,
+      replySent: sendResult.success,
+      replyProviderMessageId: sendResult.providerMessageId ?? null,
+    },
+    lastReply: {
+      assignmentId: updated.id,
+      assignmentStatus: updated.status,
+      replyMessage,
+      replyQueued: sendResult.success,
+      replyProviderMessageId: sendResult.providerMessageId ?? null,
+      repliedAt: new Date().toISOString(),
+    },
+    openRequiredSeats: progress.unresolvedRequiredSeats,
+    openRoles: progress.openRequiredRoles,
+  });
+
+  await updateVolunteerStaffingGoalStep({
+    organizationId: parsed.organizationId,
+    goalId: workflowGoalRecord.goal.id,
+    serviceRunId: matched.run.id,
+    stepKey: "wait_responses",
+    status: workflowProgress.stepStatus,
+    source: "grace_executor",
+    actorType: "public",
+    channel: "sms_public",
+    sessionId: null,
+    outputJson: {
+      assignmentId: updated.id,
+      assignmentStatus: updated.status,
+      replyMessage,
+      replyQueued: sendResult.success,
+      replyProviderMessageId: sendResult.providerMessageId ?? null,
+      workflowStatus: workflowProgress.workflowStatus,
+      unresolvedRequiredSeats: progress.unresolvedRequiredSeats,
+      openRoles: progress.openRequiredRoles,
+      workflowKey: VOLUNTEER_STAFFING_WORKFLOW_KEY,
+    },
+    errorText: sendResult.success ? null : sendResult.error ?? "SMS reply dispatch failed",
+    actionName: "processServiceAssignmentSmsReply",
+  });
+
+  await updateVolunteerStaffingGoalStatus({
+    organizationId: parsed.organizationId,
+    goalId: workflowGoalRecord.goal.id,
+    serviceRunId: matched.run.id,
+    status: workflowProgress.workflowStatus,
+    source: "grace_executor",
+    actorType: "public",
+    channel: "sms_public",
+    sessionId: null,
+    completedAt: workflowProgress.workflowStatus === "completed" ? new Date() : null,
+    contextJsonPatch: {
+      lastReplyAt: new Date().toISOString(),
+      lastReplyAssignmentId: updated.id,
+      lastReplyAssignmentStatus: updated.status,
+      lastReplyMessage: replyMessage,
+      currentRequiredSeats: progress.unresolvedRequiredSeats,
+      currentOpenRoles: progress.openRequiredRoles,
+    },
+    resultJsonPatch: workflowResult,
+    errorText: sendResult.success ? null : sendResult.error ?? "SMS reply dispatch failed",
+    actionName: "processServiceAssignmentSmsReply",
   });
 
   return {
@@ -3472,52 +3733,16 @@ export async function processServiceAssignmentSmsReply(data: {
     assignmentId: updated.id,
     assignmentStatus: updated.status,
     replyMessage,
+    replySendResult: sendResult,
+    replyQueued: sendResult.success,
+    providerMessageId: sendResult.providerMessageId,
+    replySent: sendResult.success,
+    replyProviderMessageId: sendResult.providerMessageId,
+    replyError: sendResult.error ?? null,
+    workflowGoalId: workflowGoalRecord.goal.id,
+    workflowStatus: workflowProgress.workflowStatus,
+    workflowKey: VOLUNTEER_STAFFING_WORKFLOW_KEY,
   };
-}
-
-const serviceAutostaffStepTemplates: Array<{
-  stepKey: string;
-  title: string;
-  runOrder: number;
-}> = [
-  {
-    stepKey: "ensure_assignments",
-    title: "Ensure run has assignment seats",
-    runOrder: 10,
-  },
-  {
-    stepKey: "seed_assignments",
-    title: "Auto-fill seats from recommendations",
-    runOrder: 20,
-  },
-  {
-    stepKey: "send_offers",
-    title: "Send SMS offers to proposed assignees",
-    runOrder: 30,
-  },
-  {
-    stepKey: "wait_responses",
-    title: "Wait for volunteer/staff responses",
-    runOrder: 40,
-  },
-  {
-    stepKey: "escalate_gaps",
-    title: "Escalate unresolved required seats",
-    runOrder: 50,
-  },
-];
-
-async function seedGraceGoalSteps(goalId: string, organizationId: string) {
-  const values = serviceAutostaffStepTemplates.map((step) => ({
-    goalId,
-    organizationId,
-    stepKey: step.stepKey,
-    title: step.title,
-    runOrder: step.runOrder,
-    status: "pending" as const,
-  }));
-
-  return db.insert(graceGoalSteps).values(values).returning();
 }
 
 export async function getGraceGoals(
@@ -3525,6 +3750,7 @@ export async function getGraceGoals(
   filters?: {
     status?: "queued" | "in_progress" | "waiting" | "completed" | "failed" | "cancelled" | "escalated";
     goalType?: "service_staffing" | "communications_followup" | "operations" | "custom";
+    workflowKey?: "volunteer_staffing" | "guest_followup" | "prayer_care" | "legacy_goal";
     serviceRunId?: string;
   }
 ) {
@@ -3535,6 +3761,9 @@ export async function getGraceGoals(
   }
   if (filters?.goalType) {
     clauses.push(eq(graceGoals.goalType, filters.goalType));
+  }
+  if (filters?.workflowKey) {
+    clauses.push(eq(graceGoals.workflowKey, filters.workflowKey));
   }
   if (filters?.serviceRunId) {
     clauses.push(eq(graceGoals.serviceRunId, filters.serviceRunId));
@@ -3588,52 +3817,59 @@ export async function startServiceRunAutostaffGoal(data: {
     .parse(data);
 
   const serviceRun = await requireServiceRunAccess(parsed.serviceRunId, "admin");
-  const [existingGoal] = await db
-    .select()
-    .from(graceGoals)
-    .where(
-      and(
-        eq(graceGoals.organizationId, serviceRun.organizationId),
-        eq(graceGoals.goalType, "service_staffing"),
-        eq(graceGoals.serviceRunId, serviceRun.id),
-        inArray(graceGoals.status, ["queued", "in_progress", "waiting"])
-      )
-    )
-    .orderBy(desc(graceGoals.createdAt))
-    .limit(1);
+  const goalRecord = await ensureVolunteerStaffingGoalRecord({
+    organizationId: serviceRun.organizationId,
+    serviceRunId: serviceRun.id,
+    serviceRunName: serviceRun.name,
+    serviceAt: serviceRun.serviceAt,
+    templateId: serviceRun.templateId,
+    sourceChannel: parsed.sourceChannel,
+    triggerSource: "service_page",
+    requestedByUserId: serviceRun.session.userId,
+    objectiveText:
+      parsed.objectiveText?.trim() ||
+      `Auto-staff "${serviceRun.name}" for ${formatShortDateTime(serviceRun.serviceAt)}.`,
+    waitHours: parsed.waitHours ?? null,
+  });
 
-  if (existingGoal) {
+  if (!goalRecord.created) {
     return {
-      goal: existingGoal,
+      goal: goalRecord.goal,
       created: false,
       dispatched: false,
       waitHours: null,
     };
   }
 
-  const objectiveText =
-    parsed.objectiveText?.trim() ||
-    `Auto-staff "${serviceRun.name}" for ${formatShortDateTime(serviceRun.serviceAt)}.`;
+  const goal = goalRecord.goal;
 
-  const [goal] = await db
-    .insert(graceGoals)
-    .values({
-      organizationId: serviceRun.organizationId,
-      goalType: "service_staffing",
-      status: "queued",
-      sourceChannel: parsed.sourceChannel,
-      objectiveText,
-      serviceRunId: serviceRun.id,
-      requestedByUserId: serviceRun.session.userId,
-      contextJson: {
-        serviceRunId: serviceRun.id,
-        templateId: serviceRun.templateId,
-        serviceAt: serviceRun.serviceAt.toISOString(),
-      },
-    })
-    .returning();
+  const markGoalDispatchFailed = async (errorText: string) => {
+    const [updatedGoal] = await db
+      .update(graceGoals)
+      .set({
+        status: "failed",
+        errorText,
+        updatedAt: new Date(),
+      })
+      .where(eq(graceGoals.id, goal.id))
+      .returning();
 
-  await seedGraceGoalSteps(goal.id, serviceRun.organizationId);
+    return updatedGoal ?? { ...goal, status: "failed", errorText, updatedAt: new Date() };
+  };
+
+  if (!hasInngestEventKey()) {
+    const errorText =
+      "Autostaff goal was created, but Inngest event dispatch is not configured in this environment.";
+    const updatedGoal = await markGoalDispatchFailed(errorText);
+
+    return {
+      goal: updatedGoal,
+      created: true,
+      dispatched: false,
+      waitHours: parsed.waitHours ?? null,
+      message: errorText,
+    };
+  }
 
   try {
     await inngest.send({
@@ -3653,15 +3889,18 @@ export async function startServiceRunAutostaffGoal(data: {
   } catch (error) {
     const errorText =
       error instanceof Error ? error.message : "Failed to dispatch auto-staff workflow";
+    const updatedGoal = await markGoalDispatchFailed(errorText);
 
-    await db
-      .update(graceGoals)
-      .set({
-        status: "failed",
-        errorText,
-        updatedAt: new Date(),
-      })
-      .where(eq(graceGoals.id, goal.id));
+    if (isInngestDispatchConfigurationError(error)) {
+      return {
+        goal: updatedGoal,
+        created: true,
+        dispatched: false,
+        waitHours: parsed.waitHours ?? null,
+        message:
+          "Autostaff goal was created, but the background runner could not be reached. Configure a valid Inngest event key and try again.",
+      };
+    }
 
     throw new Error(errorText);
   }

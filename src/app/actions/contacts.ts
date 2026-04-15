@@ -4,6 +4,7 @@ import { db } from "@/db";
 import {
   churchContacts,
   contactTags,
+  families,
   donations,
   pledges,
   appointments,
@@ -23,8 +24,12 @@ import {
   graceFollowupProposals,
   graceContactMatchAudit,
   serviceSchedulingProfiles,
+  attendanceEntries,
+  attendanceSessions,
+  serviceAssignments,
+  serviceRuns,
 } from "@/db/schema";
-import { eq, and, ilike, or, desc, sql, count, inArray, ne, type SQL } from "drizzle-orm";
+import { eq, and, ilike, or, desc, sql, count, inArray, ne, asc, type SQL } from "drizzle-orm";
 import { requireOrgMembership } from "./utils";
 import {
   mergeContactNotes,
@@ -37,6 +42,10 @@ import {
   normalizeImportedMemberStatus,
   normalizeMemberStatusValue,
 } from "@/lib/contacts/member-status";
+import {
+  compatibleChurchContactSelect,
+  compatibleMemberSinceDate,
+} from "@/lib/contacts/projection";
 import {
   syncContactArchivedToDittofeed,
   syncContactCreatedToDittofeed,
@@ -54,7 +63,7 @@ export async function getContactProfile(contactId: string, organizationId: strin
   const parsedOrganizationId = organizationIdSchema.parse(organizationId);
   await requireOrgMembership(parsedOrganizationId);
   const [contact] = await db
-    .select()
+    .select(compatibleChurchContactSelect)
     .from(churchContacts)
     .where(
       and(
@@ -67,6 +76,7 @@ export async function getContactProfile(contactId: string, organizationId: strin
   if (!contact) {
     return {
       contact: null,
+      household: null,
       tags: [],
       donations: [],
       pledges: [],
@@ -75,11 +85,41 @@ export async function getContactProfile(contactId: string, organizationId: strin
       pipeline: [],
       volunteer: null,
       shifts: [],
+      ministries: [],
+      conversations: [],
+      graceSessions: [],
+      handoffs: [],
+      followupProposals: [],
+      attendance: [],
+      serviceAttendance: [],
+      attendanceSummary: {
+        worship: 0,
+        ministry: 0,
+        serving: 0,
+        total: 0,
+        lastRecordedAt: null,
+      },
+      careSummary: {
+        openPrayer: 0,
+        openConversations: 0,
+        pendingAppointments: 0,
+        openHandoffs: 0,
+        pendingGraceFollowups: 0,
+        overdueItems: 0,
+      },
+      financeSummary: {
+        totalGiving: 0,
+        donationCount: 0,
+        activePledges: 0,
+      },
+      timeline: [],
     };
   }
 
   const [
     tags,
+    household,
+    householdMembers,
     contactDonations,
     contactPledges,
     contactAppointments,
@@ -87,8 +127,47 @@ export async function getContactProfile(contactId: string, organizationId: strin
     pipelineData,
     volunteerRecord,
     contactMinistries,
+    contactConversations,
+    contactGraceSessions,
+    contactHandoffs,
+    contactFollowupProposals,
+    contactAttendance,
+    contactServiceAttendance,
   ] = await Promise.all([
     db.select().from(contactTags).where(eq(contactTags.contactId, parsedContactId)),
+    contact.familyId
+      ? db
+          .select()
+          .from(families)
+          .where(
+            and(
+              eq(families.id, contact.familyId),
+              eq(families.organizationId, parsedOrganizationId)
+            )
+          )
+          .limit(1)
+          .then((rows) => rows[0] ?? null)
+      : Promise.resolve(null),
+    contact.familyId
+      ? db
+          .select({
+            id: churchContacts.id,
+            firstName: churchContacts.firstName,
+            lastName: churchContacts.lastName,
+            email: churchContacts.email,
+            phone: churchContacts.phone,
+            memberStatus: churchContacts.memberStatus,
+            memberSinceDate: compatibleMemberSinceDate,
+          })
+          .from(churchContacts)
+          .where(
+            and(
+              eq(churchContacts.familyId, contact.familyId),
+              eq(churchContacts.organizationId, parsedOrganizationId)
+            )
+          )
+          .orderBy(asc(churchContacts.firstName), asc(churchContacts.lastName))
+      : Promise.resolve([]),
     db.select().from(donations)
       .where(
         and(
@@ -144,6 +223,66 @@ export async function getContactProfile(contactId: string, organizationId: strin
       .from(ministryMembers)
       .innerJoin(ministries, eq(ministryMembers.ministryId, ministries.id))
       .where(eq(ministryMembers.contactId, parsedContactId)),
+    db.select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.contactId, parsedContactId),
+          eq(conversations.organizationId, parsedOrganizationId)
+        )
+      )
+      .orderBy(desc(conversations.lastMessageAt), desc(conversations.updatedAt)),
+    db.select()
+      .from(graceSessions)
+      .where(
+        and(
+          eq(graceSessions.organizationId, parsedOrganizationId),
+          or(
+            eq(graceSessions.contactId, parsedContactId),
+            eq(graceSessions.matchedContactId, parsedContactId)
+          )
+        )
+      )
+      .orderBy(desc(graceSessions.updatedAt), desc(graceSessions.createdAt)),
+    db.select()
+      .from(graceHandoffs)
+      .where(
+        and(
+          eq(graceHandoffs.contactId, parsedContactId),
+          eq(graceHandoffs.organizationId, parsedOrganizationId)
+        )
+      )
+      .orderBy(desc(graceHandoffs.createdAt)),
+    db.select()
+      .from(graceFollowupProposals)
+      .where(
+        and(
+          eq(graceFollowupProposals.contactId, parsedContactId),
+          eq(graceFollowupProposals.organizationId, parsedOrganizationId)
+        )
+      )
+      .orderBy(desc(graceFollowupProposals.createdAt)),
+    db.select({ entry: attendanceEntries, session: attendanceSessions })
+      .from(attendanceEntries)
+      .innerJoin(attendanceSessions, eq(attendanceEntries.sessionId, attendanceSessions.id))
+      .where(
+        and(
+          eq(attendanceEntries.contactId, parsedContactId),
+          eq(attendanceEntries.organizationId, parsedOrganizationId)
+        )
+      )
+      .orderBy(desc(attendanceSessions.occurredAt), desc(attendanceEntries.recordedAt)),
+    db.select({ assignment: serviceAssignments, serviceRun: serviceRuns })
+      .from(serviceAssignments)
+      .innerJoin(serviceRuns, eq(serviceAssignments.serviceRunId, serviceRuns.id))
+      .innerJoin(volunteers, eq(serviceAssignments.volunteerId, volunteers.id))
+      .where(
+        and(
+          eq(serviceAssignments.organizationId, parsedOrganizationId),
+          eq(volunteers.contactId, parsedContactId)
+        )
+      )
+      .orderBy(desc(serviceRuns.serviceAt), desc(serviceAssignments.checkedInAt)),
   ]);
 
   // Volunteer shifts if a volunteer record exists
@@ -153,8 +292,170 @@ export async function getContactProfile(contactId: string, organizationId: strin
         .orderBy(desc(volunteerShifts.date))
     : [];
 
+  const attendanceSummary = {
+    worship: contactAttendance.filter(
+      (row) => row.session.type === "worship" && row.entry.status === "present"
+    ).length,
+    ministry: contactAttendance.filter(
+      (row) => row.session.type === "ministry" && row.entry.status === "present"
+    ).length,
+    serving: contactServiceAttendance.filter(
+      (row) =>
+        Boolean(row.assignment.checkedInAt) ||
+        row.assignment.status === "checked_in" ||
+        row.assignment.status === "checked_out"
+    ).length,
+    total: 0,
+    lastRecordedAt: null as Date | null,
+  };
+  attendanceSummary.total =
+    attendanceSummary.worship + attendanceSummary.ministry + attendanceSummary.serving;
+  attendanceSummary.lastRecordedAt =
+    [
+      ...contactAttendance.map((row) => row.entry.recordedAt ?? row.session.occurredAt),
+      ...contactServiceAttendance.map(
+        (row) => row.assignment.checkedInAt ?? row.serviceRun.serviceAt
+      ),
+    ]
+      .filter((value): value is Date => Boolean(value))
+      .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+
+  const careSummary = {
+    openPrayer: contactPrayer.filter((row) => row.status !== "answered" && row.status !== "archived")
+      .length,
+    openConversations: contactConversations.filter(
+      (row) => row.status === "open" || row.status === "waiting"
+    ).length,
+    pendingAppointments: contactAppointments.filter(
+      (row) =>
+        row.status === "scheduled" ||
+        row.status === "confirmed"
+    ).length,
+    openHandoffs: contactHandoffs.filter((row) => row.status !== "resolved").length,
+    pendingGraceFollowups: contactFollowupProposals.filter((row) => row.status === "pending")
+      .length,
+    overdueItems:
+      contactAppointments.filter(
+        (row) =>
+          (row.status === "scheduled" || row.status === "confirmed") &&
+          new Date(row.dateTime).getTime() < Date.now()
+      ).length +
+      contactFollowupProposals.filter((row) => row.status === "pending").length,
+  };
+
+  const financeSummary = {
+    totalGiving: contactDonations.reduce((sum, donation) => sum + Number(donation.amount ?? 0), 0),
+    donationCount: contactDonations.length,
+    activePledges: contactPledges.filter((pledge) => {
+      if (!pledge.endDate) return true;
+      return new Date(pledge.endDate).getTime() >= Date.now();
+    }).length,
+  };
+
+  const timeline = [
+    ...contactDonations.map((donation) => ({
+      id: `donation:${donation.id}`,
+      type: "donation",
+      occurredAt: donation.date ?? donation.createdAt,
+      title: `Donation received • $${Number(donation.amount ?? 0).toFixed(2)}`,
+      detail: [donation.fund ?? "General", donation.method?.replaceAll("_", " ") ?? "cash"]
+        .filter(Boolean)
+        .join(" • "),
+      status: donation.receiptSent ? "receipt_sent" : "receipt_pending",
+    })),
+    ...contactPledges.map((pledge) => ({
+      id: `pledge:${pledge.id}`,
+      type: "pledge",
+      occurredAt: pledge.createdAt,
+      title: `Pledge created • $${Number(pledge.totalAmount ?? 0).toFixed(2)}`,
+      detail: [pledge.frequency, pledge.fund ?? "General"].filter(Boolean).join(" • "),
+      status: pledge.endDate && new Date(pledge.endDate).getTime() < Date.now() ? "completed" : "active",
+    })),
+    ...contactPrayer.map((request) => ({
+      id: `prayer:${request.id}`,
+      type: "prayer_request",
+      occurredAt: request.updatedAt ?? request.createdAt,
+      title: `Prayer request • ${request.urgency}`,
+      detail: request.content,
+      status: request.status,
+    })),
+    ...contactAppointments.map((appointment) => ({
+      id: `appointment:${appointment.id}`,
+      type: "appointment",
+      occurredAt: appointment.dateTime,
+      title: appointment.title,
+      detail: [appointment.type, appointment.notes].filter(Boolean).join(" • "),
+      status: appointment.status,
+    })),
+    ...contactMinistries.map(({ membership, ministry }) => ({
+      id: `ministry:${membership.id}`,
+      type: "ministry_membership",
+      occurredAt: membership.joinedAt,
+      title: `Joined ${ministry.name}`,
+      detail: membership.role.replaceAll("_", " "),
+      status: membership.role,
+    })),
+    ...contactConversations.map((conversation) => ({
+      id: `conversation:${conversation.id}`,
+      type: "conversation",
+      occurredAt:
+        conversation.lastMessageAt ?? conversation.updatedAt ?? conversation.createdAt,
+      title: `Conversation • ${conversation.channel}`,
+      detail: conversation.subject ?? "No subject",
+      status: conversation.status,
+    })),
+    ...contactGraceSessions.map((session) => ({
+      id: `grace-session:${session.id}`,
+      type: "grace_session",
+      occurredAt: session.updatedAt ?? session.createdAt,
+      title: `Grace ${session.channel} session`,
+      detail: session.finalSummary ?? session.handoffReason ?? "Grace interaction recorded",
+      status: session.status,
+    })),
+    ...contactHandoffs.map((handoff) => ({
+      id: `grace-handoff:${handoff.id}`,
+      type: "grace_handoff",
+      occurredAt: handoff.createdAt,
+      title: `Grace handoff • ${handoff.reason.replaceAll("_", " ")}`,
+      detail: handoff.summaryText ?? handoff.assignedTeam ?? "Awaiting staff resolution",
+      status: handoff.status,
+    })),
+    ...contactFollowupProposals.map((proposal) => ({
+      id: `grace-followup:${proposal.id}`,
+      type: "grace_followup",
+      occurredAt: proposal.createdAt,
+      title: `Grace follow-up proposal • ${proposal.proposedChannel}`,
+      detail: proposal.reason ?? proposal.subject ?? proposal.messageText,
+      status: proposal.status,
+    })),
+    ...contactAttendance.map((row) => ({
+      id: `attendance:${row.entry.id}`,
+      type: "attendance",
+      occurredAt: row.session.occurredAt,
+      title: `${row.session.name}`,
+      detail: `${row.session.type} attendance • ${row.entry.status}`,
+      status: row.entry.status,
+    })),
+    ...contactServiceAttendance.map((row) => ({
+      id: `service-attendance:${row.assignment.id}`,
+      type: "service_attendance",
+      occurredAt: row.assignment.checkedInAt ?? row.serviceRun.serviceAt,
+      title: `${row.serviceRun.name} • ${row.assignment.roleName}`,
+      detail: row.assignment.notes ?? "Serving attendance recorded",
+      status: row.assignment.status,
+    })),
+  ]
+    .filter((item) => Boolean(item.occurredAt))
+    .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+
   return {
     contact,
+    household: household
+      ? {
+          family: household,
+          members: householdMembers,
+        }
+      : null,
     tags,
     donations: contactDonations,
     pledges: contactPledges,
@@ -164,6 +465,16 @@ export async function getContactProfile(contactId: string, organizationId: strin
     volunteer: volunteerRecord,
     shifts,
     ministries: contactMinistries,
+    conversations: contactConversations,
+    graceSessions: contactGraceSessions,
+    handoffs: contactHandoffs,
+    followupProposals: contactFollowupProposals,
+    attendance: contactAttendance,
+    serviceAttendance: contactServiceAttendance,
+    attendanceSummary,
+    careSummary,
+    financeSummary,
+    timeline,
   };
 }
 
@@ -174,8 +485,13 @@ export type ImportContactRow = {
   lastName: string;
   email?: string;
   phone?: string;
+  family?: string;
+  household?: string;
+  tags?: string;
   memberStatus?: string;
   source?: string;
+  firstVisitDate?: string;
+  memberSinceDate?: string;
   notes?: string;
 };
 
@@ -209,8 +525,13 @@ const importContactRowSchema = z.object({
   lastName: z.string(),
   email: z.string().optional(),
   phone: z.string().optional(),
+  family: z.string().optional(),
+  household: z.string().optional(),
+  tags: z.string().optional(),
   memberStatus: z.string().optional(),
   source: z.string().optional(),
+  firstVisitDate: z.string().optional(),
+  memberSinceDate: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -222,6 +543,9 @@ const createContactSchema = z.object({
   memberStatus: memberStatusSchema.optional(),
   source: contactSourceSchema.optional(),
   familyId: z.string().trim().optional(),
+  dateOfBirth: z.union([z.coerce.date(), z.null()]).optional(),
+  firstVisitDate: z.union([z.coerce.date(), z.null()]).optional(),
+  memberSinceDate: z.union([z.coerce.date(), z.null()]).optional(),
   notes: z.string().trim().optional(),
   organizationId: organizationIdSchema,
 });
@@ -234,6 +558,9 @@ const updateContactSchema = z.object({
   memberStatus: memberStatusSchema.optional(),
   source: contactSourceSchema.optional(),
   familyId: z.string().trim().nullable().optional(),
+  dateOfBirth: z.union([z.coerce.date(), z.null()]).optional(),
+  firstVisitDate: z.union([z.coerce.date(), z.null()]).optional(),
+  memberSinceDate: z.union([z.coerce.date(), z.null()]).optional(),
   notes: z.string().trim().nullable().optional(),
 });
 
@@ -243,10 +570,112 @@ const mergeContactsSchema = z.object({
 });
 
 const VALID_ACTIVE_STATUSES = new Set(["visitor", "prospect", "regular_attendee", "member", "leader"]);
+const MEMBER_LIKE_STATUSES = new Set<MemberStatusValue>(["member", "leader"]);
+
+function isMemberLikeStatus(status: string | null | undefined): status is "member" | "leader" {
+  const normalized = normalizeMemberStatusValue(status);
+  return normalized ? MEMBER_LIKE_STATUSES.has(normalized) : false;
+}
 
 function normalizeContactSourceValue(value: string | null | undefined): ContactSourceValue {
   const normalized = typeof value === "string" ? value.trim() : "";
-  return CONTACT_SOURCE_VALUES.find((source) => source === normalized) ?? "other";
+  const aliasMap: Record<string, ContactSourceValue> = {
+    walkin: "walk_in",
+    "walk in": "walk_in",
+    guest_card: "walk_in",
+    guestcard: "walk_in",
+    web: "website",
+    webform: "website",
+    web_form: "website",
+    online: "website",
+    invite: "referral",
+    friend: "referral",
+    family: "referral",
+    social: "social_media",
+    instagram: "social_media",
+    facebook: "social_media",
+  };
+  const collapsed = normalized.toLowerCase().replace(/[\s-]+/g, "_");
+  return (
+    CONTACT_SOURCE_VALUES.find((source) => source === collapsed) ??
+    aliasMap[normalized.toLowerCase()] ??
+    aliasMap[collapsed] ??
+    "other"
+  );
+}
+
+function normalizeImportDate(value: string | null | undefined, label: string) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`${label} must be a valid date`);
+  }
+  return parsed;
+}
+
+function normalizeDelimitedTags(value: string | null | undefined) {
+  if (!value) {
+    return [];
+  }
+  return Array.from(
+    new Set(
+      value
+        .split(/[|,;]+/)
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+async function getOrCreateFamilyByName(params: {
+  organizationId: string;
+  familyName?: string | null;
+}) {
+  const normalized = params.familyName?.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const [existing] = await db
+    .select()
+    .from(families)
+    .where(
+      and(
+        eq(families.organizationId, params.organizationId),
+        sql`lower(trim(${families.name})) = ${normalized.toLowerCase()}`
+      )
+    )
+    .limit(1);
+
+  if (existing) {
+    return existing;
+  }
+
+  const [created] = await db
+    .insert(families)
+    .values({
+      organizationId: params.organizationId,
+      name: normalized,
+    })
+    .returning();
+
+  return created ?? null;
+}
+
+async function replaceContactTags(contactId: string, tags: string[]) {
+  await db.delete(contactTags).where(eq(contactTags.contactId, contactId));
+  if (tags.length === 0) {
+    return;
+  }
+  await db.insert(contactTags).values(
+    tags.map((tag) => ({
+      contactId,
+      tag,
+    }))
+  );
 }
 
 async function findContactDuplicateByIdentifiers(params: {
@@ -338,12 +767,22 @@ export async function importContacts(
       const lastName = row.lastName.trim();
       if (!firstName || !lastName) throw new Error("firstName and lastName are required");
 
-      const email = row.email?.trim().toLowerCase() || null;
-      const phone = row.phone?.replace(/\D/g, "") || null;
+      const email = normalizeContactEmail(row.email);
+      const phone = normalizeContactPhone(row.phone);
       const importedStatus = normalizeImportedMemberStatus(row.memberStatus);
-      const memberStatus: MemberStatusValue = importedStatus ?? "visitor";
-      const source = normalizeContactSourceValue(row.source);
+      const source =
+        row.source && row.source.trim().length > 0
+          ? normalizeContactSourceValue(row.source)
+          : undefined;
       const notes = row.notes?.trim() || null;
+      const firstVisitDate = normalizeImportDate(row.firstVisitDate, "firstVisitDate");
+      const memberSinceDate = normalizeImportDate(row.memberSinceDate, "memberSinceDate");
+      const familyName = row.household?.trim() || row.family?.trim() || null;
+      const tags = normalizeDelimitedTags(row.tags);
+      const family = await getOrCreateFamilyByName({
+        organizationId: parsedOrganizationId,
+        familyName,
+      });
 
       // Upsert: match existing contact by email or phone within this org
       const matchClauses = [];
@@ -353,7 +792,15 @@ export async function importContacts(
       const existing =
         matchClauses.length > 0
           ? await db
-              .select({ id: churchContacts.id })
+              .select({
+                id: churchContacts.id,
+                memberStatus: churchContacts.memberStatus,
+                source: churchContacts.source,
+                familyId: churchContacts.familyId,
+                firstVisitDate: churchContacts.firstVisitDate,
+                memberSinceDate: compatibleMemberSinceDate,
+                notes: churchContacts.notes,
+              })
               .from(churchContacts)
               .where(and(eq(churchContacts.organizationId, parsedOrganizationId), or(...matchClauses)))
               .limit(1)
@@ -362,9 +809,24 @@ export async function importContacts(
       if (existing[0]) {
         const [updatedContact] = await db
           .update(churchContacts)
-          .set({ firstName, lastName, email, phone, memberStatus, source, notes, updatedAt: new Date() })
+          .set({
+            firstName,
+            lastName,
+            email,
+            phone,
+            memberStatus: importedStatus ?? existing[0].memberStatus,
+            source: source ?? existing[0].source ?? "walk_in",
+            familyId: family?.id ?? existing[0].familyId ?? null,
+            firstVisitDate: firstVisitDate ?? existing[0].firstVisitDate ?? null,
+            memberSinceDate: memberSinceDate ?? existing[0].memberSinceDate ?? null,
+            notes: notes ?? existing[0].notes ?? null,
+            updatedAt: new Date(),
+          })
           .where(eq(churchContacts.id, existing[0].id))
           .returning();
+        if (row.tags !== undefined) {
+          await replaceContactTags(updatedContact.id, tags);
+        }
         await syncContactToDittofeedBestEffort("contacts.import.update", () =>
           syncContactUpdatedToDittofeed({
             organizationId: parsedOrganizationId,
@@ -373,16 +835,23 @@ export async function importContacts(
         );
         result.updated++;
       } else {
+        const memberStatus: MemberStatusValue = importedStatus ?? "visitor";
         const [createdContact] = await db.insert(churchContacts).values({
           firstName,
           lastName,
           email,
           phone,
           memberStatus,
-          source,
+          source: source ?? "walk_in",
+          familyId: family?.id ?? null,
+          firstVisitDate,
+          memberSinceDate,
           notes,
           organizationId: parsedOrganizationId,
         }).returning();
+        if (tags.length > 0) {
+          await replaceContactTags(createdContact.id, tags);
+        }
         await syncContactToDittofeedBestEffort("contacts.import.create", () =>
           syncContactCreatedToDittofeed({
             organizationId: parsedOrganizationId,
@@ -439,7 +908,13 @@ export async function getContacts(
   const offset = (page - 1) * CONTACTS_PAGE_SIZE;
 
   const [rows, [{ total }]] = await Promise.all([
-    db.select().from(churchContacts).where(where).orderBy(desc(churchContacts.createdAt)).limit(CONTACTS_PAGE_SIZE).offset(offset),
+    db
+      .select(compatibleChurchContactSelect)
+      .from(churchContacts)
+      .where(where)
+      .orderBy(desc(churchContacts.createdAt))
+      .limit(CONTACTS_PAGE_SIZE)
+      .offset(offset),
     db.select({ total: count() }).from(churchContacts).where(where),
   ]);
 
@@ -466,7 +941,7 @@ export async function getContact(id: string) {
 
   await requireOrgMembership(existing.organizationId);
   const [contact] = await db
-    .select()
+    .select(compatibleChurchContactSelect)
     .from(churchContacts)
     .where(
       and(
@@ -485,6 +960,9 @@ export async function createContact(data: {
   memberStatus?: string;
   source?: string;
   familyId?: string;
+  dateOfBirth?: Date | null;
+  firstVisitDate?: Date | null;
+  memberSinceDate?: Date | null;
   notes?: string;
   organizationId: string;
 }) {
@@ -514,6 +992,9 @@ export async function createContact(data: {
       memberStatus: parsed.memberStatus ?? "visitor",
       source: parsed.source ?? "walk_in",
       familyId: parsed.familyId ?? null,
+      dateOfBirth: parsed.dateOfBirth ?? null,
+      firstVisitDate: parsed.firstVisitDate ?? null,
+      memberSinceDate: parsed.memberSinceDate ?? null,
       notes: parsed.notes ?? null,
       organizationId: parsed.organizationId,
     })
@@ -555,6 +1036,42 @@ export async function createContact(data: {
     });
   }
 
+  if (isMemberLikeStatus(contact.memberStatus)) {
+    try {
+      const { inngest } = await import("@/lib/inngest/client");
+      const {
+        INNGEST_EVENTS,
+        buildContactMemberCreatedIdempotencyKey,
+      } = await import("@/lib/inngest/events");
+
+      const idempotencyKey = buildContactMemberCreatedIdempotencyKey({
+        organizationId: parsed.organizationId,
+        contactId: contact.id,
+        memberStatus: contact.memberStatus,
+        occurredAt: contact.createdAt.toISOString(),
+      });
+
+      await inngest.send({
+        id: idempotencyKey,
+        name: INNGEST_EVENTS.CONTACT_MEMBER_CREATED,
+        data: {
+          organizationId: parsed.organizationId,
+          contactId: contact.id,
+          memberStatus: contact.memberStatus,
+          occurredAt: contact.createdAt.toISOString(),
+          source: "contact_create",
+          idempotencyKey,
+        },
+      });
+    } catch (error) {
+      console.error("[Contacts] Contact member workflow enqueue failed", {
+        contactId: contact.id,
+        organizationId: parsed.organizationId,
+        error,
+      });
+    }
+  }
+
   return contact;
 }
 
@@ -568,6 +1085,9 @@ export async function updateContact(
     memberStatus: string;
     source: string;
     familyId: string | null;
+    dateOfBirth: Date | null;
+    firstVisitDate: Date | null;
+    memberSinceDate: Date | null;
     notes: string | null;
   }>
 ) {
@@ -579,7 +1099,7 @@ export async function updateContact(
 
   const existing = await requireContactAccess(contactId);
   const [previousContact] = await db
-    .select()
+    .select(compatibleChurchContactSelect)
     .from(churchContacts)
     .where(
       and(eq(churchContacts.id, contactId), eq(churchContacts.organizationId, existing.organizationId))
@@ -611,6 +1131,9 @@ export async function updateContact(
   if (parsed.memberStatus !== undefined) patch.memberStatus = parsed.memberStatus;
   if (parsed.source !== undefined) patch.source = parsed.source;
   if (parsed.familyId !== undefined) patch.familyId = parsed.familyId;
+  if (parsed.dateOfBirth !== undefined) patch.dateOfBirth = parsed.dateOfBirth;
+  if (parsed.firstVisitDate !== undefined) patch.firstVisitDate = parsed.firstVisitDate;
+  if (parsed.memberSinceDate !== undefined) patch.memberSinceDate = parsed.memberSinceDate;
   if (parsed.notes !== undefined) patch.notes = parsed.notes;
   if (normalizedEmail !== undefined) patch.email = normalizedEmail;
   if (normalizedPhone !== undefined) patch.phone = normalizedPhone;
@@ -630,6 +1153,45 @@ export async function updateContact(
       previousContact,
     })
   );
+
+  if (
+    !isMemberLikeStatus(previousContact.memberStatus) &&
+    isMemberLikeStatus(contact.memberStatus)
+  ) {
+    try {
+      const { inngest } = await import("@/lib/inngest/client");
+      const {
+        INNGEST_EVENTS,
+        buildContactMemberCreatedIdempotencyKey,
+      } = await import("@/lib/inngest/events");
+
+      const idempotencyKey = buildContactMemberCreatedIdempotencyKey({
+        organizationId: existing.organizationId,
+        contactId: contact.id,
+        memberStatus: contact.memberStatus,
+        occurredAt: contact.updatedAt.toISOString(),
+      });
+
+      await inngest.send({
+        id: idempotencyKey,
+        name: INNGEST_EVENTS.CONTACT_MEMBER_CREATED,
+        data: {
+          organizationId: existing.organizationId,
+          contactId: contact.id,
+          memberStatus: contact.memberStatus,
+          occurredAt: contact.updatedAt.toISOString(),
+          source: "contact_update",
+          idempotencyKey,
+        },
+      });
+    } catch (error) {
+      console.error("[Contacts] Contact member workflow enqueue failed", {
+        contactId: contact.id,
+        organizationId: existing.organizationId,
+        error,
+      });
+    }
+  }
   return contact;
 }
 
@@ -637,7 +1199,7 @@ export async function archiveContact(id: string) {
   const contactId = contactIdSchema.parse(id);
   const existing = await requireContactAccess(contactId);
   const [previousContact] = await db
-    .select()
+    .select(compatibleChurchContactSelect)
     .from(churchContacts)
     .where(
       and(eq(churchContacts.id, contactId), eq(churchContacts.organizationId, existing.organizationId))
@@ -672,7 +1234,7 @@ export async function restoreContact(id: string, status: string = "visitor") {
   }
   const existing = await requireContactAccess(contactId);
   const [previousContact] = await db
-    .select()
+    .select(compatibleChurchContactSelect)
     .from(churchContacts)
     .where(
       and(eq(churchContacts.id, contactId), eq(churchContacts.organizationId, existing.organizationId))
@@ -861,7 +1423,7 @@ export async function mergeContacts(input: MergeContactsInput) {
 
   return await db.transaction(async (tx) => {
     const [primary] = await tx
-      .select()
+      .select(compatibleChurchContactSelect)
       .from(churchContacts)
       .where(
         and(
@@ -871,7 +1433,7 @@ export async function mergeContacts(input: MergeContactsInput) {
       )
       .limit(1);
     const [duplicate] = await tx
-      .select()
+      .select(compatibleChurchContactSelect)
       .from(churchContacts)
       .where(
         and(
@@ -907,6 +1469,7 @@ export async function mergeContacts(input: MergeContactsInput) {
         avatarUrl: primary.avatarUrl ?? duplicate.avatarUrl,
         dateOfBirth: primary.dateOfBirth ?? duplicate.dateOfBirth,
         firstVisitDate: primary.firstVisitDate ?? duplicate.firstVisitDate,
+        memberSinceDate: primary.memberSinceDate ?? duplicate.memberSinceDate,
         notes: mergeContactNotes(primary.notes, duplicate.notes),
         updatedAt: new Date(),
       })
@@ -1209,6 +1772,38 @@ export async function mergeContacts(input: MergeContactsInput) {
         and(
           eq(graceContactMatchAudit.organizationId, organizationId),
           eq(graceContactMatchAudit.createdContactId, parsed.duplicateContactId)
+        )
+      );
+    const primaryAttendanceSessions = await tx
+      .select({ sessionId: attendanceEntries.sessionId })
+      .from(attendanceEntries)
+      .where(
+        and(
+          eq(attendanceEntries.organizationId, organizationId),
+          eq(attendanceEntries.contactId, parsed.primaryContactId)
+        )
+      );
+    const primaryAttendanceSessionIds = Array.from(
+      new Set(primaryAttendanceSessions.map((row) => row.sessionId))
+    );
+    if (primaryAttendanceSessionIds.length > 0) {
+      await tx
+        .delete(attendanceEntries)
+        .where(
+          and(
+            eq(attendanceEntries.organizationId, organizationId),
+            eq(attendanceEntries.contactId, parsed.duplicateContactId),
+            inArray(attendanceEntries.sessionId, primaryAttendanceSessionIds)
+          )
+        );
+    }
+    await tx
+      .update(attendanceEntries)
+      .set({ contactId: parsed.primaryContactId })
+      .where(
+        and(
+          eq(attendanceEntries.organizationId, organizationId),
+          eq(attendanceEntries.contactId, parsed.duplicateContactId)
         )
       );
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { smsMessages } from "@/db/schema/sms-gateway";
 import { trackDittofeedSmsReply } from "@/lib/dittofeed/sms";
+import { handleInboundGraceSms } from "@/lib/grace/channels/sms/inbound";
 import {
   resolveSmsGatewayDeviceRequestAuth,
   SmsGatewayAuthError,
@@ -54,7 +55,16 @@ export async function POST(req: NextRequest) {
           receivedAtInMillis: body.receivedAtInMillis ?? deliveredAt.getTime(),
         },
       })
-      .returning();
+      .returning({ id: smsMessages.id });
+
+    const result = await handleInboundGraceSms({
+      organizationId: device.organizationId,
+      fromNumber: body.fromNumber,
+      toNumber: body.toNumber || device.phoneNumber,
+      message: body.body,
+      smsGatewayMessageId: message.id,
+      source: "sms_gateway_device",
+    });
 
     try {
       await trackDittofeedSmsReply({
@@ -68,33 +78,11 @@ export async function POST(req: NextRequest) {
       console.error("[SMS Gateway] Failed to sync Dittofeed SMS reply:", error);
     }
 
-    try {
-      const { inngest } = await import("@/lib/inngest/client");
-      const {
-        INNGEST_EVENTS,
-        buildLeadReceivedIdempotencyKey,
-      } = await import("@/lib/inngest/events");
-
-      await inngest.send({
-        id: buildLeadReceivedIdempotencyKey({
-          organizationId: device.organizationId,
-          contactEmail: body.fromNumber,
-          message: body.body,
-        }),
-        name: INNGEST_EVENTS.GRACE_LEAD_RECEIVED,
-        data: {
-          organizationId: device.organizationId,
-          contactName: body.fromNumber,
-          contactEmail: body.fromNumber,
-          message: body.body,
-          idempotencyKey: `sms-inbound-${message.id}`,
-        },
-      });
-    } catch (error) {
-      console.error("[SMS Gateway] Failed to fire GRACE event for inbound SMS:", error);
-    }
-
-    return NextResponse.json({ message, organizationId: device.organizationId });
+    return NextResponse.json({
+      organizationId: device.organizationId,
+      message,
+      grace: result,
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Invalid inbound payload" }, { status: 400 });

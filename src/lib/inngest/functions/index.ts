@@ -17,17 +17,23 @@ import { provisionOrgProviders } from "./provision-org-providers";
 import { financeWeeklyDigest } from "./finance-weekly-digest";
 import { financeWeeklyExceptionAlerts } from "./finance-weekly-exception-alerts";
 import { graceOpsHealthMonitor } from "./grace-ops-health-monitor";
+import { graceProactiveThinker } from "./grace-proactive-thinker";
+import { lapsedGiverRecovery } from "./lapsed-giver-recovery";
 import {
   dispatchAutomationsOnContactCreated,
+  dispatchAutomationsOnContactMemberCreated,
+  dispatchAutomationsOnAppointmentScheduled,
   dispatchAutomationsOnFirstTimeGuestRequested,
   dispatchAutomationsOnMissedCall,
   dispatchAutomationsOnPrayerFollowup,
+  dispatchAutomationsOnVolunteerCreated,
 } from "./automation-event-dispatcher";
 import {
   dispatchDailyMinistryOps,
   dispatchWeeklyMinistryOps,
   replayAutomationDeadLetterQueue,
 } from "./automation-runtime-schedules";
+import { executeAutomationWorkflowRunRequested } from "./automation-workflow-runtime";
 import { generateServiceRunRecapsSchedule } from "./service-run-recap-schedule";
 import { INNGEST_EVENTS } from "../events";
 
@@ -53,6 +59,40 @@ export type InngestEvents = {
       idempotencyKey: string;
     };
   };
+  [INNGEST_EVENTS.CONTACT_MEMBER_CREATED]: {
+    data: {
+      organizationId: string;
+      contactId: string;
+      memberStatus: "member" | "leader";
+      occurredAt: string;
+      source: "contact_create" | "contact_update";
+      idempotencyKey: string;
+    };
+  };
+  [INNGEST_EVENTS.APPOINTMENT_SCHEDULED]: {
+    data: {
+      organizationId: string;
+      appointmentId: string;
+      contactId?: string;
+      staffId?: string;
+      title: string;
+      dateTime: string;
+      duration?: number;
+      type?: string | null;
+      status: "scheduled";
+      idempotencyKey: string;
+    };
+  };
+  [INNGEST_EVENTS.VOLUNTEER_CREATED]: {
+    data: {
+      organizationId: string;
+      volunteerId: string;
+      contactId: string;
+      role?: string | null;
+      status: string;
+      idempotencyKey: string;
+    };
+  };
   [INNGEST_EVENTS.GRACE_FIRST_TIME_GUEST_APPOINTMENT_REQUESTED]: {
     data: {
       organizationId: string;
@@ -63,6 +103,9 @@ export type InngestEvents = {
       trigger: "created" | "stage_changed" | "ai_categorized";
       occurredAt: string;
       idempotencyKey: string;
+      goalId?: string;
+      workflowKey?: "guest_followup";
+      correlationKey?: string | null;
     };
   };
   [INNGEST_EVENTS.COMMUNICATIONS_BROADCAST_SEND_REQUESTED]: {
@@ -91,6 +134,8 @@ export type InngestEvents = {
       goalId: string;
       waitHours?: number;
       idempotencyKey: string;
+      workflowKey?: "volunteer_staffing";
+      correlationKey?: string | null;
     };
   };
   [INNGEST_EVENTS.GRACE_SERVICE_ASSIGNMENT_REPLACEMENT_REQUESTED]: {
@@ -112,6 +157,9 @@ export type InngestEvents = {
       urgency: "normal" | "urgent" | "critical";
       occurredAt: string;
       idempotencyKey: string;
+      goalId?: string;
+      workflowKey?: "prayer_care";
+      correlationKey?: string | null;
     };
   };
   [INNGEST_EVENTS.ORG_CREATED]: {
@@ -120,6 +168,16 @@ export type InngestEvents = {
       churchName?: string;
       churchDenomination?: string;
       churchCity?: string;
+      idempotencyKey: string;
+    };
+  };
+  [INNGEST_EVENTS.AUTOMATION_WORKFLOW_RUN_REQUESTED]: {
+    data: {
+      organizationId: string;
+      workflowId: string;
+      runId: string;
+      source: "manual_trigger" | "event_trigger" | "dead_letter_replay";
+      deadLetterId?: string | null;
       idempotencyKey: string;
     };
   };
@@ -145,12 +203,18 @@ export const functions = [
   financeWeeklyDigest,
   financeWeeklyExceptionAlerts,
   graceOpsHealthMonitor,
+  graceProactiveThinker,
+  lapsedGiverRecovery,
   dispatchAutomationsOnContactCreated,
+  dispatchAutomationsOnContactMemberCreated,
+  dispatchAutomationsOnAppointmentScheduled,
   dispatchAutomationsOnFirstTimeGuestRequested,
   dispatchAutomationsOnMissedCall,
   dispatchAutomationsOnPrayerFollowup,
+  dispatchAutomationsOnVolunteerCreated,
   dispatchDailyMinistryOps,
   dispatchWeeklyMinistryOps,
   replayAutomationDeadLetterQueue,
+  executeAutomationWorkflowRunRequested,
   generateServiceRunRecapsSchedule,
 ];

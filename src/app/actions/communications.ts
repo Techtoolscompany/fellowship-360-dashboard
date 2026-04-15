@@ -14,6 +14,7 @@ import {
   assertConversationStatusTransition,
   parseConversationLifecycleStatus,
 } from "@/lib/operations/conversations-lifecycle";
+import { compatibleChurchContactSelect } from "@/lib/contacts/projection";
 import * as z from "zod";
 
 const CHANNEL_VALUES = ["phone", "sms", "email", "web", "in_person"] as const;
@@ -139,7 +140,7 @@ export async function getConversations(
   if (parsedFilters?.status) {
     const status = parseConversationLifecycleStatus(parsedFilters.status);
     return db
-      .select({ conversation: conversations, contact: churchContacts })
+      .select({ conversation: conversations, contact: compatibleChurchContactSelect })
       .from(conversations)
       .leftJoin(churchContacts, eq(conversations.contactId, churchContacts.id))
       .where(and(eq(conversations.organizationId, parsedOrgId), eq(conversations.status, status)))
@@ -147,7 +148,7 @@ export async function getConversations(
   }
 
   const query = db
-    .select({ conversation: conversations, contact: churchContacts })
+    .select({ conversation: conversations, contact: compatibleChurchContactSelect })
     .from(conversations)
     .leftJoin(churchContacts, eq(conversations.contactId, churchContacts.id));
 
@@ -291,6 +292,9 @@ export async function createBroadcast(data: {
 }) {
   const parsed = createBroadcastSchema.parse(data);
   await requireOrgMembership(parsed.organizationId);
+  if (parsed.channel !== "sms") {
+    throw new Error("Beta broadcasts are SMS-only. Choose SMS for this broadcast.");
+  }
   const [broadcast] = await db
     .insert(broadcasts)
     .values({
@@ -318,6 +322,9 @@ export async function updateBroadcast(
   const existing = await requireBroadcastAccess(broadcastId);
   if (Object.keys(parsed).length === 0) {
     return existing;
+  }
+  if (parsed.channel && parsed.channel !== "sms") {
+    throw new Error("Beta broadcasts are SMS-only. Email and voice broadcasts are not enabled in this launch scope.");
   }
   const [broadcast] = await db
     .update(broadcasts)
@@ -362,7 +369,7 @@ export async function triggerBroadcast(id: string) {
   const broadcastId = recordIdSchema.parse(id);
   const broadcast = await requireBroadcastAccess(broadcastId);
   if (broadcast.channel !== "sms") {
-    throw new Error("Only SMS broadcasts are supported in this demo.");
+    throw new Error("Beta broadcasts are SMS-only. Email and voice broadcasts are not enabled in this launch scope.");
   }
   if (broadcast.status !== "draft" && broadcast.status !== "scheduled") {
     throw new Error("Only draft or scheduled broadcasts can be sent.");
@@ -510,7 +517,7 @@ export async function getPhoneCalls(orgId: string) {
   return await db
     .select({
       conversation: conversations,
-      contact: churchContacts,
+      contact: compatibleChurchContactSelect,
       latestDirection: sql<"inbound" | "outbound" | null>`(
         select m.direction
         from message m

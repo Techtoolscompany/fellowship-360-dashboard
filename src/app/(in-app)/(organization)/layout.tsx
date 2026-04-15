@@ -22,6 +22,7 @@ import {
   Plug,
   Sparkles,
   CalendarClock,
+  CalendarDays,
   ListChecks,
   GitBranch,
 } from "lucide-react";
@@ -75,7 +76,7 @@ function NavItem({
 
   let isActive = pathname === hrefPath;
   if (isActive && hrefTab) {
-    isActive = currentTab === hrefTab || (hrefTab === "command" && !currentTab);
+    isActive = currentTab === hrefTab || (hrefTab === "home" && !currentTab);
   }
 
   // Clean Style: No background overlay on active.
@@ -185,7 +186,7 @@ function SidebarContent({
             {!collapsedSections.grace && (
               <div className="space-y-0.5">
                 <NavItem
-                  href="/app/grace?tab=command"
+                  href="/app/grace?tab=home"
                   icon={Zap}
                   isCollapsed={isCollapsed}
                   badgeLabel="Live"
@@ -201,6 +202,7 @@ function SidebarContent({
         hasAccess("tasks") ||
         hasAccess("finance") ||
         hasAccess("automations") ||
+        hasAccess("communications") ||
         hasAccess("service_ops") ? (
           <>
             <SectionHeader title="Ministry Workflows" section="core" />
@@ -226,8 +228,18 @@ function SidebarContent({
                     Automations
                   </NavItem>
                 ) : null}
+                {hasAccess("communications") ? (
+                  <NavItem href="/app/calendar" icon={CalendarDays} isCollapsed={isCollapsed}>
+                    Calendar
+                  </NavItem>
+                ) : null}
                 {hasAccess("service_ops") ? (
-                  <NavItem href="/app/volunteers" icon={CalendarClock} isCollapsed={isCollapsed}>
+                  <NavItem href="/app/services" icon={CalendarClock} isCollapsed={isCollapsed}>
+                    Services
+                  </NavItem>
+                ) : null}
+                {hasAccess("service_ops") ? (
+                  <NavItem href="/app/volunteers" icon={Users} isCollapsed={isCollapsed}>
                     Volunteers
                   </NavItem>
                 ) : null}
@@ -292,7 +304,7 @@ function SidebarContent({
                   Integrations
                 </NavItem>
                 <NavItem href="/app/settings/grace" icon={Sparkles} isCollapsed={isCollapsed}>
-                  Grace Runtime
+                  Grace Settings
                 </NavItem>
               </div>
             )}

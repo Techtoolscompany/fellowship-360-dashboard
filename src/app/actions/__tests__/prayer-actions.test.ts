@@ -4,11 +4,17 @@ const mocks = vi.hoisted(() => {
   const select = vi.fn();
   const update = vi.fn();
   const requireOrgMembership = vi.fn();
+  const ensurePrayerCareWorkflowGoal = vi.fn();
+  const markPrayerCareWorkflowKickoffConfirmed = vi.fn();
+  const updatePrayerCareWorkflowGoal = vi.fn();
 
   return {
     select,
     update,
     requireOrgMembership,
+    ensurePrayerCareWorkflowGoal,
+    markPrayerCareWorkflowKickoffConfirmed,
+    updatePrayerCareWorkflowGoal,
   };
 });
 
@@ -21,6 +27,14 @@ vi.mock("@/db", () => ({
 
 vi.mock("../utils", () => ({
   requireOrgMembership: mocks.requireOrgMembership,
+}));
+
+vi.mock("@/lib/grace/workflows/prayer-care", () => ({
+  ensurePrayerCareWorkflowGoal: mocks.ensurePrayerCareWorkflowGoal,
+  markPrayerCareWorkflowKickoffConfirmed: mocks.markPrayerCareWorkflowKickoffConfirmed,
+  updatePrayerCareWorkflowGoal: mocks.updatePrayerCareWorkflowGoal,
+  PRAYER_CARE_WORKFLOW_KEY: "prayer_care",
+  buildPrayerCareCorrelationKey: (requestId: string) => `prayer_care:prayer_request:${requestId}`,
 }));
 
 import { updatePrayerRequest } from "../prayer";
@@ -39,6 +53,18 @@ describe("prayer actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireOrgMembership.mockResolvedValue({ userId: "user_1" });
+    mocks.ensurePrayerCareWorkflowGoal.mockResolvedValue({
+      goal: {
+        id: "goal_1",
+        organizationId: "org_1",
+      },
+      created: false,
+    });
+    mocks.markPrayerCareWorkflowKickoffConfirmed.mockResolvedValue(undefined);
+    mocks.updatePrayerCareWorkflowGoal.mockResolvedValue({
+      id: "goal_1",
+      organizationId: "org_1",
+    });
   });
 
   it("throws when prayer request is not found", async () => {
