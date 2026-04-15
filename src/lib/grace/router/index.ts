@@ -1,5 +1,6 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateObject } from "ai";
+import type { ToolSet } from "ai";
 import { z } from "zod";
 import { and, desc, eq, gte, ilike, inArray, lte, or } from "drizzle-orm";
 import { db } from "@/db";
@@ -35,6 +36,7 @@ import {
   writeGraceAuditStreamSafe,
 } from "../audit-stream";
 import { startGraceWorkflowFromDecision } from "../workflows/runtime";
+import type { GraceTool } from "../tools/types";
 
 // ---------------------------------------------------------------------------
 // Zod schema for structured Gemini output
@@ -108,6 +110,26 @@ const graceOutputSchema = z.object({
     .optional()
     .describe("Slot state extracted from this message to persist across turns"),
 });
+
+type GraceLlmOutput = z.infer<typeof graceOutputSchema>;
+type ReasoningLoopExitReason =
+  | "completed"
+  | "budget_exceeded"
+  | "time_budget_exceeded"
+  | "no_tools"
+  | "no_progress"
+  | "max_iterations"
+  | "llm_error";
+
+const GRACE_MAX_REASONING_ITERATIONS = 5;
+const MAX_TOTAL_TOKENS = 12_000;
+const MAX_LOOP_DURATION_MS = 15_000;
+const DEFAULT_PUBLIC_CLAUDE_TOOLS = new Set([
+  "churchInfo.search",
+  "prayerRequests.create",
+  "appointments.checkAvailability",
+  "handoff.transfer",
+]);
 
 type PendingWorkflowConfirmation = GraceWorkflowDecision & {
   requestedAt: string;
@@ -723,7 +745,7 @@ function hasStateUpdates(
 
 function buildReasoningLoopFallbackResponse(params: {
   actionOutcomes: GraceActionOutcome[];
-  exitReason: "completed" | "budget_exceeded" | "time_budget_exceeded" | "no_tools" | "no_progress" | "max_iterations" | "llm_error";
+  exitReason: ReasoningLoopExitReason;
 }) {
   const executedCount = params.actionOutcomes.filter((outcome) =>
     outcome.status === "executed" || outcome.status === "retried"
@@ -760,6 +782,401 @@ function buildReasoningLoopFallbackResponse(params: {
   }
 
   return `I completed the safe next step and stopped when the model became unavailable.${handledText}`;
+}
+
+function mapWorkflowDecision(object: GraceLlmOutput): GraceWorkflowDecision | null {
+  return object.workflowDecision
+    ? {
+        decisionType: object.workflowDecision.decisionType,
+        workflowKey: object.workflowDecision.workflowKey,
+        workflowVersion: object.workflowDecision.workflowVersion,
+        workflowInput: object.workflowDecision.workflowInput,
+        missingInputs: object.workflowDecision.missingInputs ?? [],
+        kickoffSummary: object.workflowDecision.kickoffSummary,
+        nextBestAction: object.workflowDecision.nextBestAction,
+        approvalMode: object.workflowDecision.approvalMode,
+        confidence: object.workflowDecision.confidence,
+      }
+    : null;
+}
+
+async function finalizeGraceRouterOutput(params: {
+  input: GraceRouterInput;
+  object: GraceLlmOutput;
+  accumulatedStateUpdates: Record<string, unknown>;
+  allProposedActions: ProposedAction[];
+  allActionOutcomes: GraceActionOutcome[];
+  reasoningSteps: ReasoningStep[];
+  loopExitReason: ReasoningLoopExitReason;
+}): Promise<GraceRouterOutput> {
+  const {
+    input,
+    object,
+    accumulatedStateUpdates,
+    allProposedActions,
+    allActionOutcomes,
+    reasoningSteps,
+    loopExitReason,
+  } = params;
+  const { message, state, context } = input;
+  const workflowDecision = mapWorkflowDecision(object);
+
+  const updatedState: typeof state = {
+    ...state,
+    ...accumulatedStateUpdates,
+  };
+
+  const finalResponse =
+    loopExitReason === "completed" &&
+    typeof object.response === "string" &&
+    object.response.trim().length > 0
+      ? object.response
+      : buildReasoningLoopFallbackResponse({
+          actionOutcomes: allActionOutcomes,
+          exitReason: loopExitReason,
+        });
+
+  if (
+    context.actorType === "staff" &&
+    loopExitReason === "completed" &&
+    workflowDecision?.decisionType === "start_workflow" &&
+    workflowDecision.workflowKey &&
+    (workflowDecision.missingInputs?.length ?? 0) === 0 &&
+    workflowDecision.approvalMode !== "none"
+  ) {
+    updatedState.pendingWorkflowConfirmation = {
+      ...workflowDecision,
+      requestedAt: new Date().toISOString(),
+      sourceMessage: message,
+    };
+
+    return {
+      response:
+        workflowDecision.kickoffSummary && !finalResponse.includes(workflowDecision.kickoffSummary)
+          ? `${finalResponse}\n\n${workflowDecision.kickoffSummary}\nReply yes to start or no to cancel.`
+          : `${finalResponse}\n\nReply yes to start or no to cancel.`,
+      intent: object.intent as GraceIntent,
+      state: updatedState,
+      proposedActions: allProposedActions,
+      actionOutcomes: allActionOutcomes,
+      workflowDecision,
+      workflowStart: {
+        status: "pending_confirmation",
+        workflowKey: workflowDecision.workflowKey,
+        summary: workflowDecision.kickoffSummary ?? object.response,
+      },
+      reasoning: reasoningSteps.map((s) => s.reasoning).join("\n---\n"),
+      reasoningSteps,
+      iterationCount: reasoningSteps.length,
+    };
+  }
+
+  if (!updatedState.matchedContactId && (updatedState.name || updatedState.phone || updatedState.email)) {
+    const names = updatedState.name ? updatedState.name.split(" ") : [];
+    const firstName = names[0];
+    const lastName = names.slice(1).join(" ");
+
+    const { matchContactForGraceSession } = await import("../contacts/matcher");
+    const matchResult = await matchContactForGraceSession(
+      context.organizationId,
+      context.sessionId,
+      {
+        firstName,
+        lastName: lastName || undefined,
+        phone: updatedState.phone,
+        email: updatedState.email,
+      }
+    );
+
+    updatedState.matchedContactId = matchResult.contactId ?? undefined;
+    updatedState.matchTier = matchResult.confidenceTier;
+  }
+
+  return {
+    response: finalResponse,
+    intent: object.intent as GraceIntent,
+    state: updatedState,
+    proposedActions: allProposedActions,
+    actionOutcomes: allActionOutcomes,
+    workflowDecision,
+    workflowStart: null,
+    reasoning: reasoningSteps.map((s) => s.reasoning).join("\n---\n"),
+    reasoningSteps,
+    iterationCount: reasoningSteps.length,
+  };
+}
+
+function shouldUseClaudeNativeRouter() {
+  const provider = process.env.GRACE_ROUTER_PROVIDER?.trim().toLowerCase();
+  return provider === "anthropic" || provider === "claude";
+}
+
+function getBaseChannel(channel: GraceRouterInput["context"]["channel"]) {
+  if (channel === "voice_internal" || channel === "voice_public") return "voice";
+  if (channel === "sms_public") return "sms";
+  if (channel === "web_public") return "web";
+  return channel;
+}
+
+function isToolAvailableForContext(
+  toolDefinition: GraceTool,
+  context: GraceRouterInput["context"]
+) {
+  const allowedChannels = new Set(toolDefinition.allowedChannels);
+  const baseChannel = getBaseChannel(context.channel);
+  const channelAllowed =
+    allowedChannels.has(context.channel) ||
+    allowedChannels.has(baseChannel);
+
+  if (!channelAllowed) {
+    return false;
+  }
+
+  if (context.actorType !== "public") {
+    return true;
+  }
+
+  const configuredPublicTools = context.policy?.allowedPublicTools;
+  if (configuredPublicTools && configuredPublicTools.length > 0) {
+    return configuredPublicTools.includes(toolDefinition.name);
+  }
+
+  return DEFAULT_PUBLIC_CLAUDE_TOOLS.has(toolDefinition.name);
+}
+
+function toClaudeToolAlias(toolName: string) {
+  return toolName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+}
+
+function toInputRecord(input: unknown): Record<string, unknown> {
+  return input && typeof input === "object" && !Array.isArray(input)
+    ? (input as Record<string, unknown>)
+    : {};
+}
+
+function parseClaudeFinalObject(text: string): GraceLlmOutput | null {
+  const trimmed = text.trim();
+  const withoutFence = trimmed
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  const firstBrace = withoutFence.indexOf("{");
+  const lastBrace = withoutFence.lastIndexOf("}");
+  const candidate =
+    firstBrace >= 0 && lastBrace > firstBrace
+      ? withoutFence.slice(firstBrace, lastBrace + 1)
+      : withoutFence;
+
+  try {
+    const parsed = JSON.parse(candidate);
+    const result = graceOutputSchema.safeParse(parsed);
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
+}
+
+async function runClaudeNativeRouter(params: {
+  input: GraceRouterInput;
+  systemPrompt: string;
+}): Promise<GraceRouterOutput | null> {
+  const { input, systemPrompt } = params;
+  const { message, state, context } = input;
+  const { resolveAnthropicApiKey } = await import("../providers/resolver");
+  const anthropicApiKey = await resolveAnthropicApiKey(context.organizationId);
+
+  if (!anthropicApiKey) {
+    return null;
+  }
+
+  const ai = await import("ai");
+  const { createGraceAnthropicModel, DEFAULT_GRACE_CLAUDE_MODEL } = await import(
+    "../providers/anthropic"
+  );
+  const { graceTools } = await import("../tools/registry");
+  const allProposedActions: ProposedAction[] = [];
+  const allActionOutcomes: GraceActionOutcome[] = [];
+  const accumulatedStateUpdates: Record<string, unknown> = {};
+  const toolsCalled: ReasoningStep["toolsCalled"] = [];
+  const toolAliases = new Map<string, string>();
+  const claudeTools: ToolSet = {};
+
+  for (const toolDefinition of graceTools) {
+    if (!toolDefinition.inputSchema || !isToolAvailableForContext(toolDefinition, context)) {
+      continue;
+    }
+
+    let alias = toClaudeToolAlias(toolDefinition.name);
+    if (toolAliases.has(alias)) {
+      alias = `${alias}_${toolAliases.size + 1}`;
+    }
+    toolAliases.set(alias, toolDefinition.name);
+
+    claudeTools[alias] = ai.tool({
+      description: toolDefinition.description ?? toolDefinition.name,
+      inputSchema: toolDefinition.inputSchema,
+      execute: async (toolInput: unknown) => {
+        const action: ProposedAction = {
+          id: crypto.randomUUID(),
+          tool: toolDefinition.name,
+          input: toInputRecord(toolInput),
+          reason: `Claude tool call: ${toolDefinition.name}`,
+          requiresApproval: Boolean(toolDefinition.requiresApproval),
+        };
+
+        const execution = await executePlannedActions({
+          actions: [action],
+          context,
+          returnToolResults: true,
+        });
+        const result = execution.results[0] ?? {
+          success: false,
+          error: "Tool did not return a result",
+        };
+
+        allProposedActions.push(action);
+        allActionOutcomes.push(...(execution.actionOutcomes ?? []));
+        toolsCalled.push({
+          tool: action.tool,
+          input: action.input,
+          result,
+        });
+
+        return result;
+      },
+    });
+  }
+
+  const startedAt = Date.now();
+
+  try {
+    const llmResult = await ai.generateText({
+      model: createGraceAnthropicModel(anthropicApiKey),
+      system: `${systemPrompt}
+
+# Native Tool Mode
+Use native tools directly when current data or an action is needed. Do not invent tool names or include proposedTools for tools you already called.
+
+When you are finished, return only JSON matching this shape:
+{
+  "reasoning": "brief operator-facing rationale",
+  "continueThinking": false,
+  "intent": "info_request | prayer_request | appointment_request | follow_up_request | contact_request | report_request | emergency | unknown",
+  "response": "the response Grace should say",
+  "workflowDecision": null,
+  "stateUpdates": {}
+}`,
+      prompt: message,
+      tools: claudeTools,
+      toolChoice: "auto",
+      stopWhen: ai.stepCountIs(GRACE_MAX_REASONING_ITERATIONS),
+      temperature: 0.2,
+      maxOutputTokens: 1800,
+      maxRetries: 1,
+    });
+
+    const parsedObject = parseClaudeFinalObject(llmResult.text);
+    const object: GraceLlmOutput =
+      parsedObject ??
+      graceOutputSchema.parse({
+        reasoning:
+          "Claude returned a plain-text response after native tool execution, so Grace used it directly.",
+        continueThinking: false,
+        intent: "unknown",
+        response: llmResult.text.trim(),
+        proposedTools: [],
+        stateUpdates: {},
+      });
+
+    if (object.stateUpdates) {
+      Object.assign(accumulatedStateUpdates, object.stateUpdates);
+    }
+
+    const usage = normalizeAuditUsage((llmResult as { usage?: unknown }).usage);
+    await writeGraceAuditStreamSafe({
+      organizationId: context.organizationId,
+      sessionId: context.sessionId,
+      actorType: context.actorType,
+      channel: context.channel,
+      eventType: "ai_decision",
+      source: "grace_router",
+      status: "success",
+      intent: object.intent,
+      model: DEFAULT_GRACE_CLAUDE_MODEL,
+      latencyMs: Date.now() - startedAt,
+      inputTokens: usage.inputTokens ?? null,
+      outputTokens: usage.outputTokens ?? null,
+      totalTokens: usage.totalTokens ?? null,
+      estimatedCostUsd: estimateModelCostUsd({
+        inputTokens: usage.inputTokens ?? null,
+        outputTokens: usage.outputTokens ?? null,
+      }),
+      metadataJson: {
+        routerProvider: "anthropic",
+        nativeToolMode: true,
+        parsedFinalJson: Boolean(parsedObject),
+        toolCount: Object.keys(claudeTools).length,
+        executedToolCount: toolsCalled.length,
+      },
+    });
+
+    const reasoningSteps: ReasoningStep[] = [
+      {
+        iteration: 0,
+        reasoning: object.reasoning,
+        toolsCalled,
+        durationMs: Date.now() - startedAt,
+      },
+    ];
+
+    return finalizeGraceRouterOutput({
+      input: {
+        message,
+        state,
+        context,
+      },
+      object,
+      accumulatedStateUpdates,
+      allProposedActions,
+      allActionOutcomes,
+      reasoningSteps,
+      loopExitReason: "completed",
+    });
+  } catch (llmError) {
+    console.error("[Grace] Claude native tool routing failed:", llmError);
+    await writeGraceAuditStreamSafe({
+      organizationId: context.organizationId,
+      sessionId: context.sessionId,
+      actorType: context.actorType,
+      channel: context.channel,
+      eventType: "ai_decision",
+      source: "grace_router",
+      status: "error",
+      intent: "unknown",
+      model: DEFAULT_GRACE_CLAUDE_MODEL,
+      latencyMs: Date.now() - startedAt,
+      errorText: llmError instanceof Error ? llmError.message : "claude_router_failed",
+      metadataJson: {
+        routerProvider: "anthropic",
+        fallbackResponse: true,
+      },
+    });
+
+    return {
+      response:
+        "I'm temporarily unavailable and unable to process your request right now. " +
+        "Please try again in a moment, or contact the church office directly for assistance.",
+      intent: "unknown" as GraceIntent,
+      state,
+      proposedActions: allProposedActions,
+      actionOutcomes: allActionOutcomes,
+      workflowDecision: null,
+      workflowStart: null,
+      availabilityStatus: "llm_unavailable",
+      availabilityMessage:
+        "Grace AI is temporarily unavailable right now. Please try again in a moment.",
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -990,6 +1407,13 @@ export async function runClawRouter(input: GraceRouterInput): Promise<GraceRoute
     currentState: state,
   });
 
+  if (shouldUseClaudeNativeRouter()) {
+    const claudeResult = await runClaudeNativeRouter({ input, systemPrompt });
+    if (claudeResult) {
+      return claudeResult;
+    }
+  }
+
   if (!geminiApiKey) {
     console.error("[Grace] Gemini provider is not configured for organization:", context.organizationId);
     await writeGraceAuditStreamSafe({
@@ -1035,9 +1459,6 @@ export async function runClawRouter(input: GraceRouterInput): Promise<GraceRoute
   //   4. Loop ends when continueThinking=false or max iterations reached
   // ---------------------------------------------------------------------------
 
-  const MAX_ITERATIONS = 5;
-  const MAX_TOTAL_TOKENS = 12_000;
-  const MAX_LOOP_DURATION_MS = 15_000;
   const reasoningSteps: ReasoningStep[] = [];
   const allProposedActions: ProposedAction[] = [];
   const allActionOutcomes: GraceActionOutcome[] = [];
@@ -1047,16 +1468,9 @@ export async function runClawRouter(input: GraceRouterInput): Promise<GraceRoute
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   const loopStartedAt = Date.now();
-  let loopExitReason:
-    | "completed"
-    | "budget_exceeded"
-    | "time_budget_exceeded"
-    | "no_tools"
-    | "no_progress"
-    | "max_iterations"
-    | "llm_error" = "max_iterations";
+  let loopExitReason: ReasoningLoopExitReason = "max_iterations";
 
-  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+  for (let iteration = 0; iteration < GRACE_MAX_REASONING_ITERATIONS; iteration++) {
     const iterationStart = Date.now();
 
     // Build the prompt: original message + accumulated tool results
@@ -1246,103 +1660,13 @@ export async function runClawRouter(input: GraceRouterInput): Promise<GraceRoute
     }
   }
 
-  // Use the final iteration's output
-  const object = finalObject!;
-
-  const workflowDecision: GraceWorkflowDecision | null = object.workflowDecision
-    ? {
-        decisionType: object.workflowDecision.decisionType,
-        workflowKey: object.workflowDecision.workflowKey,
-        workflowVersion: object.workflowDecision.workflowVersion,
-        workflowInput: object.workflowDecision.workflowInput,
-        missingInputs: object.workflowDecision.missingInputs ?? [],
-        kickoffSummary: object.workflowDecision.kickoffSummary,
-        nextBestAction: object.workflowDecision.nextBestAction,
-        approvalMode: object.workflowDecision.approvalMode,
-        confidence: object.workflowDecision.confidence,
-      }
-    : null;
-
-  // Merge any state updates extracted across all iterations
-  const updatedState: typeof state = {
-    ...state,
-    ...accumulatedStateUpdates,
-  };
-
-  const finalResponse =
-    loopExitReason === "completed" && typeof object.response === "string" && object.response.trim().length > 0
-      ? object.response
-      : buildReasoningLoopFallbackResponse({
-          actionOutcomes: allActionOutcomes,
-          exitReason: loopExitReason,
-        });
-
-  if (
-    context.actorType === "staff" &&
-    loopExitReason === "completed" &&
-    workflowDecision?.decisionType === "start_workflow" &&
-    workflowDecision.workflowKey &&
-    (workflowDecision.missingInputs?.length ?? 0) === 0 &&
-    workflowDecision.approvalMode !== "none"
-  ) {
-    updatedState.pendingWorkflowConfirmation = {
-      ...workflowDecision,
-      requestedAt: new Date().toISOString(),
-      sourceMessage: message,
-    };
-
-    return {
-      response:
-        workflowDecision.kickoffSummary && !finalResponse.includes(workflowDecision.kickoffSummary)
-          ? `${finalResponse}\n\n${workflowDecision.kickoffSummary}\nReply yes to start or no to cancel.`
-          : `${finalResponse}\n\nReply yes to start or no to cancel.`,
-      intent: object.intent as GraceIntent,
-      state: updatedState,
-      proposedActions: allProposedActions,
-      actionOutcomes: allActionOutcomes,
-      workflowDecision,
-      workflowStart: {
-        status: "pending_confirmation",
-        workflowKey: workflowDecision.workflowKey,
-        summary: workflowDecision.kickoffSummary ?? object.response,
-      },
-      reasoning: reasoningSteps.map((s) => s.reasoning).join("\n---\n"),
-      reasoningSteps,
-      iterationCount: reasoningSteps.length,
-    };
-  }
-
-  if (!updatedState.matchedContactId && (updatedState.name || updatedState.phone || updatedState.email)) {
-    const names = updatedState.name ? updatedState.name.split(" ") : [];
-    const firstName = names[0];
-    const lastName = names.slice(1).join(" ");
-
-    const { matchContactForGraceSession } = await import("../contacts/matcher");
-    const matchResult = await matchContactForGraceSession(
-      context.organizationId,
-      context.sessionId,
-      {
-        firstName,
-        lastName: lastName || undefined,
-        phone: updatedState.phone,
-        email: updatedState.email
-      }
-    );
-
-    updatedState.matchedContactId = matchResult.contactId ?? undefined;
-    updatedState.matchTier = matchResult.confidenceTier;
-  }
-
-  return {
-    response: finalResponse,
-    intent: object.intent as GraceIntent,
-    state: updatedState,
-    proposedActions: allProposedActions,
-    actionOutcomes: allActionOutcomes,
-    workflowDecision,
-    workflowStart: null,
-    reasoning: reasoningSteps.map((s) => s.reasoning).join("\n---\n"),
+  return finalizeGraceRouterOutput({
+    input,
+    object: finalObject!,
+    accumulatedStateUpdates,
+    allProposedActions,
+    allActionOutcomes,
     reasoningSteps,
-    iterationCount: reasoningSteps.length,
-  };
+    loopExitReason,
+  });
 }

@@ -27,6 +27,7 @@ import {
   syncContactCreatedToDittofeed,
   syncContactToDittofeedBestEffort,
 } from "@/lib/dittofeed/contacts";
+import { z } from "zod";
 
 function isAppointmentConflictError(error: unknown) {
   if (typeof error === "object" && error !== null && "code" in error) {
@@ -206,8 +207,199 @@ async function sendEmailViaProvider(
   await sendMail(to, subject, html);
 }
 
+const idSchema = z.string().min(1).describe("Existing database id");
+const optionalIdSchema = z.string().min(1).optional().describe("Existing database id");
+const isoDateTimeSchema = z.string().min(1).describe("ISO 8601 date or datetime string");
+const optionalIsoDateTimeSchema = isoDateTimeSchema.optional();
+const optionalLimit25Schema = z.number().int().min(1).max(25).optional();
+const optionalLimit50Schema = z.number().int().min(1).max(50).optional();
+const optionalLimit200Schema = z.number().int().min(1).max(200).optional();
+
+const contactsUpsertInputSchema = z.object({
+  name: z.string().optional().describe("Full name when known"),
+  email: z.string().optional().describe("Email address when known"),
+  phone: z.string().optional().describe("Phone number when known"),
+  notes: z.string().optional().describe("Relevant contact notes"),
+});
+
+const churchInfoSearchInputSchema = z.object({
+  query: z.string().min(1).describe("Question or search terms for church knowledge"),
+});
+
+const prayerCreateInputSchema = z.object({
+  content: z.string().min(1).describe("The prayer request text"),
+  contactId: optionalIdSchema,
+  contactName: z.string().optional(),
+  urgency: z.enum(["normal", "urgent", "critical"]).optional(),
+  assignedTeam: z.string().optional(),
+  isAnonymous: z.boolean().optional(),
+});
+
+const appointmentCheckAvailabilityInputSchema = z.object({
+  rangeStart: optionalIsoDateTimeSchema.describe("Start of the availability window"),
+  rangeEnd: optionalIsoDateTimeSchema.describe("End of the availability window"),
+});
+
+const appointmentBookInputSchema = z.object({
+  dateTime: isoDateTimeSchema.describe("Appointment start time"),
+  duration: z.number().int().min(5).max(480).optional(),
+  contactId: optionalIdSchema,
+  title: z.string().optional(),
+  type: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+const messageSendSmsInputSchema = z.object({
+  to: z.string().min(1).describe("Destination phone number"),
+  message: z.string().min(1).describe("SMS body to send"),
+  contactId: optionalIdSchema,
+  idempotencyKey: z.string().optional(),
+});
+
+const messageSendEmailInputSchema = z.object({
+  to: z.string().min(1).describe("Destination email address"),
+  subject: z.string().optional(),
+  html: z.string().optional().describe("HTML email body"),
+  message: z.string().optional().describe("Plain message fallback used as HTML"),
+});
+
+const staffAlertInputSchema = z.object({
+  reason: z.string().min(1).describe("Short reason staff should be alerted"),
+  details: z.string().optional().describe("Supporting context for the alert"),
+});
+
+const handoffTransferInputSchema = z.object({
+  reason: z.string().optional().describe("Reason for human handoff"),
+  details: z.string().optional().describe("Summary to give the staff member"),
+});
+
+const tasksCreateInputSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  assigneeId: optionalIdSchema,
+  dueDate: optionalIsoDateTimeSchema,
+  priority: z.string().optional(),
+});
+
+const contactsSearchInputSchema = z.object({
+  query: z.string().min(1),
+  status: z.string().optional(),
+  limit: optionalLimit25Schema,
+});
+
+const contactsUpdateInputSchema = z.object({
+  contactId: idSchema,
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  memberStatus: z.string().optional(),
+  notes: z.string().nullable().optional(),
+  source: z.string().optional(),
+});
+
+const singleContactInputSchema = z.object({
+  contactId: idSchema,
+});
+
+const contactsRestoreInputSchema = z.object({
+  contactId: idSchema,
+  status: z.string().optional(),
+});
+
+const contactsFindDuplicatesInputSchema = z.object({
+  reason: z.string().optional(),
+  minGroupSize: z.number().int().min(2).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+});
+
+const contactsMergeInputSchema = z.object({
+  primaryContactId: idSchema,
+  duplicateContactId: idSchema,
+});
+
+const tasksSearchInputSchema = z.object({
+  query: z.string().optional(),
+  status: z.string().optional(),
+  priority: z.string().optional(),
+  assigneeId: optionalIdSchema,
+  sla: z.string().optional(),
+  limit: optionalLimit50Schema,
+});
+
+const financeWeeklyReportInputSchema = z.object({
+  startDate: optionalIsoDateTimeSchema,
+  endDate: optionalIsoDateTimeSchema,
+});
+
+const tasksUpdateInputSchema = z.object({
+  taskId: idSchema,
+  title: z.string().optional(),
+  description: z.string().nullable().optional(),
+  status: z.string().optional(),
+  priority: z.string().optional(),
+  assigneeId: z.string().nullable().optional(),
+  dueDate: z.string().nullable().optional(),
+});
+
+const singleTaskInputSchema = z.object({
+  taskId: idSchema,
+});
+
+const prayerRequestsUpdateInputSchema = z.object({
+  requestId: idSchema,
+  status: z.string().optional(),
+  urgency: z.enum(["normal", "urgent", "critical"]).optional(),
+  response: z.string().optional(),
+  assignedTeam: z.string().nullable().optional(),
+});
+
+const appointmentsSearchInputSchema = z.object({
+  query: z.string().optional(),
+  status: z.string().optional(),
+  fromDate: optionalIsoDateTimeSchema,
+  toDate: optionalIsoDateTimeSchema,
+  upcomingOnly: z.boolean().optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+});
+
+const appointmentIdInputSchema = z.object({
+  appointmentId: idSchema,
+});
+
+const appointmentsSetStatusInputSchema = z.object({
+  appointmentId: idSchema,
+  status: z.enum(["scheduled", "confirmed", "completed", "cancelled", "no_show"]),
+});
+
+const appointmentsRescheduleInputSchema = z.object({
+  appointmentId: idSchema,
+  dateTime: isoDateTimeSchema,
+  duration: z.number().int().min(5).max(480).optional(),
+  notes: z.string().nullable().optional(),
+  resetStatus: z.boolean().optional(),
+});
+
+const conversationsSearchInputSchema = z.object({
+  query: z.string().optional(),
+  status: z.string().optional(),
+  includeArchived: z.boolean().optional(),
+  limit: optionalLimit200Schema,
+});
+
+const conversationIdInputSchema = z.object({
+  conversationId: idSchema,
+});
+
+const conversationsSetStatusInputSchema = z.object({
+  conversationId: idSchema,
+  status: z.enum(["open", "waiting", "resolved", "archived"]),
+});
+
 const contactsUpsert: GraceTool = {
   name: "contacts.upsert",
+  description: "Create or update a contact from a name, email, phone, or notes.",
+  inputSchema: contactsUpsertInputSchema,
   allowedChannels: ["voice", "sms", "web", "in_app"],
   requiresApproval: true,
   async execute(input, ctx) {
@@ -279,6 +471,8 @@ const contactsUpsert: GraceTool = {
 
 const churchInfoSearch: GraceTool = {
   name: "churchInfo.search",
+  description: "Search public or internal church knowledge for facts Grace can cite in the response.",
+  inputSchema: churchInfoSearchInputSchema,
   allowedChannels: ["voice", "sms", "web", "in_app"],
   async execute(input, ctx) {
     const query = String(input.query || "").trim();
@@ -314,6 +508,8 @@ const churchInfoSearch: GraceTool = {
 
 const prayerCreate: GraceTool = {
   name: "prayerRequests.create",
+  description: "Create a prayer request and route urgent requests for staff follow-up.",
+  inputSchema: prayerCreateInputSchema,
   allowedChannels: ["voice", "sms", "web", "in_app"],
   async execute(input, ctx) {
     const content = String(input.content || "").trim();
@@ -395,6 +591,8 @@ const prayerCreate: GraceTool = {
 
 const appointmentCheckAvailability: GraceTool = {
   name: "appointments.checkAvailability",
+  description: "List busy appointment slots inside a date window before offering appointment times.",
+  inputSchema: appointmentCheckAvailabilityInputSchema,
   allowedChannels: ["voice", "sms", "web", "in_app"],
   async execute(input, ctx) {
     const rangeStart = input.rangeStart ? new Date(String(input.rangeStart)) : new Date();
@@ -429,6 +627,8 @@ const appointmentCheckAvailability: GraceTool = {
 
 const appointmentBook: GraceTool = {
   name: "appointments.book",
+  description: "Book a pastoral or staff appointment for a contact.",
+  inputSchema: appointmentBookInputSchema,
   allowedChannels: ["voice", "sms", "web", "in_app"],
   requiresApproval: true,
   async execute(input, ctx) {
@@ -486,7 +686,9 @@ const appointmentBook: GraceTool = {
 
 const messageSendSMS: GraceTool = {
   name: "messages.sendSMS",
-  allowedChannels: ["sms", "in_app"],
+  description: "Send a one-to-one SMS message through the organization's SMS provider.",
+  inputSchema: messageSendSmsInputSchema,
+  allowedChannels: ["sms", "voice_internal", "in_app"],
   requiresApproval: true,
   async execute(input, ctx) {
     const to = String(input.to || "").trim();
@@ -523,7 +725,9 @@ const messageSendSMS: GraceTool = {
 
 const messageSendEmail: GraceTool = {
   name: "messages.sendEmail",
-  allowedChannels: ["in_app"],
+  description: "Send a one-to-one email message through the organization's email provider.",
+  inputSchema: messageSendEmailInputSchema,
+  allowedChannels: ["voice_internal", "in_app"],
   requiresApproval: true,
   async execute(input, ctx) {
     const to = String(input.to || "").trim();
@@ -541,6 +745,8 @@ const messageSendEmail: GraceTool = {
 
 const staffAlert: GraceTool = {
   name: "staff.alert",
+  description: "Alert organization admins when Grace needs human staff attention.",
+  inputSchema: staffAlertInputSchema,
   allowedChannels: ["voice", "sms", "web", "in_app"],
   async execute(input, ctx) {
     const reason = String(input.reason || "Grace AI flagged an item requiring attention");
@@ -589,6 +795,8 @@ ${details ? `<p><strong>Details:</strong> ${details}</p>` : ""}
 
 const handoffTransfer: GraceTool = {
   name: "handoff.transfer",
+  description: "Escalate the current Grace session to a human staff handoff queue.",
+  inputSchema: handoffTransferInputSchema,
   allowedChannels: ["voice", "sms", "web", "in_app"],
   async execute(input, ctx) {
     const reason = input.reason ? String(input.reason) : "policy_handoff";
@@ -642,6 +850,8 @@ const handoffTransfer: GraceTool = {
 
 const tasksCreate: GraceTool = {
   name: "tasks.create",
+  description: "Create a staff follow-up task.",
+  inputSchema: tasksCreateInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   requiresApproval: true,
   async execute(input, ctx) {
@@ -1019,6 +1229,8 @@ const pipelinesAddToStage: GraceTool = {
 
 const contactsSearch: GraceTool = {
   name: "contacts.search",
+  description: "Search CRM contacts by name, email, phone, or member status.",
+  inputSchema: contactsSearchInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, ctx) {
     const query = String(input.query || "").trim();
@@ -1062,6 +1274,8 @@ const contactsSearch: GraceTool = {
 
 const contactsUpdate: GraceTool = {
   name: "contacts.update",
+  description: "Update profile fields on an existing CRM contact.",
+  inputSchema: contactsUpdateInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, _ctx) {
     const contactId = String(input.contactId || "").trim();
@@ -1088,6 +1302,8 @@ const contactsUpdate: GraceTool = {
 
 const contactsArchive: GraceTool = {
   name: "contacts.archive",
+  description: "Archive an existing CRM contact.",
+  inputSchema: singleContactInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   requiresApproval: true,
   async execute(input, _ctx) {
@@ -1108,6 +1324,8 @@ const contactsArchive: GraceTool = {
 
 const contactsRestore: GraceTool = {
   name: "contacts.restore",
+  description: "Restore an archived CRM contact to an active member status.",
+  inputSchema: contactsRestoreInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   requiresApproval: true,
   async execute(input, _ctx) {
@@ -1129,6 +1347,8 @@ const contactsRestore: GraceTool = {
 
 const contactsDelete: GraceTool = {
   name: "contacts.delete",
+  description: "Permanently delete an existing CRM contact.",
+  inputSchema: singleContactInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   requiresApproval: true,
   async execute(input, _ctx) {
@@ -1143,6 +1363,8 @@ const contactsDelete: GraceTool = {
 
 const contactsFindDuplicates: GraceTool = {
   name: "contacts.findDuplicates",
+  description: "Find possible duplicate contacts for review or merge planning.",
+  inputSchema: contactsFindDuplicatesInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, ctx) {
     const reasonFilter = input.reason ? String(input.reason) : null;
@@ -1181,6 +1403,8 @@ const contactsFindDuplicates: GraceTool = {
 
 const contactsMerge: GraceTool = {
   name: "contacts.merge",
+  description: "Merge a duplicate contact into a primary contact.",
+  inputSchema: contactsMergeInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   requiresApproval: true,
   async execute(input, _ctx) {
@@ -1210,6 +1434,8 @@ const contactsMerge: GraceTool = {
 
 const tasksSearch: GraceTool = {
   name: "tasks.search",
+  description: "Search staff tasks by text, status, priority, assignee, or SLA status.",
+  inputSchema: tasksSearchInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, ctx) {
     const query = input.query ? String(input.query).trim().toLowerCase() : "";
@@ -1247,6 +1473,8 @@ const tasksSearch: GraceTool = {
 
 const financeWeeklyReport: GraceTool = {
   name: "finance.weeklyReport",
+  description: "Return a weekly giving report for the organization.",
+  inputSchema: financeWeeklyReportInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, ctx) {
     const startDate = parseOptionalInputDate(input.startDate, "startDate");
@@ -1265,6 +1493,8 @@ const financeWeeklyReport: GraceTool = {
 
 const tasksUpdate: GraceTool = {
   name: "tasks.update",
+  description: "Update fields on an existing staff task.",
+  inputSchema: tasksUpdateInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, ctx) {
     const taskId = String(input.taskId || "").trim();
@@ -1301,6 +1531,8 @@ const tasksUpdate: GraceTool = {
 
 const tasksComplete: GraceTool = {
   name: "tasks.complete",
+  description: "Mark a staff task as done.",
+  inputSchema: singleTaskInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, ctx) {
     const taskId = String(input.taskId || "").trim();
@@ -1469,6 +1701,8 @@ const volunteerShiftsDelete: GraceTool = {
 
 const prayerRequestsUpdate: GraceTool = {
   name: "prayerRequests.update",
+  description: "Update status, urgency, response, or assigned team on a prayer request.",
+  inputSchema: prayerRequestsUpdateInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, _ctx) {
     const requestId = String(input.requestId || "").trim();
@@ -1489,6 +1723,8 @@ const prayerRequestsUpdate: GraceTool = {
 
 const appointmentsSearch: GraceTool = {
   name: "appointments.search",
+  description: "Search appointments by text, status, date window, or upcoming-only filter.",
+  inputSchema: appointmentsSearchInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, ctx) {
     const query = input.query ? String(input.query).trim().toLowerCase() : "";
@@ -1553,6 +1789,8 @@ const appointmentsSearch: GraceTool = {
 
 const appointmentsSetStatus: GraceTool = {
   name: "appointments.setStatus",
+  description: "Set an appointment status.",
+  inputSchema: appointmentsSetStatusInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   requiresApproval: true,
   async execute(input, _ctx) {
@@ -1581,6 +1819,8 @@ const appointmentsSetStatus: GraceTool = {
 
 const appointmentsReschedule: GraceTool = {
   name: "appointments.reschedule",
+  description: "Move an appointment to a new date/time and optionally update duration or notes.",
+  inputSchema: appointmentsRescheduleInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   requiresApproval: true,
   async execute(input, _ctx) {
@@ -1629,6 +1869,8 @@ const appointmentsReschedule: GraceTool = {
 
 const appointmentsDelete: GraceTool = {
   name: "appointments.delete",
+  description: "Permanently delete an appointment.",
+  inputSchema: appointmentIdInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   requiresApproval: true,
   async execute(input, _ctx) {
@@ -1643,6 +1885,8 @@ const appointmentsDelete: GraceTool = {
 
 const appointmentsCancel: GraceTool = {
   name: "appointments.cancel",
+  description: "Cancel an appointment without deleting it.",
+  inputSchema: appointmentIdInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   requiresApproval: true,
   async execute(input, _ctx) {
@@ -2108,6 +2352,8 @@ const ministriesAddMember: GraceTool = {
 
 const conversationsSearch: GraceTool = {
   name: "conversations.search",
+  description: "Search communication conversations by text, status, or archived state.",
+  inputSchema: conversationsSearchInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, ctx) {
     const query = input.query ? String(input.query).trim().toLowerCase() : "";
@@ -2159,6 +2405,8 @@ const conversationsSearch: GraceTool = {
 
 const conversationsSetStatus: GraceTool = {
   name: "conversations.setStatus",
+  description: "Set a communication conversation status.",
+  inputSchema: conversationsSetStatusInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, _ctx) {
     const conversationId = String(input.conversationId || "").trim();
@@ -2185,6 +2433,8 @@ const conversationsSetStatus: GraceTool = {
 
 const conversationsMarkWaiting: GraceTool = {
   name: "conversations.waiting",
+  description: "Mark a communication conversation as waiting.",
+  inputSchema: conversationIdInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, _ctx) {
     const conversationId = String(input.conversationId || "").trim();
@@ -2198,6 +2448,8 @@ const conversationsMarkWaiting: GraceTool = {
 
 const conversationsArchive: GraceTool = {
   name: "conversations.archive",
+  description: "Archive a communication conversation.",
+  inputSchema: conversationIdInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, _ctx) {
     const conversationId = String(input.conversationId || "").trim();
@@ -2211,6 +2463,8 @@ const conversationsArchive: GraceTool = {
 
 const conversationsReopen: GraceTool = {
   name: "conversations.reopen",
+  description: "Reopen a communication conversation.",
+  inputSchema: conversationIdInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, _ctx) {
     const conversationId = String(input.conversationId || "").trim();
@@ -2224,6 +2478,8 @@ const conversationsReopen: GraceTool = {
 
 const conversationsResolve: GraceTool = {
   name: "conversations.resolve",
+  description: "Resolve a communication conversation.",
+  inputSchema: conversationIdInputSchema,
   allowedChannels: ["voice", "voice_internal", "in_app"],
   async execute(input, _ctx) {
     const conversationId = String(input.conversationId || "").trim();

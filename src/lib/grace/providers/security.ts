@@ -26,8 +26,12 @@ const providerRules: Record<string, ProviderRule> = {
     required: ["apiKey"],
     secret: ["apiKey"],
   },
-  "voice:elevenlabs": {
+  "ai:anthropic": {
     required: ["apiKey"],
+    secret: ["apiKey"],
+  },
+  "voice:elevenlabs": {
+    required: ["apiKey", "agentId"],
     secret: ["apiKey"],
   },
   "voice:retell": {

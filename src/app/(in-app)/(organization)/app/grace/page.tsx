@@ -8,7 +8,7 @@ import useOrganization from "@/lib/organizations/useOrganization";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { GraceVoiceAssistant } from "@/components/grace-voice/GraceVoiceAssistant";
+import { GraceElevenLabsAssistant } from "@/components/grace-voice/GraceElevenLabsAssistant";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -1699,7 +1699,7 @@ export default function GraceWorkspacePage() {
                 Wake Grace
               </Button>
             </div>
-            <GraceVoiceAssistant
+            <GraceElevenLabsAssistant
               hideTitle
               startSignal={voiceStartSignal}
               onActionComplete={fetchWorkspace}

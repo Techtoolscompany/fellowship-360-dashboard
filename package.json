@@ -24,12 +24,14 @@
     "postinstall": "fumadocs-mdx"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.69",
     "@ai-sdk/google": "^3.0.34",
     "@auth/drizzle-adapter": "^1.11.1",
     "@aws-sdk/client-s3": "^3.940.0",
     "@aws-sdk/client-ses": "^3.940.0",
     "@aws-sdk/s3-presigned-post": "^3.940.0",
     "@aws-sdk/s3-request-presigner": "^3.940.0",
+    "@elevenlabs/react": "^1.1.1",
     "@google/genai": "^1.48.0",
     "@google/generative-ai": "^0.24.1",
     "@hello-pangea/dnd": "^18.0.1",

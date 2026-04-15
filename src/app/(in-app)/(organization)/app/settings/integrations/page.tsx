@@ -116,6 +116,31 @@ const PROVIDERS: ProviderDefinition[] = [
     },
   },
   {
+    key: "voice-elevenlabs",
+    channel: "voice",
+    provider: "elevenlabs",
+    title: "ElevenLabs (Grace Voice)",
+    summary:
+      "Powers realtime Grace voice sessions while Fellowship 360 keeps CRM reasoning, policy, and approvals.",
+    fields: [
+      {
+        key: "agentId",
+        label: "ElevenLabs Agent ID",
+        placeholder: "agent_...",
+      },
+      {
+        key: "apiKey",
+        label: "ElevenLabs API Key",
+        secret: true,
+        placeholder: "xi-api-key for signed voice sessions",
+      },
+    ],
+    modeDescription: {
+      agency_managed: "Use agency-managed ElevenLabs voice credentials.",
+      disabled: "Disable ElevenLabs realtime Grace voice.",
+    },
+  },
+  {
     key: "email-sendgrid",
     channel: "email",
     provider: "sendgrid",

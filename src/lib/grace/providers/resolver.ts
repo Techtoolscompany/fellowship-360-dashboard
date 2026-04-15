@@ -18,6 +18,11 @@ export type ResolvedEmailProvider =
   | { mode: "managed" }
   | { mode: "sendgrid"; apiKey: string; fromEmail: string };
 
+export type ResolvedElevenLabsVoiceProvider = {
+  apiKey: string;
+  agentId: string;
+};
+
 function getStringOrNull(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -190,6 +195,65 @@ export async function resolveGeminiApiKey(
 
   const fallback = process.env.GEMINI_API_KEY;
   return getStringOrNull(fallback);
+}
+
+/**
+ * Resolve Anthropic API key for Grace's Claude-backed reasoning layer.
+ * Prefers active org provider config and falls back to env.
+ */
+export async function resolveAnthropicApiKey(
+  organizationId: string
+): Promise<string | null> {
+  const latestRow = await getLatestProviderRow({
+    organizationId,
+    channel: "ai",
+    provider: "anthropic",
+  });
+  if (latestRow?.mode === "disabled") return null;
+
+  const row = await getActiveProviderRow({
+    organizationId,
+    channel: "ai",
+    provider: "anthropic",
+  });
+
+  if (row?.mode === "disabled") return null;
+
+  const config = decryptConfigFields(row?.configJson ?? {}, ["apiKey"]);
+  const configuredApiKey = getStringOrNull(config.apiKey);
+  if (configuredApiKey) return configuredApiKey;
+
+  return getStringOrNull(process.env.ANTHROPIC_API_KEY);
+}
+
+/**
+ * Resolve ElevenLabs credentials for Grace voice sessions.
+ * Agent ID is intentionally non-secret, but it lives beside the API key so
+ * agency-managed and BYO orgs can be configured consistently.
+ */
+export async function resolveElevenLabsVoiceProvider(
+  organizationId: string
+): Promise<ResolvedElevenLabsVoiceProvider | null> {
+  const latestRow = await getLatestProviderRow({
+    organizationId,
+    channel: "voice",
+    provider: "elevenlabs",
+  });
+  if (latestRow?.mode === "disabled") return null;
+
+  const row = await getActiveProviderRow({
+    organizationId,
+    channel: "voice",
+    provider: "elevenlabs",
+  });
+
+  if (row?.mode === "disabled") return null;
+
+  const config = decryptConfigFields(row?.configJson ?? {}, ["apiKey"]);
+  const apiKey = getStringOrNull(config.apiKey) ?? getStringOrNull(process.env.ELEVENLABS_API_KEY);
+  const agentId = getStringOrNull(config.agentId) ?? getStringOrNull(process.env.ELEVENLABS_AGENT_ID);
+
+  return apiKey && agentId ? { apiKey, agentId } : null;
 }
 
 export async function resolveProviderWebhookSecret(params: {
