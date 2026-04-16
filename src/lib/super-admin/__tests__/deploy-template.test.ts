@@ -30,20 +30,103 @@ vi.mock("@/db", () => ({
   },
 }));
 
-vi.mock("@/lib/automations/templates", () => ({
-  getAutomationTemplateByKey: vi.fn(),
+vi.mock("@/lib/automations/template-registry", () => ({
+  getResolvedAutomationTemplateByKey: vi.fn(),
 }));
 
 vi.mock("@/lib/automations/validation", () => ({
   validateAutomationDefinition: vi.fn(() => []),
 }));
 
-import { getAutomationTemplateByKey } from "@/lib/automations/templates";
+import { getResolvedAutomationTemplateByKey } from "@/lib/automations/template-registry";
 import { deployAutomationTemplateBatch, mapWithConcurrency } from "../deploy-template";
+
+function resetDbMocks() {
+  mocks.selectLimit.mockReset();
+  mocks.selectWhere.mockReset();
+  mocks.selectFrom.mockReset();
+  mocks.select.mockReset();
+  mocks.insertReturning.mockReset();
+  mocks.insertOnConflictDoNothing.mockReset();
+  mocks.insertValues.mockReset();
+  mocks.insert.mockReset();
+
+  mocks.selectWhere.mockImplementation(() => ({ limit: mocks.selectLimit }));
+  mocks.selectFrom.mockImplementation(() => ({ where: mocks.selectWhere }));
+  mocks.select.mockImplementation(() => ({ from: mocks.selectFrom }));
+
+  mocks.insertReturning.mockResolvedValue([]);
+  mocks.insertOnConflictDoNothing.mockImplementation(() => ({ returning: mocks.insertReturning }));
+  mocks.insertValues.mockImplementation(() => ({
+    onConflictDoNothing: mocks.insertOnConflictDoNothing,
+    returning: mocks.insertReturning,
+  }));
+  mocks.insert.mockImplementation(() => ({ values: mocks.insertValues }));
+}
+
+function makeResolvedTemplate() {
+  return {
+    key: "visitor_follow_up",
+    name: "Visitor Follow-Up",
+    description: "Follow-up template",
+    category: "Follow-Up" as const,
+    triggerEvent: "contacts.created.v1",
+    mode: "template" as const,
+    recommendedChannels: ["sms"],
+    definition: {
+      version: 1,
+      startNodeId: "trigger_1",
+      nodes: [
+        {
+          id: "trigger_1",
+          type: "trigger" as const,
+          label: "Trigger",
+          nextIds: ["stop_1"],
+        },
+        {
+          id: "stop_1",
+          type: "stop" as const,
+          label: "Stop",
+          nextIds: [],
+        },
+      ],
+    },
+    source: "system" as const,
+    status: "published" as const,
+    updatedAt: null,
+    publishedAt: null,
+  };
+}
+
+function mockSelectByShape(rowsByKind: {
+  organization?: Array<Record<string, unknown>>;
+  existing?: Array<Record<string, unknown>>;
+  version?: Array<Record<string, unknown>>;
+}) {
+  mocks.select.mockImplementation(((selection: Record<string, unknown>) => {
+    const keys = Object.keys(selection);
+    const kind = keys.includes("latestVersionNumber")
+      ? "version"
+      : keys.includes("templateKey")
+        ? "existing"
+        : "organization";
+
+    const rows = rowsByKind[kind] ?? [];
+
+    return {
+      from: () => ({
+        where: () => ({
+          limit: async () => rows,
+        }),
+      }),
+    };
+  }) as never);
+}
 
 describe("deploy template helpers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetDbMocks();
   });
 
   it("caps concurrent work at five tasks", async () => {
@@ -67,33 +150,7 @@ describe("deploy template helpers", () => {
   });
 
   it("returns already_installed when the template is already present", async () => {
-    vi.mocked(getAutomationTemplateByKey).mockReturnValueOnce({
-      key: "visitor_follow_up",
-      name: "Visitor Follow-Up",
-      description: "Follow-up template",
-      category: "Follow-Up",
-      triggerEvent: "contacts.created.v1",
-      mode: "template",
-      recommendedChannels: ["sms"],
-      definition: {
-        version: 1,
-        startNodeId: "trigger_1",
-        nodes: [
-          {
-            id: "trigger_1",
-            type: "trigger",
-            label: "Trigger",
-            nextIds: ["stop_1"],
-          },
-          {
-            id: "stop_1",
-            type: "stop",
-            label: "Stop",
-            nextIds: [],
-          },
-        ],
-      },
-    });
+    vi.mocked(getResolvedAutomationTemplateByKey).mockResolvedValueOnce(makeResolvedTemplate());
 
     mocks.selectLimit
       .mockResolvedValueOnce([{ id: "org_1", name: "Church One" }])
@@ -126,58 +183,13 @@ describe("deploy template helpers", () => {
   });
 
   it("dedupes duplicate organization ids in batch deploys", async () => {
-    vi.mocked(getAutomationTemplateByKey).mockReturnValueOnce({
-      key: "visitor_follow_up",
-      name: "Visitor Follow-Up",
-      description: "Follow-up template",
-      category: "Follow-Up",
-      triggerEvent: "contacts.created.v1",
-      mode: "template",
-      recommendedChannels: ["sms"],
-      definition: {
-        version: 1,
-        startNodeId: "trigger_1",
-        nodes: [
-          {
-            id: "trigger_1",
-            type: "trigger",
-            label: "Trigger",
-            nextIds: ["stop_1"],
-          },
-          {
-            id: "stop_1",
-            type: "stop",
-            label: "Stop",
-            nextIds: [],
-          },
-        ],
-      },
+    vi.mocked(getResolvedAutomationTemplateByKey).mockResolvedValueOnce(makeResolvedTemplate());
+
+    mockSelectByShape({
+      organization: [{ id: "org_1", name: "Church One" }],
+      existing: [{ id: "existing_wf" }],
+      version: [{ latestVersionNumber: 0 }],
     });
-
-    mocks.select.mockImplementation(((selection: Record<string, unknown>) => {
-      const keys = Object.keys(selection);
-      const kind = keys.includes("latestVersionNumber")
-        ? "version"
-        : keys.includes("templateKey")
-          ? "existing"
-          : "organization";
-
-      return {
-        from: () => ({
-          where: () => ({
-            limit: async () => {
-              if (kind === "organization") {
-                return [{ id: "org_1", name: "Church One" }];
-              }
-              if (kind === "existing") {
-                return [{ id: "existing_wf" }];
-              }
-              return [{ latestVersionNumber: 0 }];
-            },
-          }),
-        }),
-      };
-    }) as never);
 
     const result = await deployAutomationTemplateBatch({
       request: {

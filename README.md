@@ -1,29 +1,59 @@
-# Indie Kit
+# Fellowship 360 App
 
-Indie Kit is a NextJS Boilerplate for building SaaS products.
+Fellowship 360 is a church operations platform built on Next.js. The repository contains the main web app, Grace AI workflows and tooling, automation and messaging infrastructure, and an Android SMS gateway companion app.
 
-## Features
+## Stack
 
-- NextJS 15
+- Next.js 16 App Router
+- React 19
+- TypeScript
+- Drizzle ORM
+- Inngest
+- Vitest and Playwright
 
-## Getting Started
+## Repository layout
 
-1. Clone the repo
-2. Run `pnpm install`
-3. Run `pnpm dev`
+- `src/app`: App Router pages, route handlers, and server actions
+- `src/components`: UI and feature components
+- `src/lib`: domain logic for Grace, automations, operations, billing, and integrations
+- `src/db`: database schema and data access setup
+- `src/content`: docs, blog, and policy content
+- `apps/fellowship-sms-gateway-android`: Android SMS gateway companion app
 
-## Documentation
+## Getting started
 
-For detailed documentation, visit [https://indiekit.pro/app/docs](https://indiekit.pro/app/docs)
+1. Install dependencies:
 
-## Quick Start
+```bash
+pnpm install
+```
 
-Check out our ["Launch in 5 Minutes" tutorial](https://indiekit.pro/app/docs/tutorials/launch-in-5-minutes) to get started quickly.
+2. Create local environment files from the example and fill in the required secrets:
 
-## Community
+```bash
+cp .env.example .env.local
+```
 
-Join our [Discord community](https://indiekit.pro/app) to connect with other developers and get help.
+3. Start the local development stack:
 
-## License
+```bash
+pnpm dev
+```
 
-This project is licensed under the [Custom License](License.md).
+## Common commands
+
+```bash
+pnpm dev
+pnpm lint
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm launch:preflight
+pnpm status:delivery
+```
+
+## Notes
+
+- The app uses MDX content and generates docs assets during install and build.
+- The Android gateway project has its own Gradle workflow under `apps/fellowship-sms-gateway-android`.
+- The current test suite includes unit, integration, and route coverage under `src/**/__tests__` plus Playwright smoke coverage in `e2e/`.

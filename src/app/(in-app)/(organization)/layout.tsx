@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import useUser from "@/lib/users/useUser";
 import useOrganization from "@/lib/organizations/useOrganization";
 import Link from "next/link";
@@ -39,6 +39,7 @@ import { InAppFooter } from "@/components/layout/in-app-footer";
 import { UserDropdown } from "@/components/in-app/user-dropdown";
 import { PageLoader } from "@/components/in-app/page-loader";
 import { OrganizationSwitcher } from "@/components/in-app/organization-switcher";
+import { AppBreadcrumbs } from "@/components/in-app/app-breadcrumbs";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { GraceFab } from "@/components/grace/GraceFab";
 import { getOrganizationRoleAccess } from "@/app/actions/access";
@@ -51,6 +52,14 @@ import {
 } from "@/lib/access/role-access.shared";
 
 const DEFAULT_ACCESS_MATRIX = defaultRoleAccessMatrix();
+const NAV_PREFERENCES_STORAGE_KEY = "f360:organization-nav-preferences";
+const DEFAULT_COLLAPSED_SECTIONS: Record<string, boolean> = {
+  administration: false,
+  core: false,
+  explore: true,
+  grace: false,
+  onboarding: true,
+};
 
 function NavItem({
   href,
@@ -84,10 +93,11 @@ function NavItem({
   const content = (
     <Link
       href={href}
+      aria-current={isActive ? "page" : undefined}
       className={cn(
         "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
         isActive
-          ? "bg-transparent text-foreground"
+          ? "bg-primary/10 text-primary shadow-sm ring-1 ring-primary/15"
           : "text-muted-foreground hover:bg-accent hover:text-foreground",
         isCollapsed && "justify-center px-2",
         className
@@ -135,34 +145,35 @@ function SidebarContent({
   isCollapsed,
   allowedSections,
   canManageAccess,
+  collapsedSections,
+  onToggleSection,
 }: {
   className?: string;
   isCollapsed?: boolean;
   allowedSections: AccessSection[];
   canManageAccess: boolean;
+  collapsedSections: Record<string, boolean>;
+  onToggleSection: (section: string) => void;
 }) {
   const { user } = useUser();
   const allowedSectionSet = new Set(allowedSections);
-  const [collapsedSections, setCollapsedSections] = React.useState<Record<string, boolean>>({
-    explore: true,
-    onboarding: true,
-  });
 
   const hasAccess = (section: AccessSection) => allowedSectionSet.has(section);
 
-  const toggleSection = (section: string) => {
-    setCollapsedSections(prev => ({ ...prev, [section]: !prev[section] }));
-  };
-
   const SectionHeader = ({ title, section }: { title: string; section: string }) => {
     if (isCollapsed) return null;
+
+    const isSectionCollapsed = collapsedSections[section] ?? false;
+
     return (
       <button
-        onClick={() => toggleSection(section)}
+        type="button"
+        aria-expanded={!isSectionCollapsed}
+        onClick={() => onToggleSection(section)}
         className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 hover:text-muted-foreground"
       >
         {title}
-        {collapsedSections[section] ? (
+        {isSectionCollapsed ? (
           <ChevronRight className="h-3 w-3" />
         ) : (
           <ChevronDown className="h-3 w-3" />
@@ -349,15 +360,58 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const { isLoading: isUserLoading } = useUser();
   const { organization, isLoading: isOrgLoading } = useOrganization();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState(DEFAULT_COLLAPSED_SECTIONS);
   const [allowedSections, setAllowedSections] = useState<AccessSection[] | null>(null);
   const [isAccessLoading, setIsAccessLoading] = useState(true);
+  const [navPreferencesReady, setNavPreferencesReady] = useState(false);
 
-  // Close mobile menu when route changes
   const pathname = usePathname();
   const hideGraceFab = pathname === "/app" || pathname === "/app/grace";
+
   useEffect(() => {
-    // Remove the setIsMobileOpen call since we no longer need it
-  }, [pathname]);
+    try {
+      const storedPreferences = window.localStorage.getItem(NAV_PREFERENCES_STORAGE_KEY);
+      if (!storedPreferences) {
+        return;
+      }
+
+      const parsed = JSON.parse(storedPreferences) as {
+        collapsedSections?: Record<string, boolean>;
+        sidebarCollapsed?: boolean;
+      };
+
+      if (typeof parsed.sidebarCollapsed === "boolean") {
+        setIsCollapsed(parsed.sidebarCollapsed);
+      }
+
+      if (parsed.collapsedSections && typeof parsed.collapsedSections === "object") {
+        setCollapsedSections((current) => ({
+          ...current,
+          ...parsed.collapsedSections,
+        }));
+      }
+    } catch (error) {
+      console.error("Failed to load navigation preferences", error);
+    } finally {
+      setNavPreferencesReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!navPreferencesReady) return;
+
+    try {
+      window.localStorage.setItem(
+        NAV_PREFERENCES_STORAGE_KEY,
+        JSON.stringify({
+          collapsedSections,
+          sidebarCollapsed: isCollapsed,
+        })
+      );
+    } catch (error) {
+      console.error("Failed to save navigation preferences", error);
+    }
+  }, [collapsedSections, isCollapsed, navPreferencesReady]);
 
   useEffect(() => {
     if (!isUserLoading && !isOrgLoading && !organization) {
@@ -411,6 +465,12 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       ? getAllowedSectionsForRole(DEFAULT_ACCESS_MATRIX, organization.role)
       : []);
   const canManageAccess = organization?.role === "owner" || organization?.role === "admin";
+  const handleToggleSection = useCallback((section: string) => {
+    setCollapsedSections((current) => ({
+      ...current,
+      [section]: !(current[section] ?? false),
+    }));
+  }, []);
 
   if (isUserLoading || isOrgLoading || (organization && isAccessLoading)) {
     return <PageLoader />;
@@ -418,6 +478,12 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <TooltipProvider>
+      <a
+        href="#main-content"
+        className="sr-only fixed left-4 top-4 z-50 rounded-md bg-background px-4 py-2 text-sm font-medium text-foreground shadow-lg ring-1 ring-border focus:not-sr-only focus:outline-none focus:ring-2 focus:ring-primary"
+      >
+        Skip to main content
+      </a>
       <div className="flex min-h-screen bg-background">
         {/* Desktop Sidebar */}
         <div
@@ -432,6 +498,8 @@ function AppLayout({ children }: { children: React.ReactNode }) {
               isCollapsed={isCollapsed}
               allowedSections={effectiveAllowedSections}
               canManageAccess={canManageAccess}
+              collapsedSections={collapsedSections}
+              onToggleSection={handleToggleSection}
             />
           </div>
           <div className="flex items-center justify-center gap-1 mb-3 px-2">
@@ -440,7 +508,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
               variant="ghost"
               size="icon"
               className="hover:bg-accent"
-              onClick={() => setIsCollapsed(!isCollapsed)}
+              onClick={() => setIsCollapsed((current) => !current)}
             >
               <ChevronLeft
                 className={cn(
@@ -468,11 +536,13 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                   <span className="sr-only">Toggle navigation menu</span>
                 </Button>
               </SheetTrigger>
-              <SheetContent side="right" className="w-64 p-0 pt-16">
+              <SheetContent side="right" className="w-[18rem] p-0 pt-16 sm:w-80">
                 <div className="p-3">
                   <SidebarContent
                     allowedSections={effectiveAllowedSections}
                     canManageAccess={canManageAccess}
+                    collapsedSections={collapsedSections}
+                    onToggleSection={handleToggleSection}
                   />
                 </div>
               </SheetContent>
@@ -482,9 +552,16 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col">
-          <div className="flex-1 md:pt-0 pt-16">
-            <div className="p-6 max-w-7xl mx-auto w-full">{children}</div>
-          </div>
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className="flex-1 pt-16 focus:outline-none md:pt-0"
+          >
+            <div className="max-w-7xl mx-auto w-full p-6">
+              <AppBreadcrumbs />
+              {children}
+            </div>
+          </main>
           <InAppFooter />
         </div>
 
